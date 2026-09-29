@@ -1,0 +1,38 @@
+# Merged into the Hermes "continuum" profile by: python scripts/setup_hermes.py
+# `model` is filled in from LLM_PROVIDER in .env (deepseek now, nebius for the final demo).
+
+model:
+  provider: deepseek
+  default: deepseek-v4-flash
+  base_url: https://api.deepseek.com
+
+mcp_servers:
+  continuum:
+    url: "http://127.0.0.1:8000/mcp/"
+    tools:
+      include: [remember, list_open_loops, list_goals, inspect_loop, resolve_loop]
+      prompts: false
+      resources: false
+
+# Show our 5 tools to the model directly. Hermes' default "tool search" hides MCP tools behind
+# tool_search/tool_describe/tool_call, which cost ~3 extra model round-trips per reply.
+tools:
+  tool_search:
+    enabled: "off"
+
+# Continuum's tools only. No terminal, files, web or browser.
+platform_toolsets:
+  api_server: [continuum]
+  cli: [continuum]
+
+# Own gateway + API server for this profile, so your default Hermes profile stays untouched.
+# Hermes marks this as a temporary shim. If a Hermes update removes it, switch to the shared
+# host gateway: enable the API server on the default profile and set
+# HERMES_API_URL=http://127.0.0.1:8642/p/continuum/v1
+gateway:
+  standalone: true
+
+# Continuum is the memory. Hermes' own memory stays off, so there is one source of truth.
+memory:
+  memory_enabled: false
+  user_profile_enabled: false

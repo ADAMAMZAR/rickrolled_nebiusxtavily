@@ -1,0 +1,32 @@
+[project]
+name = "continuum"
+version = "0.1.0"
+description = "Personal AI that remembers what's still unfinished."
+requires-python = ">=3.11"
+license = "MIT"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "sqlmodel>=0.0.47",  # stores and returns timezone-aware datetimes
+    "pydantic-settings>=2.4",
+    "openai>=1.40",
+    "httpx>=0.27",
+    "mcp>=2.2",  # MCPServer API (v2)
+    "pyyaml>=6",
+    "tzdata",  # timezone data for zoneinfo on Windows
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["app"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-m 'not live'"
+markers = ["live: calls real Nebius (needs NEBIUS_API_KEY)"]
