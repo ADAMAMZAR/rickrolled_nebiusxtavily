@@ -167,7 +167,7 @@ Other engine functions: `list_goals`, `list_loops(status, goal_id)`, `get_loop`,
 ## 7. LLM Client (`llm.py`)
 
 - Use the `openai` SDK with the provider's `base_url`. It already handles auth, timeouts, and retries.
-- `LLM_PROVIDER=nebius` (default, the real target) or `deepseek` (dev stand-in while there's no Nebius key; model `deepseek-flash`). **The final demo and submission must use Nebius Nemotron.**
+- `LLM_PROVIDER=nebius` (default, the real target) or `deepseek` (dev stand-in while there's no Nebius key; model `deepseek-v4-flash`). **The final demo and submission must use Nebius Nemotron.**
 - `NEBIUS_MODEL` is configurable. Pick a Nemotron model from the Nebius catalog with solid tool calling, since Hermes uses it too.
 - Log the model name and latency. Never log keys or full user messages.
 
@@ -177,9 +177,9 @@ Other engine functions: `list_goals`, `list_loops(status, goal_id)`, `get_loop`,
 
 ```http
 GET    /health
-POST   /api/chat                 {message} → {reply}   (proxies to Hermes)
+POST   /api/chat                 {message, conversation?} → {reply}   (proxies to Hermes)
 GET    /api/goals                → goals + open loop counts
-GET    /api/loops?status=&goal_id=
+GET    /api/loops?status=open|resolved|all&goal_id=   (default open)
 GET    /api/loops/{id}           → loop + source text
 POST   /api/loops/{id}/resolve
 POST   /api/loops/{id}/reopen
@@ -188,7 +188,9 @@ DELETE /api/loops/{id}
 
 Routes stay thin and call the engine. After each chat reply, the UI re-fetches lists instead of parsing the reply.
 
-Errors are JSON: `{"error": "extraction_failed", "message": "..."}`. If Hermes is down, `/api/chat` returns `{"error": "agent_unavailable"}`.
+Errors are JSON: `{"error": "not_found" | "invalid_request" | "agent_unavailable", "message": "..."}`. If Hermes is down, `/api/chat` returns 503 `agent_unavailable`. Extraction runs inside Hermes' `remember` tool, so an extraction failure reaches the user as Hermes' reply, not as a REST error.
+
+The UI sends a new `conversation` id per page load, so each visit starts a fresh Hermes conversation and answers come from the DB, not old chat history.
 
 ---
 
@@ -279,7 +281,7 @@ NEBIUS_BASE_URL=https://api.tokenfactory.nebius.com/v1/
 NEBIUS_MODEL=nvidia/nemotron-3-super-120b-a12b
 DEEPSEEK_API_KEY=
 DEEPSEEK_BASE_URL=https://api.deepseek.com
-DEEPSEEK_MODEL=deepseek-flash
+DEEPSEEK_MODEL=deepseek-v4-flash
 HERMES_API_URL=http://localhost:8642/v1
 TIMEZONE=Asia/Kuala_Lumpur
 DATABASE_URL=sqlite:///./data/continuum.db
@@ -305,9 +307,11 @@ Each step ends with passing tests. **Steps 2 and 3 are gates: don't continue unt
   *Done 2026-09-29: 12 mocked tests (parsing, retry, dedup, update/resolve, invented-id guard, nothing written on failure). All 5 live acceptance scenarios + the §1 demo message pass on Nemotron, 3 runs in a row (15/15). Each extraction takes ~2–7 s. Note: `next_action` usually comes back null, because rule 1 forbids inventing it. Revisit if the detail view feels empty.*
 - [x] **5. Real MCP tools** wired to the engine. Hermes answers "what am I waiting on?" from the DB.
   *Done 2026-09-29: the 5 tools in §2 (`ping` removed). 6 MCP-over-HTTP tests. Checked live on Nemotron against a scratch DB: demo message → `remember` saved 1 goal + 2 loops. Then, **after restarting Continuum**, fresh conversations answered "What am I waiting on?" (`list_open_loops`), "Why do you know that?" (`inspect_loop`, quoting the original words) and "Sarah got back to me" (`resolve_loop`). One tool call per reply, ~3–9 s. Changes found along the way: Hermes' **tool search** (on by default) hid MCP tools behind extra round-trips, so it's now off in `hermes/config.example.yaml`. A message that changes nothing is no longer stored.*
-- [ ] **6. REST API + UI.**
-- [ ] **7. E2E:** run the §1 demo, restart, and confirm memory persists.
-- [ ] **8. README:** one-liner, problem, architecture diagram, why Hermes, Nemotron/Nebius usage, setup (both processes, Windows + macOS/Linux), tests, privacy, track, license.
+- [x] **6. REST API + UI.**
+  *Done 2026-10-01: all §8 routes + JSON errors, 7 API tests (Hermes faked, loops seeded through the real MCP `remember`). UI in `app/static/index.html`: loops grouped by goal, friendly/overdue dates, highlight after chat, inline detail (native `<details>`, no modal) with source + Resolve/Reopen/Delete, empty state with the demo message. Checked in Chrome at desktop/mobile, light/dark, against `scripts/seed_demo.py` data; the chat error path shows Hermes' message. Not yet checked with live Hermes (Step 7).*
+- [x] **7. E2E:** run the §1 demo, restart, and confirm memory persists.
+  *Done 2026-10-01 on Nebius Nemotron through Hermes 0.21.5 and the real `/api/chat`, scratch DB: demo → 1 goal + 2 loops with source; both servers restarted; a fresh conversation answered "What am I waiting on?" via `list_open_loops`; "Sarah got back to me" resolved it via `remember`. Run twice (before and after the prompt fix below). `pytest -m live` 8/8, 3 runs in a row, on the pinned `requirements.txt` versions too. Found along the way: (1) Nemotron filed unrelated loops ("Alex will send the dataset") under the only goal once that goal had open loops (2/3 runs). Extraction rule 6 now links a loop only when the message mentions what the goal is about; added a live regression test. (2) Hermes replied in Markdown, which the chat shows raw; `SOUL.md` now asks for plain text.*
+- [x] **8. README:** one-liner, problem, architecture diagram, why Hermes, Nemotron/Nebius usage, setup (both processes, Windows + macOS/Linux), tests, privacy, track, license.
 
 If a Hermes or Nebius API differs from this spec, follow the official docs and update this file.
 
@@ -315,13 +319,13 @@ If a Hermes or Nebius API differs from this spec, follow the official docs and u
 
 ## 14. Done Checklist
 
-- [ ] §1 demo works with real Nemotron via Nebius, through Hermes. *(Chat steps 1, 2, 5, 6, 7 verified through Hermes; dashboard steps 3–4 wait on Step 6.)*
-- [ ] Data survives restart. *(Engine level tested; still needs the E2E check.)*
-- [ ] Every loop shows its source text. Resolve / reopen / delete work. *(Engine done; API + UI pending.)*
-- [ ] Repeated info doesn't duplicate. *(Engine + live test pass; still needs the E2E check.)*
-- [ ] `pytest` passes without network. *(True so far; recheck at the end.)*
-- [ ] Clean clone → running in ≤ 5 commands per README
-- [ ] No `.env` or `.db` in git. *(`.gitignore` confirmed working; nothing committed yet.)*
-- [ ] README states real limitations honestly
+- [x] §1 demo works with real Nemotron via Nebius, through Hermes.
+- [x] Data survives restart.
+- [x] Every loop shows its source text. Resolve / reopen / delete work.
+- [x] Repeated info doesn't duplicate.
+- [x] `pytest` passes without network. *(40 passed, 2026-10-01.)*
+- [x] Clean clone → running in ≤ 5 commands per README *(install path checked in a fresh venv; needs Hermes on PATH)*
+- [x] No `.env` or `.db` in git. *(2026-10-01: `git ls-files` has neither; `git check-ignore` confirms both are ignored.)*
+- [x] README states real limitations honestly
 
 **Do not start Phase 2** (proactive follow-ups, stale-loop detection, integrations) until every box is checked.

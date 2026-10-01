@@ -71,3 +71,13 @@ def test_same_message_twice_is_one_loop(session: Session, llm: LLMClient) -> Non
     say(session, llm, "Sarah said she'll respond Friday.")
     say(session, llm, "Sarah said she'll respond Friday.")
     assert len(eng.list_loops(session)) == 1
+
+
+def test_unrelated_loop_gets_no_goal(session: Session, llm: LLMClient) -> None:
+    """With a goal that has open loops, the model used to file unrelated items under it."""
+    say(session, llm, "I'm applying for an NVIDIA internship. Sarah said she'll get back to me next Friday.")
+    alex = say(session, llm, "Alex said he'll send me the dataset tomorrow.").created_loops
+    assert len(alex) == 1 and alex[0].goal_id is None
+    prep = say(session, llm, "I need to prepare for the NVIDIA interview.").created_loops
+    assert len(prep) == 1 and prep[0].goal_id is not None
+    assert len(eng.list_goals(session)) == 1

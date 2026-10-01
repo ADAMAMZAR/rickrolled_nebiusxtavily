@@ -17,7 +17,7 @@ class Settings(BaseSettings):
 
     deepseek_api_key: SecretStr = SecretStr("")
     deepseek_base_url: str = "https://api.deepseek.com"
-    deepseek_model: str = "deepseek-flash"
+    deepseek_model: str = "deepseek-v4-flash"
 
     hermes_api_url: str = "http://127.0.0.1:8642/v1"
     hermes_api_key: SecretStr = SecretStr("")  # written by scripts/setup_hermes.py

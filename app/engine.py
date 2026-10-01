@@ -268,6 +268,7 @@ def resolve_loop(session: Session, loop_id: UUID) -> OpenLoop:
     loop.updated_at = now
     session.commit()
     session.refresh(loop)
+    log.info("loop_resolved id=%s", loop_id)
     return loop
 
 
@@ -278,6 +279,7 @@ def reopen_loop(session: Session, loop_id: UUID) -> OpenLoop:
     loop.updated_at = utcnow()
     session.commit()
     session.refresh(loop)
+    log.info("loop_reopened id=%s", loop_id)
     return loop
 
 
@@ -285,6 +287,7 @@ def delete_loop(session: Session, loop_id: UUID) -> None:
     """Delete a wrong loop. Its source stays, since other loops may share it."""
     session.delete(_get(session, loop_id))
     session.commit()
+    log.info("loop_deleted id=%s", loop_id)
 
 
 def _get(session: Session, loop_id: UUID) -> OpenLoop:

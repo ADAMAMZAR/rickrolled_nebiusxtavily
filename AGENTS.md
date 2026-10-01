@@ -4,8 +4,8 @@ Personal AI that tracks **open loops** (unfinished tasks, promises, things you'r
 Hackathon: Nebius x NVIDIA, Personal AI track. **Hermes Agent + NVIDIA Nemotron via Nebius are required and must be real, not mocked, at runtime.**
 
 **Specs (source of truth):** read the current phase before any work. If reality differs (APIs, SDKs), update the spec as well.
-- [continuum_phase_1.md](continuum_phase_1.md): Core: chat → open loops → dashboard. **← current phase**
-- [continuum_phase_2.md](continuum_phase_2.md): Proactive: attention rules, snooze, Hermes cron briefing, Telegram
+- [continuum_phase_1.md](continuum_phase_1.md): Core: chat → open loops → dashboard. *(done 2026-10-01)*
+- [continuum_phase_2.md](continuum_phase_2.md): Proactive: attention rules, snooze, Hermes cron briefing, Telegram **← current phase**
 - [continuum_phase_3.md](continuum_phase_3.md): Connected: Gmail/Calendar, auto-resolve from email, approval-gated actions
 
 Start a phase only after every box in the previous phase's Done Checklist is checked. When a phase is finished, move the "current phase" marker.
@@ -29,7 +29,7 @@ Start a phase only after every box in the previous phase's Done Checklist is che
 ## Commands
 ```bash
 python -m venv .venv && .venv\Scripts\activate   # Windows (source .venv/bin/activate elsewhere)
-pip install -r requirements.txt  # pinned, tested versions (or: pip install -e ".[dev]")
+pip install -r requirements.txt -e .  # pinned, tested versions + the app itself (scripts import `app`)
 python scripts/setup_hermes.py    # once, and after changing LLM_PROVIDER or keys
 uvicorn app.main:app --reload     # Continuum on :8000 (MCP at /mcp/)
 hermes -p continuum gateway run   # Hermes API server on :8642

@@ -1,10 +1,102 @@
+import json
+from collections.abc import Iterator
+
+import pytest
 from fastapi.testclient import TestClient
 
+from app.hermes import HermesError, HermesReply
 from app.main import create_app
+from tests.conftest import FakeLLM
+from tests.test_mcp_tools import HEADERS
+from tests.test_process_message import DEMO, DEMO_RESULT
 
 
-def test_health(db_url: str) -> None:
-    with TestClient(create_app(db_url)) as client:
-        response = client.get("/health")
-    assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
+class FakeHermes:
+    def __init__(self) -> None:
+        self.asked: list[tuple[str, str]] = []
+        self.down = False
+
+    def ask(self, message: str, conversation: str = "continuum") -> HermesReply:
+        if self.down:
+            raise HermesError("Hermes isn't running.")
+        self.asked.append((message, conversation))
+        return HermesReply(text="Saved.")
+
+
+@pytest.fixture
+def hermes() -> FakeHermes:
+    return FakeHermes()
+
+
+@pytest.fixture
+def client(db_url: str, hermes: FakeHermes) -> Iterator[TestClient]:
+    llm = FakeLLM(DEMO_RESULT)
+    app = create_app(db_url, get_llm=lambda: llm, get_hermes=lambda: hermes)
+    with TestClient(app, base_url="http://127.0.0.1:8000") as http:
+        yield http
+
+
+def seed(client: TestClient) -> list[dict]:
+    """Save the demo through the real MCP `remember` tool, then return open loops via REST."""
+    call = {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "remember", "arguments": {"text": DEMO}}}
+    assert client.post("/mcp/", json=call, headers=HEADERS).status_code == 200
+    return client.get("/api/loops").json()
+
+
+def test_health(client: TestClient) -> None:
+    assert client.get("/health").json() == {"status": "ok"}
+
+
+def test_ui_is_served(client: TestClient) -> None:
+    response = client.get("/")
+    assert response.status_code == 200 and "Continuum" in response.text
+
+
+def test_chat_proxies_to_hermes(client: TestClient, hermes: FakeHermes) -> None:
+    response = client.post("/api/chat", json={"message": "What am I waiting on?", "conversation": "ui-1"})
+    assert response.json() == {"reply": "Saved."}
+    assert hermes.asked == [("What am I waiting on?", "ui-1")]
+
+
+def test_chat_when_hermes_down(client: TestClient, hermes: FakeHermes) -> None:
+    hermes.down = True
+    response = client.post("/api/chat", json={"message": "hi"})
+    assert response.status_code == 503
+    assert response.json()["error"] == "agent_unavailable"
+
+
+def test_goals_and_loops(client: TestClient) -> None:
+    loops = seed(client)
+    assert [l["title"] for l in loops] == ["Wait for Sarah's response", "Finish portfolio"]
+    assert loops[0]["goal_title"] == "Secure NVIDIA internship"
+    assert (loops[0]["kind"], loops[0]["waiting_on"], loops[0]["due"]) == ("waiting", "Sarah", "2026-10-02")
+
+    [goal] = client.get("/api/goals").json()
+    assert (goal["title"], goal["open_loops"]) == ("Secure NVIDIA internship", 2)
+    assert len(client.get(f"/api/loops?goal_id={goal['id']}").json()) == 2
+
+
+def test_detail_resolve_reopen_delete(client: TestClient) -> None:
+    loop_id = seed(client)[0]["id"]
+
+    detail = client.get(f"/api/loops/{loop_id}").json()
+    assert detail["source"]["text"] == DEMO and detail["source"]["created_at"]
+
+    resolved = client.post(f"/api/loops/{loop_id}/resolve").json()
+    assert resolved["status"] == "resolved" and resolved["resolved_at"]
+    assert [l["id"] for l in client.get("/api/loops?status=resolved").json()] == [loop_id]
+    assert len(client.get("/api/loops?status=all").json()) == 2
+
+    reopened = client.post(f"/api/loops/{loop_id}/reopen").json()
+    assert reopened["status"] == "open" and reopened["resolved_at"] is None
+
+    assert client.delete(f"/api/loops/{loop_id}").status_code == 204
+    assert client.get(f"/api/loops/{loop_id}").status_code == 404
+
+
+def test_errors_are_json(client: TestClient) -> None:
+    missing = client.post("/api/loops/00000000-0000-0000-0000-000000000000/resolve")
+    assert missing.status_code == 404 and missing.json()["error"] == "not_found"
+    bad = client.get("/api/loops/not-a-uuid")
+    assert bad.status_code == 422 and bad.json()["error"] == "invalid_request"
+    assert json.loads(client.get("/api/loops?status=nope").text)["error"] == "invalid_request"
