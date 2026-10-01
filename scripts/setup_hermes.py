@@ -15,9 +15,11 @@ from urllib.parse import urlsplit
 
 import yaml
 
-from app.config import settings
-
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))  # so `app` imports without installing the package
+
+from app.config import settings  # noqa: E402
+
 PROFILE = "continuum"
 
 

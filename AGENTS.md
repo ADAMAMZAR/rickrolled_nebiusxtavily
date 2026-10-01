@@ -29,7 +29,7 @@ Start a phase only after every box in the previous phase's Done Checklist is che
 ## Commands
 ```bash
 python -m venv .venv && .venv\Scripts\activate   # Windows (source .venv/bin/activate elsewhere)
-pip install -e ".[dev]"
+pip install -r requirements.txt  # pinned, tested versions (or: pip install -e ".[dev]")
 python scripts/setup_hermes.py    # once, and after changing LLM_PROVIDER or keys
 uvicorn app.main:app --reload     # Continuum on :8000 (MCP at /mcp/)
 hermes -p continuum gateway run   # Hermes API server on :8642

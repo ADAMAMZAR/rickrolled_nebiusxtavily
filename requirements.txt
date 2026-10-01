@@ -1,0 +1,14 @@
+# Pinned to the versions Continuum is tested with. Install: pip install -r requirements.txt
+# pyproject.toml holds the same deps as ranges (used by: pip install -e ".[dev]").
+fastapi==0.141.1
+uvicorn[standard]==0.54.0
+sqlmodel==0.0.47
+pydantic-settings==2.15.0
+openai==3.20.0
+httpx==0.28.1
+mcp==2.2.0
+pyyaml==6.0.3
+tzdata==2026.4
+
+# Tests
+pytest==9.1.1

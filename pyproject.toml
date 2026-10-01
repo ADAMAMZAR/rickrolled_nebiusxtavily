@@ -28,5 +28,6 @@ packages = ["app"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]  # import app/ without installing the package
 addopts = "-m 'not live'"
 markers = ["live: calls real Nebius (needs NEBIUS_API_KEY)"]
