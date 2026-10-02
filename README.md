@@ -2,7 +2,7 @@
 
 **A personal AI that remembers what's still unfinished.**
 
-You mention things in passing: "Sarah said she'll get back to me Friday", "I need to finish my portfolio". Then they slip. Notes apps keep what you wrote. Chatbots forget it by the next session. Continuum pulls the **open loops** out of normal conversation (tasks, your promises, things you're waiting on, deadlines), links them to your goals, and keeps them until they're done.
+You mention things in passing: "Sarah said she'll get back to me Friday", "I need to finish my portfolio". Then they slip. Notes apps keep what you wrote. Chatbots forget it by the next session. Continuum pulls the **open loops** out of normal conversation (tasks, your promises, things you're waiting on, deadlines), links them to your goals, keeps them until they're done, and tells you before they slip.
 
 Built for the Nebius x NVIDIA Global AI Hackathon, **Personal AI** track.
 
@@ -14,13 +14,23 @@ Built for the Nebius x NVIDIA Global AI Hackathon, **Personal AI** track.
 4. Restart everything, then ask *"What am I waiting on?"* and it answers from its database.
 5. Say *"Sarah got back to me!"* or click **Resolve**, and the loop closes. When the whole goal is finished, click **Mark goal done**.
 
+### Before things slip
+
+- **Needs attention.** The top of the dashboard lists what's overdue, due today or tomorrow, or hasn't been touched for 4 days (`STALE_DAYS`). Plain rules, no LLM, so it's instant and predictable. Ask *"What's urgent?"* in chat for the same list.
+- **Snooze.** Hide a loop until Tomorrow, In 3 days, Next Monday or any date, from the dashboard or in chat (*"snooze the portfolio till Monday"*). It comes back on that day.
+- **Drafts.** Click **Draft** (or ask *"draft a follow-up to Sarah"*) and Continuum writes a short message for you to copy. It never sends anything.
+- **Telegram.** The same assistant on your phone: capture loops on the go, ask what's urgent. [Setup](#telegram-optional).
+- **Daily briefing.** Every morning, a short Telegram message with what needs you. Reply to it to snooze, resolve or draft. [Setup](#daily-briefing-optional-needs-telegram).
+
 ## Architecture
 
 ```mermaid
 flowchart LR
     UI[Dashboard] -->|chat| API[Continuum FastAPI]
-    UI -->|list / resolve / delete| API
-    API -->|proxy chat| H[Hermes Agent<br/>API server :8642]
+    UI -->|list / resolve / snooze| API
+    TG[Telegram] <--> H
+    CRON[Hermes cron<br/>daily briefing] --> H
+    API -->|proxy chat| H[Hermes Agent<br/>gateway :8642]
     H -->|reasoning| N[Nemotron via Nebius]
     H -->|MCP tools| MCP[Continuum MCP /mcp]
     MCP --> E[Continuity Engine]
@@ -29,8 +39,8 @@ flowchart LR
     E --> DB[(SQLite)]
 ```
 
-- **Continuum** (one Python process): FastAPI serves the dashboard, a REST API, and an MCP server at `/mcp/`. The continuity engine (`app/engine.py`) owns extraction, goal linking, dedup and storage.
-- **Hermes Agent** (second process) is the chat brain. It decides when to save (`remember`) and when to answer from memory (`list_open_loops`, `list_goals`, `inspect_loop`, `resolve_loop`). It runs in its own `continuum` profile, so your default Hermes setup is untouched. Its built-in terminal, file, web, browser and memory tools are off. It only has Continuum's tools.
+- **Continuum** (one Python process): FastAPI serves the dashboard, a REST API, and an MCP server at `/mcp/`. The continuity engine (`app/engine.py`) owns extraction, goal linking, dedup, the attention rules and storage.
+- **Hermes Agent** (second process) is the chat brain, for the dashboard chat, Telegram and the daily briefing. It decides when to save (`remember`) and when to answer from memory (`list_open_loops`, `needs_attention`, `list_goals`, `inspect_loop`, `resolve_loop`, `snooze_loop`). It runs in its own `continuum` profile, so your default Hermes setup is untouched. Its built-in terminal, file, web, browser and memory tools are off on every platform. It only has Continuum's tools.
 
 ### Why Hermes
 
@@ -116,6 +126,7 @@ The live suite runs the acceptance inputs against real Nemotron, e.g. "Alex said
 
 - Everything stays local in `data/continuum.db` (SQLite). The only data that leaves your machine is what goes to the LLM provider to do its job, plus your Telegram messages if you turn Telegram on (they pass through Telegram's servers).
 - Every loop links to the message it came from, and you can delete any loop.
+- Continuum never sends anything on your behalf. Drafts are text for you to copy.
 - Messages that change nothing (questions, small talk) aren't stored by Continuum. Hermes keeps its own chat history in its `continuum` profile folder.
 - Logs record event names, counts and ids (`extraction_ok`, `loop_created`, `loop_resolved`, `extraction_failed`), never message content or API keys.
 
@@ -128,7 +139,8 @@ The live suite runs the acceptance inputs against real Nemotron, e.g. "Alex said
 - **Hermes' standalone gateway** (`gateway.standalone: true`) is a shim Hermes marks as temporary. `hermes/config.example.yaml` describes the fallback.
 - Goals are marked done from the dashboard only, not by chat.
 - Chat replies take a few seconds (one Nemotron tool call plus the reply, ~3–9 s in testing).
-- Reactive only: no reminders or notifications yet (planned in [Phase 2](continuum_phase_2.md)).
+- Telegram and the daily briefing only work while Hermes' gateway is running on your machine.
+- Telegram, the daily briefing and the `needs_attention` / `snooze_loop` chat tools are set up from Hermes' docs and tested offline, but not yet run end to end against a live Hermes.
 
 ## License
 
