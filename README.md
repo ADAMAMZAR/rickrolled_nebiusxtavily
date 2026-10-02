@@ -12,7 +12,7 @@ Built for the Nebius x NVIDIA Global AI Hackathon, **Personal AI** track.
 2. It saves the goal **Secure NVIDIA internship** with 2 loops: **Wait for Sarah's response** (due Fri) and **Finish portfolio**.
 3. The dashboard groups loops under goals and shows due dates, with overdue items in red. Click a loop to see **the exact sentence it came from**.
 4. Restart everything, then ask *"What am I waiting on?"* and it answers from its database.
-5. Say *"Sarah got back to me!"* or click **Resolve**, and the loop closes.
+5. Say *"Sarah got back to me!"* or click **Resolve**, and the loop closes. When the whole goal is finished, click **Mark goal done**.
 
 ## Architecture
 
@@ -100,6 +100,7 @@ The live suite runs the acceptance inputs against real Nemotron, e.g. "Alex said
 - **`next_action` is usually empty**, because the model is told never to invent anything the message doesn't state.
 - **Dedup is exact-match** on normalized title + person, plus giving the model the existing loops. Reworded duplicates can slip through.
 - **Hermes' standalone gateway** (`gateway.standalone: true`) is a shim Hermes marks as temporary. `hermes/config.example.yaml` describes the fallback.
+- Goals are marked done from the dashboard only, not by chat.
 - Chat replies take a few seconds (one Nemotron tool call plus the reply, ~3–9 s in testing).
 - Reactive only: no reminders or notifications yet (planned in [Phase 2](continuum_phase_2.md)).
 

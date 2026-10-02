@@ -94,6 +94,22 @@ def test_detail_resolve_reopen_delete(client: TestClient) -> None:
     assert client.get(f"/api/loops/{loop_id}").status_code == 404
 
 
+def test_complete_goal(client: TestClient) -> None:
+    loops = seed(client)
+    assert loops[0]["goal_status"] == "active"
+    goal_id = loops[0]["goal_id"]
+
+    done = client.post(f"/api/goals/{goal_id}/complete").json()
+    assert done["status"] == "done"
+    assert client.get("/api/goals").json() == []
+    assert client.get("/api/loops").json() == []
+    resolved = client.get("/api/loops?status=resolved").json()
+    assert len(resolved) == 2 and {l["goal_status"] for l in resolved} == {"done"}
+
+    missing = client.post("/api/goals/00000000-0000-0000-0000-000000000000/complete")
+    assert missing.status_code == 404 and missing.json()["error"] == "not_found"
+
+
 def test_errors_are_json(client: TestClient) -> None:
     missing = client.post("/api/loops/00000000-0000-0000-0000-000000000000/resolve")
     assert missing.status_code == 404 and missing.json()["error"] == "not_found"

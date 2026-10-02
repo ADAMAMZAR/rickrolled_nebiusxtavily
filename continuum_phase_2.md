@@ -59,7 +59,7 @@ OpenLoop:
 
 That's the only schema change.
 
-**Migration:** Phase 1 used `create_all`, which doesn't add columns. Add `db.migrate()`, run at startup. It checks `PRAGMA table_info(openloop)` and runs `ALTER TABLE ... ADD COLUMN` for missing columns. Don't add Alembic for one column.
+**No migration.** There are no old databases to keep. `create_all` doesn't add columns to an existing table, so delete `data/continuum.db` (and any scratch DBs) after pulling this change.
 
 ---
 
@@ -154,7 +154,6 @@ POST /api/loops/{id}/unsnooze
 
 - **Attention rules**, with a fixed `today`: each rule fires, the boundaries (`due == today`, exactly `STALE_DAYS`) behave, snoozed loops are skipped, resolved loops never appear, and the sort order is right.
 - **Snooze:** set/unsnooze, `updated_at` bumps, the list filter hides snoozed loops.
-- **Migration:** a Phase 1 DB file (without `snoozed_until`) → `migrate()` → column exists, data kept, and running it twice is safe.
 - **API:** new endpoints.
 - **Manual:** trigger the cron job now (`hermes cron run <id>` or the docs equivalent) → the Telegram message arrives.
 
@@ -162,7 +161,7 @@ POST /api/loops/{id}/unsnooze
 
 ## 12. Build Order
 
-1. `snoozed_until` + `migrate()` + tests.
+1. `snoozed_until` + tests.
 2. `needs_attention()` + tests.
 3. REST endpoints + UI section.
 4. MCP tools → check in Hermes chat: "what's urgent?" / "snooze X till Monday".
@@ -179,6 +178,5 @@ POST /api/loops/{id}/unsnooze
 - [ ] Snooze via Telegram and dashboard; snoozed loops come back after the date
 - [ ] "Draft a follow-up" works in both, and nothing is sent automatically
 - [ ] New loops can be captured from Telegram
-- [ ] A Phase 1 DB upgrades without data loss
 - [ ] `pytest` passes offline
 - [ ] No bot token or chat id in git

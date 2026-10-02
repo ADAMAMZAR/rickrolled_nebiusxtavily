@@ -281,14 +281,35 @@ def resolve_loop(session: Session, loop_id: UUID) -> OpenLoop:
 
 
 def reopen_loop(session: Session, loop_id: UUID) -> OpenLoop:
+    """Reopen a loop. If its goal was marked done, the goal becomes active again."""
     loop = _get(session, loop_id)
     loop.status = LoopStatus.open
     loop.resolved_at = None
     loop.updated_at = utcnow()
+    goal = session.get(Goal, loop.goal_id) if loop.goal_id else None
+    if goal and goal.status == GoalStatus.done:
+        goal.status, goal.updated_at = GoalStatus.active, loop.updated_at
+        log.info("goal_reopened id=%s", goal.id)
     session.commit()
     session.refresh(loop)
     log.info("loop_reopened id=%s", loop_id)
     return loop
+
+
+def complete_goal(session: Session, goal_id: UUID) -> Goal:
+    """Mark a goal done (achieved or dropped) and resolve its open loops.
+    Done goals aren't sent to the LLM anymore. Reopening one of its loops makes it active again."""
+    goal = session.get(Goal, goal_id)
+    if goal is None:
+        raise NotFound(f"Goal {goal_id} not found")
+    now = utcnow()
+    goal.status, goal.updated_at = GoalStatus.done, now
+    for loop in list_loops(session, goal_id=goal_id):
+        loop.status, loop.resolved_at, loop.updated_at = LoopStatus.resolved, now, now
+    session.commit()
+    session.refresh(goal)
+    log.info("goal_completed id=%s", goal_id)
+    return goal
 
 
 def delete_loop(session: Session, loop_id: UUID) -> None:

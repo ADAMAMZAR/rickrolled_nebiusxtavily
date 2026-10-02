@@ -44,6 +44,6 @@ pytest -m live                    # real LLM + Hermes (needs keys and both serve
 - Don't swallow exceptions.
 - Stay in the current phase's scope. Ask before adding anything from its "Out" list.
 - Continuum never sends anything on the user's behalf. Drafts and approved calendar events only.
-- Schema changes go through `db.migrate()` (from Phase 2 on). Old DBs must upgrade without data loss.
+- No DB migrations: `create_all` builds the schema. After a schema change, delete the old `.db` file.
 - Windows dev machine: keep commands cross-platform or give both variants.
 - Before saying something is done: run `pytest` and, for LLM/Hermes changes, check the real path.

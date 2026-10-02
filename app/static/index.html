@@ -101,8 +101,12 @@ form.composer .btn { min-height: 44px; }
 .toggle input { accent-color: var(--accent); margin: 0; }
 #loops { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 8px 10px 16px; }
 .group { padding-top: 10px; }
-.group h3 { margin: 0; padding: 6px 8px; font-size: var(--small); font-weight: 620; color: var(--muted); display: flex; gap: 8px; }
+.group h3 { margin: 0; padding: 6px 8px; font-size: var(--small); font-weight: 620; color: var(--muted); display: flex; align-items: baseline; gap: 8px; }
 .group h3 .count { font-weight: 500; font-variant-numeric: tabular-nums; }
+.group h3 .end { margin-left: auto; font-weight: 500; white-space: nowrap; }
+.group h3 button.end { border: 0; background: none; padding: 2px 4px; border-radius: 4px; color: var(--accent); cursor: pointer; font-size: var(--small); }
+.group h3 button.end:hover { background: var(--accent-soft); }
+.group h3 .done { color: var(--accent); }
 .group.nogoal h3 { font-weight: 500; }
 details.loop { border-radius: 8px; transition: background 150ms; }
 details.loop[open] { background: var(--sunk); }
@@ -260,9 +264,9 @@ async function loadLoops() {
     box.replaceChildren(emptyState());
     return;
   }
-  const groups = new Map();  // goal title -> loops, most urgent goal first ("No goal" last)
+  const groups = new Map();  // goal id -> loops, most urgent goal first ("No goal" last)
   for (const l of loops) {
-    const key = l.goal_title || "";
+    const key = l.goal_id || "";
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(l);
   }
@@ -270,10 +274,20 @@ async function loadLoops() {
   box.replaceChildren(...keys.map((key) => {
     const items = groups.get(key).sort((a, b) => (a.status === "resolved") - (b.status === "resolved"));
     const open = items.filter((l) => l.status === "open").length;
+    const { goal_title: title, goal_status: goalStatus } = items[0];
     return h("div", { class: "group" + (key ? "" : " nogoal") },
-      h("h3", {}, key || "No goal", h("span", { class: "count" }, `(${open})`)),
+      h("h3", {}, key ? title : "No goal", h("span", { class: "count" }, `(${open})`),
+        key && (goalStatus === "done"
+          ? h("span", { class: "end done" }, "Goal done")
+          : h("button", { class: "end", type: "button", onclick: () => completeGoal(key, title, open) }, "Mark goal done"))),
       items.map((l) => loopRow(l, fresh.includes(l.id), openIds.has(l.id))));
   }));
+}
+
+function completeGoal(id, title, open) {
+  const loops = open === 1 ? "its open loop" : `its ${open} open loops`;
+  const note = open ? ` This resolves ${loops}. Reopen any of them to undo.` : "";
+  if (confirm(`Mark "${title}" done?${note}`)) act(`/api/goals/${id}/complete`, "POST");
 }
 
 function emptyState() {

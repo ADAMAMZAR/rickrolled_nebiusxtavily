@@ -5,7 +5,7 @@ import pytest
 from sqlmodel import Session
 
 from app import engine as eng
-from app.db import Goal, LoopKind, LoopStatus, OpenLoop, create_db_engine
+from app.db import Goal, GoalStatus, LoopKind, LoopStatus, OpenLoop, create_db_engine
 
 
 def seed(session: Session) -> tuple[Goal, OpenLoop, OpenLoop]:
@@ -83,6 +83,21 @@ def test_resolve_then_reopen(session: Session) -> None:
     assert reopened.resolved_at is None
 
 
+def test_complete_goal_resolves_its_loops_and_reopen_undoes_it(session: Session) -> None:
+    goal, wait, task = seed(session)
+    eng.resolve_loop(session, wait.id)
+
+    done = eng.complete_goal(session, goal.id)
+    assert done.status == GoalStatus.done
+    assert eng.list_goals(session) == []
+    assert eng.list_loops(session) == []
+    assert eng.get_loop(session, task.id).loop.resolved_at is not None
+
+    eng.reopen_loop(session, task.id)
+    assert [s.goal.id for s in eng.list_goals(session)] == [goal.id]
+    assert [l.id for l in eng.list_loops(session)] == [task.id]  # only the reopened loop
+
+
 def test_delete_keeps_shared_source(session: Session) -> None:
     _, wait, task = seed(session)
 
@@ -93,7 +108,7 @@ def test_delete_keeps_shared_source(session: Session) -> None:
 
 
 def test_missing_loop_raises_not_found(session: Session) -> None:
-    for action in (eng.get_loop, eng.resolve_loop, eng.reopen_loop, eng.delete_loop):
+    for action in (eng.get_loop, eng.resolve_loop, eng.reopen_loop, eng.delete_loop, eng.complete_goal):
         with pytest.raises(eng.NotFound):
             action(session, uuid4())
 

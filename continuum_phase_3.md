@@ -94,7 +94,7 @@ PendingAction:                   # NEW: anything that touches Google
     created_at, updated_at
 ```
 
-Extend `db.migrate()` from Phase 2 with the new tables and columns.
+No migration, same as Phase 2: delete the old `.db` file after pulling, and `create_all` builds the new schema.
 
 **Person linking:**
 - Extraction gets the known people list (name, email) and returns `person` for new waiting loops. The engine matches it by case-insensitive name, or creates the Person.
@@ -190,14 +190,13 @@ GET  /api/google/status  ·  POST /api/google/connect  ·  POST /api/google/disc
 - **Reconciliation:** an email resolves only that person's loops. A foreign id gets dropped. Undo restores the loop.
 - **Person linking:** name match (case-insensitive), `set_person_email`, and new waiting loops link to the person.
 - **Actions:** proposing doesn't call Google. Approve calls it exactly once. Approving twice doesn't create a duplicate. Reject → never executed. Failures → `failed` + logged.
-- **Migration:** a Phase 2 DB upgrades cleanly.
 - **Live (optional, `-m live`):** extraction on 3 sample emails (a reply that resolves, an unrelated email, an email that adds a new deadline).
 
 ---
 
 ## 13. Build Order
 
-1. Tables + migration: Person, Activity, Source columns, PendingAction, setting.
+1. Tables: Person, Activity, Source columns, PendingAction, setting.
 2. Activity logging + undo in the engine (works for chat changes too). Add tests.
 3. Person linking in extraction + `set_person_email` + UI field.
 4. **Google gate:** OAuth connect, list the last 5 emails from one address, create one draft, create one event, all from a scratch script.
@@ -216,6 +215,5 @@ GET  /api/google/status  ·  POST /api/google/connect  ·  POST /api/google/disc
 - [ ] Every automatic change shows in the activity timeline and can be undone
 - [ ] Approve/reject works from Telegram and the dashboard, with no duplicates
 - [ ] Disconnect + Forget email data work
-- [ ] A Phase 2 DB upgrades without loss
 - [ ] `pytest` passes offline
 - [ ] No tokens or client secrets in git

@@ -105,6 +105,7 @@ Deliberately simple:
 - `kind` and `status` don't overlap. "Waiting" is a kind, not a status.
 - A deadline is just the `due` field, not a separate kind.
 - No `cancelled` status. Wrong loops get deleted.
+- The user marks a goal done (dashboard). That resolves its open loops, and done goals aren't sent to the LLM anymore. Reopening one of its loops makes the goal active again.
 - No LLM confidence score. Self-reported confidence is noise. Validation + user delete is the safety net.
 
 ---
@@ -160,7 +161,7 @@ extract (LLM, no DB writes yet)
 
 **Dedup:** mostly handled by passing existing items to the LLM (rule 7). Safety net: before inserting, skip a new loop if an open loop exists with the same normalized title (lowercase, trimmed, whitespace collapsed) and the same `waiting_on`. Goals match on normalized title. No token similarity or embeddings.
 
-Other engine functions: `list_goals`, `list_loops(status, goal_id)`, `get_loop`, `resolve_loop`, `reopen_loop`, `delete_loop`.
+Other engine functions: `list_goals`, `list_loops(status, goal_id)`, `get_loop`, `resolve_loop`, `reopen_loop`, `delete_loop`, `complete_goal`.
 
 ---
 
@@ -179,6 +180,7 @@ Other engine functions: `list_goals`, `list_loops(status, goal_id)`, `get_loop`,
 GET    /health
 POST   /api/chat                 {message, conversation?} → {reply}   (proxies to Hermes)
 GET    /api/goals                → goals + open loop counts
+POST   /api/goals/{id}/complete  → goal done, its open loops resolved
 GET    /api/loops?status=open|resolved|all&goal_id=   (default open)
 GET    /api/loops/{id}           → loop + source text
 POST   /api/loops/{id}/resolve
@@ -213,6 +215,7 @@ One page, two columns:
 - New or changed loops briefly highlight after a chat.
 - Click a loop to open a detail panel: fields + **"Why Continuum knows this"** (the original sentence and timestamp) + **Resolve / Reopen / Delete**.
 - Empty state shows an example message to try.
+- Each goal heading has **Mark goal done** (asks to confirm first).
 
 ---
 
@@ -309,6 +312,7 @@ Each step ends with passing tests. **Steps 2 and 3 are gates: don't continue unt
   *Done 2026-09-29: the 5 tools in §2 (`ping` removed). 6 MCP-over-HTTP tests. Checked live on Nemotron against a scratch DB: demo message → `remember` saved 1 goal + 2 loops. Then, **after restarting Continuum**, fresh conversations answered "What am I waiting on?" (`list_open_loops`), "Why do you know that?" (`inspect_loop`, quoting the original words) and "Sarah got back to me" (`resolve_loop`). One tool call per reply, ~3–9 s. Changes found along the way: Hermes' **tool search** (on by default) hid MCP tools behind extra round-trips, so it's now off in `hermes/config.example.yaml`. A message that changes nothing is no longer stored.*
 - [x] **6. REST API + UI.**
   *Done 2026-10-01: all §8 routes + JSON errors, 7 API tests (Hermes faked, loops seeded through the real MCP `remember`). UI in `app/static/index.html`: loops grouped by goal, friendly/overdue dates, highlight after chat, inline detail (native `<details>`, no modal) with source + Resolve/Reopen/Delete, empty state with the demo message. Checked in Chrome at desktop/mobile, light/dark, against `scripts/seed_demo.py` data; the chat error path shows Hermes' message. Not yet checked with live Hermes (Step 7).*
+  *2026-10-02: added **Mark goal done** (`POST /api/goals/{id}/complete` + a button on each goal heading), so finished goals stop going to the LLM. Dashboard only; no Hermes tool yet.*
 - [x] **7. E2E:** run the §1 demo, restart, and confirm memory persists.
   *Done 2026-10-01 on Nebius Nemotron through Hermes 0.21.5 and the real `/api/chat`, scratch DB: demo → 1 goal + 2 loops with source; both servers restarted; a fresh conversation answered "What am I waiting on?" via `list_open_loops`; "Sarah got back to me" resolved it via `remember`. Run twice (before and after the prompt fix below). `pytest -m live` 8/8, 3 runs in a row, on the pinned `requirements.txt` versions too. Found along the way: (1) Nemotron filed unrelated loops ("Alex will send the dataset") under the only goal once that goal had open loops (2/3 runs). Extraction rule 6 now links a loop only when the message mentions what the goal is about; added a live regression test. (2) Hermes replied in Markdown, which the chat shows raw; `SOUL.md` now asks for plain text.*
 - [x] **8. README:** one-liner, problem, architecture diagram, why Hermes, Nemotron/Nebius usage, setup (both processes, Windows + macOS/Linux), tests, privacy, track, license.

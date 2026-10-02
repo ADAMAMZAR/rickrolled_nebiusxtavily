@@ -106,6 +106,16 @@ def test_prompt_sees_existing_goals_and_loop_ids(session: Session) -> None:
     assert str(first.created_loops[0].id) in user
 
 
+def test_done_goals_are_not_sent_to_the_model(session: Session) -> None:
+    first = process(session, DEMO_RESULT)
+    eng.complete_goal(session, first.created_goals[0].id)
+    llm = FakeLLM(result())
+    eng.process_message(session, llm, "Any news?", now=NOW)
+    user = llm.calls[0][1]["content"]
+    assert "Secure NVIDIA internship" not in user
+    assert "Existing open loops: none" in user
+
+
 def test_message_with_nothing_to_save_is_not_stored(session: Session) -> None:
     changes = process(session, result(), "I like pizza.")
     assert changes.source is None

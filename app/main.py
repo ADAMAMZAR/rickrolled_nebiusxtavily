@@ -51,7 +51,11 @@ def error(status: int, code: str, message: str) -> JSONResponse:
 
 def loop_out(session: Session, loop: OpenLoop) -> dict[str, Any]:
     goal = session.get(Goal, loop.goal_id) if loop.goal_id else None
-    return {**loop.model_dump(mode="json"), "goal_title": goal.title if goal else None}
+    return {
+        **loop.model_dump(mode="json"),
+        "goal_title": goal.title if goal else None,
+        "goal_status": goal.status.value if goal else None,
+    }
 
 
 def create_app(
@@ -107,6 +111,10 @@ def create_app(
     @app.get("/api/goals")
     def goals(session: Session = Depends(get_session)) -> list[dict[str, Any]]:
         return [{**g.goal.model_dump(mode="json"), "open_loops": g.open_loops} for g in eng.list_goals(session)]
+
+    @app.post("/api/goals/{goal_id}/complete")
+    def complete_goal(goal_id: UUID, session: Session = Depends(get_session)) -> dict[str, Any]:
+        return eng.complete_goal(session, goal_id).model_dump(mode="json")
 
     @app.get("/api/loops")
     def loops(
