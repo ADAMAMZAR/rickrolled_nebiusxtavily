@@ -6,7 +6,7 @@ Hackathon: Nebius x NVIDIA, Personal AI track. **Hermes Agent + NVIDIA Nemotron 
 **Specs (source of truth):** read the current phase before any work. If reality differs (APIs, SDKs), update the spec as well.
 - [continuum_phase_1.md](continuum_phase_1.md): Core: chat → open loops → dashboard. *(done 2026-10-01)*
 - [continuum_phase_2.md](continuum_phase_2.md): Proactive: attention rules, snooze, Hermes cron briefing, Telegram **← current phase**
-- [continuum_phase_3.md](continuum_phase_3.md): Connected: Gmail/Calendar, auto-resolve from email, approval-gated actions
+- [continuum_phase_3.md](continuum_phase_3.md): Connected: web watch + lookup (Tavily), Gmail/Calendar, auto-resolve from email, approval-gated actions
 
 Start a phase only after every box in the previous phase's Done Checklist is checked. When a phase is finished, move the "current phase" marker.
 

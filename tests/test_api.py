@@ -94,6 +94,31 @@ def test_detail_resolve_reopen_delete(client: TestClient) -> None:
     assert client.get(f"/api/loops/{loop_id}").status_code == 404
 
 
+@pytest.mark.usefixtures("on_friday")
+def test_attention_snooze_unsnooze(client: TestClient) -> None:
+    wait = seed(client)[0]
+    attention = client.get("/api/attention").json()
+    assert [(a["loop"]["title"], a["reason"]) for a in attention] == [("Wait for Sarah's response", "due today")]
+    assert attention[0]["loop"]["goal_title"] == "Secure NVIDIA internship"
+
+    snoozed = client.post(f"/api/loops/{wait['id']}/snooze", json={"until": "2026-10-05"}).json()
+    assert snoozed["snoozed_until"] == "2026-10-05"
+    assert client.get("/api/attention").json() == []
+    assert [l["title"] for l in client.get("/api/loops").json()] == ["Finish portfolio"]
+    assert len(client.get("/api/loops?include_snoozed=true").json()) == 2
+
+    assert client.post(f"/api/loops/{wait['id']}/unsnooze").json()["snoozed_until"] is None
+    assert len(client.get("/api/attention").json()) == 1
+
+
+@pytest.mark.usefixtures("on_friday")
+def test_snooze_needs_a_future_date(client: TestClient) -> None:
+    loop_id = seed(client)[0]["id"]
+    for until in ("2026-10-02", "monday"):
+        response = client.post(f"/api/loops/{loop_id}/snooze", json={"until": until})
+        assert response.status_code == 422 and response.json()["error"] == "invalid_request", until
+
+
 def test_complete_goal(client: TestClient) -> None:
     loops = seed(client)
     assert loops[0]["goal_status"] == "active"

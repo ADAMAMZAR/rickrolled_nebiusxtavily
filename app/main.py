@@ -1,6 +1,7 @@
 import logging
 from collections.abc import AsyncIterator, Callable, Iterator
 from contextlib import asynccontextmanager
+from datetime import date
 from functools import cache
 from pathlib import Path
 from typing import Any, Literal, Protocol
@@ -33,6 +34,10 @@ class Agent(Protocol):
 class ChatIn(BaseModel):
     message: str = Field(min_length=1, max_length=8000)
     conversation: str = Field(default="continuum", max_length=100)  # the UI sends one per page load
+
+
+class SnoozeIn(BaseModel):
+    until: date
 
 
 @cache
@@ -84,6 +89,10 @@ def create_app(
     def not_found(request: Request, e: eng.NotFound) -> JSONResponse:
         return error(404, "not_found", str(e))
 
+    @app.exception_handler(eng.InvalidRequest)
+    def invalid_action(request: Request, e: eng.InvalidRequest) -> JSONResponse:
+        return error(422, "invalid_request", str(e))
+
     @app.exception_handler(HTTPException)  # unknown paths, wrong methods
     def http_error(request: Request, e: HTTPException) -> JSONResponse:
         return error(e.status_code, "not_found" if e.status_code == 404 else "invalid_request", str(e.detail))
@@ -116,13 +125,21 @@ def create_app(
     def complete_goal(goal_id: UUID, session: Session = Depends(get_session)) -> dict[str, Any]:
         return eng.complete_goal(session, goal_id).model_dump(mode="json")
 
+    @app.get("/api/attention")
+    def attention(session: Session = Depends(get_session)) -> list[dict[str, Any]]:
+        items = eng.needs_attention(session, eng.local_now().date())
+        return [{"loop": loop_out(session, a.loop), "reason": a.reason} for a in items]
+
     @app.get("/api/loops")
     def loops(
         status: Literal["open", "resolved", "all"] = "open",
         goal_id: UUID | None = None,
+        include_snoozed: bool = False,
         session: Session = Depends(get_session),
     ) -> list[dict[str, Any]]:
-        found = eng.list_loops(session, None if status == "all" else LoopStatus(status), goal_id)
+        found = eng.list_loops(
+            session, None if status == "all" else LoopStatus(status), goal_id, include_snoozed=include_snoozed
+        )
         return [loop_out(session, loop) for loop in found]
 
     @app.get("/api/loops/{loop_id}")
@@ -137,6 +154,14 @@ def create_app(
     @app.post("/api/loops/{loop_id}/reopen")
     def reopen(loop_id: UUID, session: Session = Depends(get_session)) -> dict[str, Any]:
         return loop_out(session, eng.reopen_loop(session, loop_id))
+
+    @app.post("/api/loops/{loop_id}/snooze")
+    def snooze(loop_id: UUID, body: SnoozeIn, session: Session = Depends(get_session)) -> dict[str, Any]:
+        return loop_out(session, eng.snooze_loop(session, loop_id, body.until))
+
+    @app.post("/api/loops/{loop_id}/unsnooze")
+    def unsnooze(loop_id: UUID, session: Session = Depends(get_session)) -> dict[str, Any]:
+        return loop_out(session, eng.unsnooze_loop(session, loop_id))
 
     @app.delete("/api/loops/{loop_id}", status_code=204)
     def delete(loop_id: UUID, session: Session = Depends(get_session)) -> Response:

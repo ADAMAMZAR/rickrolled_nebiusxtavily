@@ -11,7 +11,7 @@ from sqlmodel import Session
 
 from app import engine as eng
 from app.config import settings
-from app.db import LoopKind, create_db_engine
+from app.db import LoopKind, create_db_engine, utcnow
 
 
 def main() -> None:
@@ -26,8 +26,8 @@ def main() -> None:
         goal = eng.add_goal(s, "Secure NVIDIA internship", "Land the summer internship at NVIDIA.")
         eng.add_loop(s, source_id=src.id, goal_id=goal.id, title="Wait for Sarah's response", kind=LoopKind.waiting,
                      summary="Sarah will reply about the application.", waiting_on="Sarah", due=today + timedelta(days=2))
-        eng.add_loop(s, source_id=src.id, goal_id=goal.id, title="Finish portfolio", kind=LoopKind.task,
-                     summary="Finish the portfolio before the interview.")
+        portfolio = eng.add_loop(s, source_id=src.id, goal_id=goal.id, title="Finish portfolio", kind=LoopKind.task,
+                                 summary="Finish the portfolio before the interview.")
 
         src2 = eng.add_source(s, "Alex said he'll send me the dataset yesterday, still nothing. I promised Mia the slides by tomorrow.")
         hack = eng.add_goal(s, "Win the datathon")
@@ -38,11 +38,14 @@ def main() -> None:
                      summary="Promised Mia the slides.", due=today + timedelta(days=1))
 
         src3 = eng.add_source(s, "I need to renew my passport.")
-        eng.add_loop(s, source_id=src3.id, title="Renew passport", kind=LoopKind.task, summary="Passport renewal.")
+        passport = eng.add_loop(s, source_id=src3.id, title="Renew passport", kind=LoopKind.task, summary="Passport renewal.")
         s.commit()
         done = eng.add_loop(s, source_id=src3.id, title="Book dentist", kind=LoopKind.task, summary="Dentist booking.")
         s.commit()
         eng.resolve_loop(s, done.id)
+        eng.snooze_loop(s, passport.id, today + timedelta(days=3))
+        portfolio.updated_at = utcnow() - timedelta(days=5)  # stale: shows under Needs attention
+        s.commit()
     print(f"Seeded {settings.database_url}")
 
 
