@@ -91,7 +91,7 @@ The live suite runs the acceptance inputs against real Nemotron, e.g. "Alex said
 - Everything stays local in `data/continuum.db` (SQLite). The only data that leaves your machine is what goes to the LLM provider to do its job.
 - Every loop links to the message it came from, and you can delete any loop.
 - Messages that change nothing (questions, small talk) aren't stored by Continuum. Hermes keeps its own chat history in its `continuum` profile folder.
-- Logs record event names, counts and ids (`extraction_ok`, `message_processed`, `loop_resolved`), never message content or API keys.
+- Logs record event names, counts and ids (`extraction_ok`, `loop_created`, `loop_resolved`, `extraction_failed`), never message content or API keys.
 
 ## Limitations
 

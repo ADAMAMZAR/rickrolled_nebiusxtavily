@@ -1,3 +1,4 @@
+import logging
 from datetime import date
 from typing import Any
 
@@ -116,3 +117,16 @@ def test_failed_extraction_writes_nothing(session: Session) -> None:
         eng.process_message(session, FakeLLM("nope", "still nope"), DEMO, now=NOW)
     assert session.exec(select(Source)).all() == []
     assert session.exec(select(OpenLoop)).all() == []
+
+
+def test_logs_events_and_ids_not_content(session: Session, caplog: pytest.LogCaptureFixture) -> None:
+    caplog.set_level(logging.INFO, logger="continuum")
+    wait = process(session, DEMO_RESULT).created_loops[0]
+    process(session, result(resolved=[str(wait.id)]), "Sarah replied.")
+    with pytest.raises(ExtractionError):
+        eng.process_message(session, FakeLLM("nope", "still nope"), DEMO, now=NOW)
+
+    assert f"loop_created id={wait.id}" in caplog.text
+    assert f"loop_resolved id={wait.id}" in caplog.text
+    assert "extraction_failed" in caplog.text
+    assert "Sarah" not in caplog.text

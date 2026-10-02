@@ -60,6 +60,9 @@ def test_clear_errors() -> None:
     with pytest.raises(HermesError, match="rejected"):
         client(httpx.MockTransport(lambda r: httpx.Response(401))).ask("hi")
 
+    with pytest.raises(HermesError, match="isn't JSON"):
+        client(httpx.MockTransport(lambda r: httpx.Response(200, text="<html>"))).ask("hi")
+
 
 @pytest.mark.live
 @pytest.mark.skipif(not settings.hermes_api_key.get_secret_value(), reason="HERMES_API_KEY not set")

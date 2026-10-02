@@ -60,13 +60,17 @@ def process_message(session: Session, llm: Completer, text: str, now: datetime |
     goals = [s.goal for s in list_goals(session)]
     open_loops = list_loops(session)
     goal_titles = {g.id: g.title for g in goals}
-    result = extract(
-        llm,
-        text,
-        now,
-        goals=[{"title": g.title} for g in goals],
-        loops=[_loop_context(loop, goal_titles) for loop in open_loops],
-    )
+    try:
+        result = extract(
+            llm,
+            text,
+            now,
+            goals=[{"title": g.title} for g in goals],
+            loops=[_loop_context(loop, goal_titles) for loop in open_loops],
+        )
+    except Exception as e:
+        log.warning("extraction_failed error=%s", type(e).__name__)
+        raise
 
     known = {str(loop.id): loop for loop in open_loops}
     goal_by_name = {normalize(g.title): g for g in goals}
@@ -133,6 +137,10 @@ def process_message(session: Session, llm: Completer, text: str, now: datetime |
         len(changes.created_goals), len(changes.created_loops),
         len(changes.updated_loops), len(changes.resolved_loops),
     )
+    for loop in changes.created_loops:
+        log.info("loop_created id=%s", loop.id)
+    for loop in changes.resolved_loops:
+        log.info("loop_resolved id=%s", loop.id)
     return changes
 
 

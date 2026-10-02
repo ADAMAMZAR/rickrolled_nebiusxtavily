@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sqlmodel import Session, text
+from starlette.exceptions import HTTPException
 
 from app import engine as eng
 from app.config import settings
@@ -78,6 +79,10 @@ def create_app(
     @app.exception_handler(eng.NotFound)
     def not_found(request: Request, e: eng.NotFound) -> JSONResponse:
         return error(404, "not_found", str(e))
+
+    @app.exception_handler(HTTPException)  # unknown paths, wrong methods
+    def http_error(request: Request, e: HTTPException) -> JSONResponse:
+        return error(e.status_code, "not_found" if e.status_code == 404 else "invalid_request", str(e.detail))
 
     @app.exception_handler(RequestValidationError)
     def invalid(request: Request, e: RequestValidationError) -> JSONResponse:

@@ -42,11 +42,17 @@ class HermesClient:
             raise HermesError(f"Hermes isn't running. {START_HINT}") from e
         except httpx.TimeoutException as e:
             raise HermesError("Hermes timed out.") from e
+        except httpx.HTTPError as e:
+            raise HermesError(f"Couldn't reach Hermes ({type(e).__name__}).") from e
         if response.status_code == 401:
             raise HermesError("Hermes rejected HERMES_API_KEY. Re-run: python scripts/setup_hermes.py")
         if response.is_error:
             raise HermesError(f"Hermes returned HTTP {response.status_code}.")
-        return parse_reply(response.json())
+        try:
+            data = response.json()
+        except ValueError as e:
+            raise HermesError("Hermes sent a reply that isn't JSON. Check HERMES_API_URL in .env.") from e
+        return parse_reply(data)
 
 
 def parse_reply(data: dict[str, Any]) -> HermesReply:

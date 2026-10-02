@@ -100,3 +100,7 @@ def test_errors_are_json(client: TestClient) -> None:
     bad = client.get("/api/loops/not-a-uuid")
     assert bad.status_code == 422 and bad.json()["error"] == "invalid_request"
     assert json.loads(client.get("/api/loops?status=nope").text)["error"] == "invalid_request"
+    unknown = client.get("/api/nope")
+    assert unknown.status_code == 404 and unknown.json()["error"] == "not_found"
+    wrong_method = client.put("/api/goals")
+    assert wrong_method.status_code == 405 and wrong_method.json()["error"] == "invalid_request"
