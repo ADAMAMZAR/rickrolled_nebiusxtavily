@@ -108,7 +108,7 @@ def test_delete_keeps_shared_source(session: Session) -> None:
 
 
 def test_missing_loop_raises_not_found(session: Session) -> None:
-    for action in (eng.get_loop, eng.resolve_loop, eng.reopen_loop, eng.delete_loop, eng.complete_goal):
+    for action in (eng.get_loop, eng.resolve_loop, eng.reopen_loop, eng.delete_loop, eng.unsnooze_loop, eng.complete_goal):
         with pytest.raises(eng.NotFound):
             action(session, uuid4())
 

@@ -59,6 +59,8 @@ OpenLoop:
 
 That's the only schema change.
 
+Engine: `snooze_loop(id, until)` (`until` must be after today, else `InvalidRequest`) and `unsnooze_loop(id)`. Both bump `updated_at`. `list_loops(include_snoozed=False)` hides loops with `snoozed_until > today`. Extraction still sees snoozed loops, so chat can update or resolve them.
+
 **No migration.** There are no old databases to keep. `create_all` doesn't add columns to an existing table, so delete `data/continuum.db` (and any scratch DBs) after pulling this change.
 
 ---
@@ -74,7 +76,8 @@ Plain rules, no LLM. Open loops only. Skip a loop if `snoozed_until > today`.
 | Stale wait | `kind=waiting`, no `due`, `updated_at` older than `STALE_DAYS` | "waiting N days, no reply" |
 | Stale task | `kind in (task, commitment)`, no `due`, `updated_at` older than `STALE_DAYS` | "no update in N days" |
 
-- Sort: overdue → due soon → stale. Within each group, oldest first.
+- "Older than `STALE_DAYS`" = at least `STALE_DAYS` days since `updated_at`, by the user's local date.
+- Sort: overdue → due soon → stale. Within each group, oldest first (earliest due date; for stale, longest without an update).
 - Return `[{loop, reason}]`.
 - `today` uses `TIMEZONE`. The function takes `today` as a parameter so tests can fix the date.
 - New env: `STALE_DAYS=4`.
@@ -162,7 +165,9 @@ POST /api/loops/{id}/unsnooze
 ## 12. Build Order
 
 1. `snoozed_until` + tests.
+   *Done 2026-10-02: column, `snooze_loop`/`unsnooze_loop`, `list_loops(include_snoozed=False)`. Delete old `.db` files (no migration).*
 2. `needs_attention()` + tests.
+   *Done 2026-10-02: the 4 rules in §5, `STALE_DAYS` setting. Tests use a fixed `today`, pass under any `TIMEZONE`. Not exposed yet (REST in step 3, MCP in step 4).*
 3. REST endpoints + UI section.
 4. MCP tools → check in Hermes chat: "what's urgent?" / "snooze X till Monday".
 5. **Telegram gate:** chatting with Continuum through Telegram works.

@@ -55,6 +55,7 @@ class OpenLoop(SQLModel, table=True):
     waiting_on: str | None = None
     due: date | None = None
     next_action: str | None = None
+    snoozed_until: date | None = None  # hidden while this is after today
     status: LoopStatus = Field(default=LoopStatus.open, index=True)
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
