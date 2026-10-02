@@ -43,7 +43,7 @@ flowchart LR
 - **Hermes is the chat brain.** It decides when to save (`remember`) and when to answer from memory (`list_open_loops`). This covers both "remember this" and "what am I waiting on?".
 - **The Continuity Engine owns the domain logic**: extraction, goal linking, dedup, and persistence. Hermes only calls it through tools.
 - Continuum runs as **one process**: FastAPI serves the REST API, the static UI, and an MCP endpoint at `/mcp/` (streamable HTTP, MCP SDK 2.x `MCPServer`).
-- Hermes runs as a second process in its own **`continuum` profile** (`hermes -p continuum gateway run`), so the user's default Hermes setup is untouched. `python scripts/setup_hermes.py` creates the profile from `.env` + `hermes/`. Nebius and DeepSeek are both built-in Hermes providers.
+- Hermes runs as a second process in its own **`continuum` profile** (`hermes -p continuum gateway run`), so the user's default Hermes setup is untouched. `python scripts/setup_hermes.py` creates the profile from `.env` + `hermes/`. Nebius is a built-in Hermes provider.
 - **Hermes built-in toolsets are off** (terminal, file, browser, web, memory). Continuum tools only. Checked via Hermes' `GET /v1/toolsets`.
 - Hermes 0.21 facts:
   - One host gateway per machine by default, so the profile uses `gateway.standalone: true` (a shim Hermes marks as temporary; the fallback is in `hermes/config.example.yaml`).
@@ -167,8 +167,8 @@ Other engine functions: `list_goals`, `list_loops(status, goal_id)`, `get_loop`,
 
 ## 7. LLM Client (`llm.py`)
 
-- Use the `openai` SDK with the provider's `base_url`. It already handles auth, timeouts, and retries.
-- `LLM_PROVIDER=nebius` (default, the real target) or `deepseek` (dev stand-in while there's no Nebius key; model `deepseek-v4-flash`). **The final demo and submission must use Nebius Nemotron.**
+- Use the `openai` SDK with Nebius' `base_url`. It already handles auth, timeouts, and retries.
+- Nebius Nemotron is the only LLM.
 - `NEBIUS_MODEL` is configurable. Pick a Nemotron model from the Nebius catalog with solid tool calling, since Hermes uses it too.
 - Log the model name and latency. Never log keys or full user messages.
 
@@ -278,13 +278,9 @@ Add files only when one gets too big.
 `.env.example`:
 
 ```bash
-LLM_PROVIDER=nebius            # or deepseek (dev stand-in)
 NEBIUS_API_KEY=
 NEBIUS_BASE_URL=https://api.tokenfactory.nebius.com/v1/
 NEBIUS_MODEL=nvidia/nemotron-3-super-120b-a12b
-DEEPSEEK_API_KEY=
-DEEPSEEK_BASE_URL=https://api.deepseek.com
-DEEPSEEK_MODEL=deepseek-v4-flash
 HERMES_API_URL=http://localhost:8642/v1
 TIMEZONE=Asia/Kuala_Lumpur
 DATABASE_URL=sqlite:///./data/continuum.db
@@ -305,7 +301,7 @@ Each step ends with passing tests. **Steps 2 and 3 are gates: don't continue unt
 - [x] **2. Nebius gate:** a real Nemotron call succeeds through `llm.py`.
   *Done 2026-09-29: `nvidia/nemotron-3-super-120b-a12b` via Nebius, plain + JSON mode. No `<think>` text leaks; the client strips leading newlines.*
 - [x] **3. Hermes gate (biggest risk, do it early):** install Hermes, point it at Nebius Nemotron, connect a dummy MCP tool at `/mcp`, and call it through the Hermes API server. Save the working config to `hermes/config.example.yaml`.
-  *Done 2026-09-29, first with DeepSeek, then rechecked on Nebius Nemotron: 3/3 runs, each a real `POST /mcp/` to Continuum. Hermes 0.21.5 `continuum` profile; built-in toolsets confirmed off. The live test uses a fresh conversation per run so Hermes can't answer from history.*
+  *Done 2026-09-29 on Nebius Nemotron: 3/3 runs, each a real `POST /mcp/` to Continuum. Hermes 0.21.5 `continuum` profile; built-in toolsets confirmed off. The live test uses a fresh conversation per run so Hermes can't answer from history.*
 - [x] **4. Extraction + `process_message`** with mocked tests, then the live acceptance inputs.
   *Done 2026-09-29: 12 mocked tests (parsing, retry, dedup, update/resolve, invented-id guard, nothing written on failure). All 5 live acceptance scenarios + the §1 demo message pass on Nemotron, 3 runs in a row (15/15). Each extraction takes ~2–7 s. Note: `next_action` usually comes back null, because rule 1 forbids inventing it. Revisit if the detail view feels empty.*
 - [x] **5. Real MCP tools** wired to the engine. Hermes answers "what am I waiting on?" from the DB.

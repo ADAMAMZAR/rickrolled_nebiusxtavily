@@ -1,8 +1,4 @@
-"""LLM client. Every model call goes through here.
-
-Nebius (Nemotron) is the real target. DeepSeek is a dev stand-in, picked with LLM_PROVIDER.
-Both speak the OpenAI API, so only the key, URL and model differ.
-"""
+"""LLM client: NVIDIA Nemotron on Nebius Token Factory. Every model call goes through here."""
 
 import logging
 import time
@@ -22,27 +18,13 @@ class LLMError(Exception):
 
 class LLMClient:
     def __init__(self, settings: Settings, client: Any = None) -> None:
-        if settings.llm_provider == "deepseek":
-            self.provider = "DeepSeek"
-            key, base_url, self.model = (
-                settings.deepseek_api_key,
-                settings.deepseek_base_url,
-                settings.deepseek_model,
-            )
-        else:
-            self.provider = "Nebius"
-            key, base_url, self.model = (
-                settings.nebius_api_key,
-                settings.nebius_base_url,
-                settings.nebius_model,
-            )
-        self._key_name = f"{self.provider.upper()}_API_KEY"
-        api_key = key.get_secret_value()
+        self.model = settings.nebius_model
+        api_key = settings.nebius_api_key.get_secret_value()
         if not api_key and client is None:
-            raise LLMError(f"{self._key_name} is not set. Add it to .env.")
+            raise LLMError("NEBIUS_API_KEY is not set. Add it to .env.")
         self._client = client or OpenAI(
             api_key=api_key,
-            base_url=base_url,
+            base_url=settings.nebius_base_url,
             timeout=settings.llm_timeout,
             max_retries=2,
         )
@@ -56,17 +38,17 @@ class LLMClient:
                 model=self.model, messages=messages, temperature=0, **extra
             )
         except openai.AuthenticationError as e:
-            raise LLMError(f"{self.provider} rejected {self._key_name}.") from e
+            raise LLMError("Nebius rejected NEBIUS_API_KEY.") from e
         except openai.NotFoundError as e:
-            raise LLMError(f"Model '{self.model}' not found on {self.provider}.") from e
+            raise LLMError(f"Model '{self.model}' not found on Nebius.") from e
         except openai.APITimeoutError as e:
-            raise LLMError(f"{self.provider} timed out.") from e
+            raise LLMError("Nebius timed out.") from e
         except openai.APIError as e:
-            raise LLMError(f"{self.provider} request failed: {type(e).__name__}") from e
+            raise LLMError(f"Nebius request failed: {type(e).__name__}") from e
 
         ms = int((time.perf_counter() - start) * 1000)
-        log.info("llm_call provider=%s model=%s ms=%d json=%s", self.provider, self.model, ms, json_mode)
+        log.info("llm_call model=%s ms=%d json=%s", self.model, ms, json_mode)
         content = (response.choices[0].message.content or "").strip()
         if not content:
-            raise LLMError(f"{self.provider} returned an empty reply.")
+            raise LLMError("Nebius returned an empty reply.")
         return content

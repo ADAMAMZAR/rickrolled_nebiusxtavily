@@ -79,7 +79,7 @@ copy .env.example .env                              # then set NEBIUS_API_KEY
 hermes -p continuum gateway run                     # terminal 2
 ```
 
-Open **http://127.0.0.1:8000**. Re-run `setup_hermes.py` after changing the LLM provider or keys.
+Open **http://127.0.0.1:8000**. Re-run `setup_hermes.py` after changing keys or the model.
 
 `requirements.txt` pins the tested versions; `-e .` installs Continuum itself so the scripts can import it.
 
@@ -124,7 +124,7 @@ The live suite runs the acceptance inputs against real Nemotron, e.g. "Alex said
 
 ## Privacy
 
-- Everything stays local in `data/continuum.db` (SQLite). The only data that leaves your machine is what goes to the LLM provider to do its job, plus your Telegram messages if you turn Telegram on (they pass through Telegram's servers).
+- Everything stays local in `data/continuum.db` (SQLite). The only data that leaves your machine is what goes to Nebius for Nemotron to do its job, plus your Telegram messages if you turn Telegram on (they pass through Telegram's servers).
 - Every loop links to the message it came from, and you can delete any loop.
 - Continuum never sends anything on your behalf. Drafts are text for you to copy.
 - Messages that change nothing (questions, small talk) aren't stored by Continuum. Hermes keeps its own chat history in its `continuum` profile folder.

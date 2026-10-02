@@ -1,7 +1,7 @@
 """Set up the Hermes "continuum" profile from .env and the hermes/ folder.
 
 Usage: python scripts/setup_hermes.py
-Safe to re-run, e.g. after changing LLM_PROVIDER. Your default Hermes profile is not touched.
+Safe to re-run, e.g. after changing keys. Your default Hermes profile is not touched.
 Note: rewriting the profile's config.yaml drops its comments.
 """
 
@@ -29,15 +29,6 @@ def hermes_root() -> Path:
     if os.name == "nt":
         return Path(os.environ["LOCALAPPDATA"]) / "hermes"
     return Path.home() / ".hermes"
-
-
-def provider() -> tuple[dict[str, str], str, str]:
-    """Hermes model block, key env var name, key value."""
-    if settings.llm_provider == "deepseek":
-        model = {"provider": "deepseek", "default": settings.deepseek_model, "base_url": settings.deepseek_base_url}
-        return model, "DEEPSEEK_API_KEY", settings.deepseek_api_key.get_secret_value()
-    model = {"provider": "nebius", "default": settings.nebius_model, "base_url": settings.nebius_base_url}
-    return model, "NEBIUS_API_KEY", settings.nebius_api_key.get_secret_value()
 
 
 def telegram_env(config: Settings) -> dict[str, str]:
@@ -77,9 +68,10 @@ def set_env(path: Path, values: dict[str, str]) -> None:
 
 
 def main() -> None:
-    model, key_name, key = provider()
+    key = settings.nebius_api_key.get_secret_value()
     if not key:
-        sys.exit(f"{key_name} is empty in .env. Add it, then re-run.")
+        sys.exit("NEBIUS_API_KEY is empty in .env. Add it, then re-run.")
+    model = {"provider": "nebius", "default": settings.nebius_model, "base_url": settings.nebius_base_url}
     telegram = telegram_env(settings)
     hermes = shutil.which("hermes")
     if hermes is None:
@@ -101,7 +93,7 @@ def main() -> None:
     port = str(urlsplit(settings.hermes_api_url).port or 8642)
     set_env(
         profile_dir / ".env",
-        {key_name: key, "API_SERVER_ENABLED": "true", "API_SERVER_KEY": api_key, "API_SERVER_PORT": port, **telegram},
+        {"NEBIUS_API_KEY": key, "API_SERVER_ENABLED": "true", "API_SERVER_KEY": api_key, "API_SERVER_PORT": port, **telegram},
     )
     set_env(ROOT / ".env", {"HERMES_API_KEY": api_key})
 
