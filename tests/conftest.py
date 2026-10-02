@@ -9,11 +9,14 @@ import pytest
 from sqlalchemy import Engine
 from sqlmodel import Session
 
+from app import engine as eng
 from app.db import create_db_engine
 
 
 # Tuesday evening in the user's timezone: "tomorrow" = 2026-09-30, "Friday" = 2026-10-02.
 NOW = datetime(2026, 9, 29, 21, 0, tzinfo=ZoneInfo("Asia/Kuala_Lumpur"))
+# The demo's due date: Sarah's reply is "due today".
+FRIDAY = datetime(2026, 10, 2, 9, 0, tzinfo=ZoneInfo("Asia/Kuala_Lumpur"))
 
 
 class FakeLLM:
@@ -26,6 +29,12 @@ class FakeLLM:
     def complete(self, messages: list[dict[str, str]], json_mode: bool = False) -> str:
         self.calls.append(messages)
         return self.replies.pop(0)
+
+
+@pytest.fixture
+def on_friday(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Freeze the user's "now" at FRIDAY for code that reads today's date (attention, snooze)."""
+    monkeypatch.setattr(eng, "local_now", lambda: FRIDAY)
 
 
 @pytest.fixture

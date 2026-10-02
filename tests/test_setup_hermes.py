@@ -7,7 +7,8 @@ from pydantic import SecretStr
 from app.config import Settings
 from scripts.setup_hermes import telegram_env
 
-CONFIG = Path(__file__).parent.parent / "hermes" / "config.example.yaml"
+HERMES = Path(__file__).parent.parent / "hermes"
+CONFIG = HERMES / "config.example.yaml"
 
 
 def config(token: str = "", users: str = "") -> Settings:
@@ -22,6 +23,7 @@ def test_telegram_env_for_allowed_users() -> None:
     assert telegram_env(config("123:abc", "123, 456")) == {
         "TELEGRAM_BOT_TOKEN": "123:abc",
         "TELEGRAM_ALLOWED_USERS": "123,456",
+        "TELEGRAM_HOME_CHANNEL": "123",  # where the daily briefing goes
     }
 
 
@@ -34,5 +36,10 @@ def test_telegram_needs_numeric_user_ids(users: str) -> None:
 def test_every_platform_gets_continuum_tools_only() -> None:
     """A platform missing here would get Hermes' default tools, terminal included."""
     toolsets = yaml.safe_load(CONFIG.read_text(encoding="utf-8"))["platform_toolsets"]
-    assert {"api_server", "cli", "telegram"} <= set(toolsets)
+    assert {"api_server", "cli", "telegram", "cron"} <= set(toolsets)
     assert all(tools == ["continuum"] for tools in toolsets.values())
+
+
+def test_briefing_prompt_has_no_double_quotes() -> None:
+    """The README passes it as a command argument; Windows PowerShell 5.1 drops double quotes there."""
+    assert '"' not in (HERMES / "briefing_prompt.md").read_text(encoding="utf-8")

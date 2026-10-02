@@ -89,6 +89,20 @@ Chat with Continuum from your phone. Hermes runs the bot, so there's no extra se
 
 Only the user ids in `TELEGRAM_ALLOWED_USERS` get replies. On Telegram, Continuum has the same tools as the dashboard chat, nothing else. Telegram keeps one ongoing conversation; send `/new` to start fresh.
 
+### Daily briefing (optional, needs Telegram)
+
+Every morning at 8:00 in your `TIMEZONE`, Continuum sends what needs attention to Telegram. Reply to it to snooze, resolve or draft a follow-up. Create the job once:
+
+```bash
+hermes -p continuum cron create "0 8 * * *" "$(cat hermes/briefing_prompt.md)" --deliver telegram --name briefing
+```
+
+```powershell
+hermes -p continuum cron create "0 8 * * *" (Get-Content hermes\briefing_prompt.md -Raw) --deliver telegram --name briefing
+```
+
+The gateway (`hermes -p continuum gateway run`) must be running for it to fire. To try it now: `hermes -p continuum cron list` shows the job id, and `hermes -p continuum cron run <id>` sends it within a minute.
+
 ## Tests
 
 ```bash

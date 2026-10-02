@@ -1,5 +1,6 @@
 # Merged into the Hermes "continuum" profile by: python scripts/setup_hermes.py
 # `model` is replaced from LLM_PROVIDER in .env (nebius; deepseek only as a dev stand-in).
+# `timezone` is set from TIMEZONE in .env, so Hermes' clock and the briefing schedule match Continuum's.
 
 model:
   provider: nebius
@@ -10,11 +11,11 @@ mcp_servers:
   continuum:
     url: "http://127.0.0.1:8000/mcp/"
     tools:
-      include: [remember, list_open_loops, list_goals, inspect_loop, resolve_loop]
+      include: [remember, list_open_loops, needs_attention, list_goals, inspect_loop, resolve_loop, snooze_loop]
       prompts: false
       resources: false
 
-# Show our 5 tools to the model directly. Hermes' default "tool search" hides MCP tools behind
+# Show our tools to the model directly. Hermes' default "tool search" hides MCP tools behind
 # tool_search/tool_describe/tool_call, which cost ~3 extra model round-trips per reply.
 tools:
   tool_search:
@@ -26,6 +27,11 @@ platform_toolsets:
   api_server: [continuum]
   cli: [continuum]
   telegram: [continuum]
+  cron: [continuum]  # the daily briefing job
+
+# A delivered briefing joins the Telegram chat, so a reply like "snooze the second one" has context.
+cron:
+  mirror_delivery: true
 
 # Own gateway + API server for this profile, so your default Hermes profile stays untouched.
 # Hermes marks this as a temporary shim. If a Hermes update removes it, switch to the shared

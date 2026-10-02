@@ -51,7 +51,8 @@ def telegram_env(config: Settings) -> dict[str, str]:
             "TELEGRAM_ALLOWED_USERS must be your numeric Telegram user id (message @userinfobot to get it). "
             "Separate several with commas."
         )
-    return {"TELEGRAM_BOT_TOKEN": token, "TELEGRAM_ALLOWED_USERS": users}
+    # The daily briefing goes to the home channel: the first user's DM (a DM's chat id is the user id).
+    return {"TELEGRAM_BOT_TOKEN": token, "TELEGRAM_ALLOWED_USERS": users, "TELEGRAM_HOME_CHANNEL": users.split(",")[0]}
 
 
 def merge(base: dict, extra: dict) -> dict:
@@ -92,6 +93,7 @@ def main() -> None:
     config = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
     template = yaml.safe_load((ROOT / "hermes" / "config.example.yaml").read_text(encoding="utf-8"))
     template["model"] = model
+    template["timezone"] = settings.timezone  # Hermes' clock and cron schedules follow it
     config_path.write_text(yaml.safe_dump(merge(config, template), sort_keys=False), encoding="utf-8")
     shutil.copyfile(ROOT / "hermes" / "SOUL.md", profile_dir / "SOUL.md")
 

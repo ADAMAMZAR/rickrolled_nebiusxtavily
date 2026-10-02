@@ -114,6 +114,14 @@ Keep the briefing prompt in `hermes/briefing_prompt.md`:
 
 **Check in Hermes docs:** exact schedule syntax, the timezone the cron uses, and whether the cron platform needs MCP tools enabled (`hermes tools` → cron). Update this section with what works.
 
+What the Hermes 0.21 docs say (not yet run live):
+- Command: `hermes -p continuum cron create "0 8 * * *" "<prompt>" --deliver telegram --name briefing`. The README passes `hermes/briefing_prompt.md` as the prompt (bash `$(cat …)`, PowerShell `(Get-Content … -Raw)`). The prompt has no double quotes, because PowerShell 5.1 drops them in arguments; a test enforces it.
+- Timezone: top-level `timezone:` in the profile config. `setup_hermes.py` sets it from `TIMEZONE`, so Hermes' clock, cron and Continuum agree.
+- Tools: the cron agent gets `platform_toolsets.cron` (default: the full CLI toolset, no MCP). Set to `[continuum]`.
+- Delivery: `--deliver telegram` goes to `TELEGRAM_HOME_CHANNEL`; `setup_hermes.py` sets it to the first allowed user id (a DM's chat id).
+- Replies: by default a delivered brief isn't part of the Telegram chat, so "snooze the second one" lacks context. `cron.mirror_delivery: true` fixes that.
+- The gateway runs the scheduler (checks every 60 s); it must be running. `hermes -p continuum cron run <id>` fires a job on the next check.
+
 ---
 
 ## 8. Telegram
@@ -139,7 +147,7 @@ POST /api/loops/{id}/snooze       {until: "2026-10-05"}
 POST /api/loops/{id}/unsnooze
 ```
 
-`GET /api/loops` hides snoozed loops by default. `?include_snoozed=true` shows them.
+`GET /api/loops` hides snoozed loops by default. `?include_snoozed=true` shows them. A snooze date that isn't after today → 422 `invalid_request`.
 
 ---
 
@@ -176,9 +184,13 @@ POST /api/loops/{id}/unsnooze
 2. `needs_attention()` + tests.
    *Done 2026-10-02: the 4 rules in §5, `STALE_DAYS` setting. Tests use a fixed `today`, pass under any `TIMEZONE`. Not exposed yet (REST in step 3, MCP in step 4).*
 3. REST endpoints + UI section.
+   *Done 2026-10-02: §9 routes. UI: Needs attention section, Snooze menu (also in loop detail, plus Unsnooze), Show snoozed toggle, Draft with a Copy button. Draft needs Hermes to give a reply.*
 4. MCP tools → check in Hermes chat: "what's urgent?" / "snooze X till Monday".
+   *Code done 2026-10-02: `needs_attention`, `snooze_loop` (+ `list_open_loops(include_snoozed)`), in `tools.include`, SOUL.md rules for urgent / snooze / drafts. Offline MCP tests pass. **Live Hermes check pending.***
 5. **Telegram gate:** chatting with Continuum through Telegram works.
+   *Config done 2026-10-02 (§8). **Live check pending.***
 6. Cron briefing → trigger it by hand, check delivery. Then schedule it.
+   *Code done 2026-10-02: `hermes/briefing_prompt.md`, cron toolset, timezone, home channel, README command (§7). **Live check pending.***
 7. Run the §1 demo. Add a Phase 2 section to the README.
 
 ---

@@ -2,9 +2,11 @@
 
 import json
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 from fastapi.testclient import TestClient
 
 from app.main import create_app
@@ -12,6 +14,7 @@ from tests.conftest import FakeLLM
 from tests.test_process_message import DEMO, DEMO_RESULT, result
 
 HEADERS = {"Accept": "application/json, text/event-stream", "Content-Type": "application/json"}
+HERMES_CONFIG = Path(__file__).parent.parent / "hermes" / "config.example.yaml"
 
 
 class MCP:
@@ -53,9 +56,13 @@ def remember_demo(mcp: MCP, llm: FakeLLM) -> dict[str, Any]:
     return mcp.call("remember", text=DEMO)
 
 
-def test_lists_exactly_the_five_tools(mcp: MCP) -> None:
+def test_lists_exactly_the_tools_hermes_includes(mcp: MCP) -> None:
     names = {t["name"] for t in mcp.rpc("tools/list")["tools"]}
-    assert names == {"remember", "list_open_loops", "list_goals", "inspect_loop", "resolve_loop"}
+    assert names == {
+        "remember", "list_open_loops", "needs_attention", "list_goals", "inspect_loop", "resolve_loop", "snooze_loop",
+    }
+    include = yaml.safe_load(HERMES_CONFIG.read_text(encoding="utf-8"))["mcp_servers"]["continuum"]["tools"]["include"]
+    assert set(include) == names  # a tool missing from tools.include is invisible to Hermes
 
 
 def test_remember_then_what_am_i_waiting_on(mcp: MCP, llm: FakeLLM) -> None:
@@ -90,6 +97,31 @@ def test_goals_inspect_and_resolve(mcp: MCP, llm: FakeLLM) -> None:
     assert mcp.call("resolve_loop", loop_id=loop_id) == {"resolved": "Wait for Sarah's response"}
     remaining = mcp.call("list_open_loops")["groups"][0]["loops"]
     assert [l["title"] for l in remaining] == ["Finish portfolio"]
+
+
+@pytest.mark.usefixtures("on_friday")
+def test_needs_attention_then_snooze(mcp: MCP, llm: FakeLLM) -> None:
+    saved = remember_demo(mcp, llm)
+    urgent = mcp.call("needs_attention")
+    assert urgent["today"] == "Fri 2026-10-02"
+    assert [(i["title"], i["reason"]) for i in urgent["items"]] == [("Wait for Sarah's response", "due today")]
+
+    loop_id = saved["new_loops"][0]["id"]
+    snoozed = mcp.call("snooze_loop", loop_id=loop_id, until="2026-10-05")
+    assert snoozed == {"snoozed": "Wait for Sarah's response", "until": "Mon 2026-10-05"}
+    assert mcp.call("needs_attention")["items"] == []
+
+    visible = mcp.call("list_open_loops")["groups"][0]["loops"]
+    assert [l["title"] for l in visible] == ["Finish portfolio"]
+    everything = mcp.call("list_open_loops", include_snoozed=True)["groups"][0]["loops"]
+    assert everything[0]["snoozed_until"] == "Mon 2026-10-05"
+
+
+@pytest.mark.usefixtures("on_friday")
+def test_snooze_errors_are_readable(mcp: MCP, llm: FakeLLM) -> None:
+    loop_id = remember_demo(mcp, llm)["new_loops"][0]["id"]
+    assert "must be a date" in mcp.call("snooze_loop", loop_id=loop_id, until="monday")["error"]
+    assert "after today" in mcp.call("snooze_loop", loop_id=loop_id, until="2026-10-02")["error"]
 
 
 def test_bad_ids_give_readable_errors(mcp: MCP) -> None:
