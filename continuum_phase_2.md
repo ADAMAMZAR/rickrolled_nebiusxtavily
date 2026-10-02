@@ -122,6 +122,13 @@ Keep the briefing prompt in `hermes/briefing_prompt.md`:
 - Telegram and the dashboard share the same MCP tools, so they always show the same state.
 - Put setup steps in the README. Token goes in Hermes config/env, **never** in this repo.
 
+What works (Hermes 0.21 docs):
+- The user sets `TELEGRAM_BOT_TOKEN` and `TELEGRAM_ALLOWED_USERS` (numeric ids, from @userinfobot) in Continuum's gitignored `.env`. `setup_hermes.py` validates them and copies them into the profile `.env`. Unlisted users are denied by default.
+- `gateway.standalone: true` runs the profile's own adapters, so `hermes -p continuum gateway run` serves the API server and Telegram together. Polling: no public URL.
+- **`platform_toolsets.telegram: [continuum]` is required.** Without it, Telegram gets Hermes' default toolset (terminal, files, web) and no MCP tools. A test checks every platform in `hermes/config.example.yaml` is `[continuum]` only.
+- One bot token can't be polled by two running gateways: use a bot just for Continuum.
+- Telegram keeps one long session (until `/new`), so `SOUL.md` tells Hermes to call the tools again instead of answering from earlier messages.
+
 ---
 
 ## 9. REST API (added)

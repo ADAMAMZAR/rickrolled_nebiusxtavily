@@ -20,10 +20,12 @@ tools:
   tool_search:
     enabled: "off"
 
-# Continuum's tools only. No terminal, files, web or browser.
+# Continuum's tools only, on every platform this profile serves. No terminal, files, web or browser.
+# A platform without an entry gets Hermes' full default toolset (terminal included) and no Continuum tools.
 platform_toolsets:
   api_server: [continuum]
   cli: [continuum]
+  telegram: [continuum]
 
 # Own gateway + API server for this profile, so your default Hermes profile stays untouched.
 # Hermes marks this as a temporary shim. If a Hermes update removes it, switch to the shared

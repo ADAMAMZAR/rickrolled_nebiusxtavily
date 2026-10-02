@@ -77,6 +77,18 @@ On Windows the Hermes installer puts `hermes.exe` in `%LOCALAPPDATA%\hermes\bin`
 
 To try the UI without an LLM, fill a scratch database with sample data: set `DATABASE_URL=sqlite:///./data/seed.db`, then run `python scripts/seed_demo.py` and start uvicorn with the same `DATABASE_URL`.
 
+### Telegram (optional)
+
+Chat with Continuum from your phone. Hermes runs the bot, so there's no extra server and no public URL.
+
+1. In Telegram, message **@BotFather**, send `/newbot`, and copy the token. Make a new bot just for Continuum: one token can't serve two running gateways.
+2. Message **@userinfobot** to get your numeric user id.
+3. In `.env`, set `TELEGRAM_BOT_TOKEN=<token>` and `TELEGRAM_ALLOWED_USERS=<your id>`.
+4. Re-run `python scripts/setup_hermes.py`, then restart `hermes -p continuum gateway run`.
+5. Message your bot, e.g. *"What am I waiting on?"*
+
+Only the user ids in `TELEGRAM_ALLOWED_USERS` get replies. On Telegram, Continuum has the same tools as the dashboard chat, nothing else. Telegram keeps one ongoing conversation; send `/new` to start fresh.
+
 ## Tests
 
 ```bash
@@ -88,7 +100,7 @@ The live suite runs the acceptance inputs against real Nemotron, e.g. "Alex said
 
 ## Privacy
 
-- Everything stays local in `data/continuum.db` (SQLite). The only data that leaves your machine is what goes to the LLM provider to do its job.
+- Everything stays local in `data/continuum.db` (SQLite). The only data that leaves your machine is what goes to the LLM provider to do its job, plus your Telegram messages if you turn Telegram on (they pass through Telegram's servers).
 - Every loop links to the message it came from, and you can delete any loop.
 - Messages that change nothing (questions, small talk) aren't stored by Continuum. Hermes keeps its own chat history in its `continuum` profile folder.
 - Logs record event names, counts and ids (`extraction_ok`, `loop_created`, `loop_resolved`, `extraction_failed`), never message content or API keys.
