@@ -12,7 +12,7 @@ from typing import Any
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
-from sqlmodel import Session, col, func, select
+from sqlmodel import Session, col, func, or_, select
 
 from app.config import settings
 from app.db import Goal, GoalStatus, LoopKind, LoopStatus, OpenLoop, Source, utcnow
@@ -22,6 +22,10 @@ log = logging.getLogger("continuum.engine")
 
 
 class NotFound(Exception):
+    pass
+
+
+class InvalidRequest(Exception):
     pass
 
 
@@ -45,6 +49,12 @@ class LoopDetail:
     loop: OpenLoop
     goal: Goal | None
     source: Source
+
+
+@dataclass
+class Attention:
+    loop: OpenLoop
+    reason: str  # "overdue by 2 days", "due today", "waiting 5 days, no reply", ...
 
 
 # --- process a message ---
@@ -243,17 +253,53 @@ def list_loops(
     session: Session,
     status: LoopStatus | None = LoopStatus.open,
     goal_id: UUID | None = None,
+    include_snoozed: bool = True,
+    today: date | None = None,
 ) -> list[OpenLoop]:
-    """Loops sorted by due date (undated last), then oldest first. status=None means all."""
+    """Loops sorted by due date (undated last), then oldest first. status=None means all.
+    include_snoozed=False hides loops snoozed past `today` (default: the user's today).
+    Extraction keeps snoozed loops, so chat can still update or resolve them."""
     query = select(OpenLoop)
     if status is not None:
         query = query.where(OpenLoop.status == status)
     if goal_id is not None:
         query = query.where(OpenLoop.goal_id == goal_id)
+    if not include_snoozed:
+        today = today or local_now().date()
+        query = query.where(or_(col(OpenLoop.snoozed_until).is_(None), col(OpenLoop.snoozed_until) <= today))
     query = query.order_by(
         col(OpenLoop.due).is_(None), col(OpenLoop.due), col(OpenLoop.created_at)
     )
     return list(session.exec(query).all())
+
+
+def needs_attention(session: Session, today: date, stale_days: int | None = None) -> list[Attention]:
+    """Open, unsnoozed loops that need the user now. Plain rules, no LLM. `today` is the user's local date.
+
+    Order: overdue (most overdue first), due today/tomorrow, then undated loops with no update
+    for at least `stale_days` days (longest first).
+    """
+    stale_days = settings.stale_days if stale_days is None else stale_days
+    tz = ZoneInfo(settings.timezone)
+    found: list[tuple[int, Any, Attention]] = []  # (rule, sort key, item)
+    for loop in list_loops(session, include_snoozed=False, today=today):
+        if loop.due is not None:
+            late = (today - loop.due).days
+            if late > 0:
+                found.append((0, loop.due, Attention(loop, f"overdue by {_days(late)}")))
+            elif late >= -1:
+                found.append((1, loop.due, Attention(loop, "due today" if late == 0 else "due tomorrow")))
+            continue
+        idle = (today - loop.updated_at.astimezone(tz).date()).days
+        if idle >= stale_days:
+            reason = f"waiting {_days(idle)}, no reply" if loop.kind == LoopKind.waiting else f"no update in {_days(idle)}"
+            found.append((2, loop.updated_at, Attention(loop, reason)))
+    found.sort(key=lambda f: (f[0], f[1]))  # stable: ties keep list_loops order
+    return [item for _, _, item in found]
+
+
+def _days(n: int) -> str:
+    return "1 day" if n == 1 else f"{n} days"
 
 
 def get_loop(session: Session, loop_id: UUID) -> LoopDetail:
@@ -293,6 +339,27 @@ def reopen_loop(session: Session, loop_id: UUID) -> OpenLoop:
     session.commit()
     session.refresh(loop)
     log.info("loop_reopened id=%s", loop_id)
+    return loop
+
+
+def snooze_loop(session: Session, loop_id: UUID, until: date, today: date | None = None) -> OpenLoop:
+    """Hide a loop from lists and attention until `until`. It shows again on that date."""
+    if until <= (today or local_now().date()):
+        raise InvalidRequest("Snooze date must be after today.")
+    loop = _get(session, loop_id)
+    loop.snoozed_until, loop.updated_at = until, utcnow()
+    session.commit()
+    session.refresh(loop)
+    log.info("loop_snoozed id=%s", loop_id)
+    return loop
+
+
+def unsnooze_loop(session: Session, loop_id: UUID) -> OpenLoop:
+    loop = _get(session, loop_id)
+    loop.snoozed_until, loop.updated_at = None, utcnow()
+    session.commit()
+    session.refresh(loop)
+    log.info("loop_unsnoozed id=%s", loop_id)
     return loop
 
 
