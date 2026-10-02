@@ -180,17 +180,17 @@ POST /api/loops/{id}/unsnooze
 ## 12. Build Order
 
 1. `snoozed_until` + tests.
-   *Done 2026-10-02: column, `snooze_loop`/`unsnooze_loop`, `list_loops(include_snoozed=False)`. Delete old `.db` files (no migration).*
+   *Done 2026-10-02: column, `snooze_loop`/`unsnooze_loop`, `list_loops(include_snoozed=False)`. Delete old `.db` files (no migration). Startup stops with a clear message if the `.db` is outdated.*
 2. `needs_attention()` + tests.
    *Done 2026-10-02: the 4 rules in §5, `STALE_DAYS` setting. Tests use a fixed `today`, pass under any `TIMEZONE`. Not exposed yet (REST in step 3, MCP in step 4).*
 3. REST endpoints + UI section.
    *Done 2026-10-02: §9 routes. UI: Needs attention section, Snooze menu (also in loop detail, plus Unsnooze), Show snoozed toggle, Draft with a Copy button. Draft needs Hermes to give a reply.*
 4. MCP tools → check in Hermes chat: "what's urgent?" / "snooze X till Monday".
-   *Code done 2026-10-02: `needs_attention`, `snooze_loop` (+ `list_open_loops(include_snoozed)`), in `tools.include`, SOUL.md rules for urgent / snooze / drafts. Offline MCP tests pass. **Live Hermes check pending.***
+   *Code done 2026-10-02: `needs_attention`, `snooze_loop` (+ `list_open_loops(include_snoozed)`), in `tools.include`, SOUL.md rules for urgent / snooze / drafts. Offline MCP tests pass. Live check done 2026-10-02 through real Hermes + Nemotron: capture → `remember`, "what's urgent?" → `needs_attention`, "snooze the portfolio till Monday" → `snooze_loop` (Mon Oct 5), "draft a follow-up to Sarah" → `inspect_loop` and nothing saved, "Sarah got back to me!" → `resolve_loop`. It first failed because the Hermes profile was still Phase 1's: re-run `scripts/setup_hermes.py` after pulling tool or SOUL.md changes.*
 5. **Telegram gate:** chatting with Continuum through Telegram works.
-   *Config done 2026-10-02 (§8). **Live check pending.***
+   *Config done 2026-10-02 (§8). Live check done 2026-10-02: capture → `remember`, urgent → `needs_attention`, snooze → `snooze_loop`, draft → `inspect_loop` with no writes. The first message was blocked because `TELEGRAM_ALLOWED_USERS` held the bot's own id (the start of the token); setup now rejects that.*
 6. Cron briefing → trigger it by hand, check delivery. Then schedule it.
-   *Code done 2026-10-02: `hermes/briefing_prompt.md`, cron toolset, timezone, home channel, README command (§7). **Live check pending.***
+   *Code done 2026-10-02: `hermes/briefing_prompt.md`, cron toolset, timezone, home channel, README command (§7). Triggered by hand 2026-10-02, both delivered to Telegram: empty day → "Nothing urgent today.", 2 items → the §7 list. **Scheduled 08:00 run not seen yet.***
 7. Run the §1 demo. Add a Phase 2 section to the README.
 
 ---
@@ -198,9 +198,9 @@ POST /api/loops/{id}/unsnooze
 ## 13. Done Checklist
 
 - [ ] Briefing arrives on Telegram at the scheduled time, with correct items
-- [ ] Empty day → "Nothing urgent today."
+- [x] Empty day → "Nothing urgent today."
 - [ ] Snooze via Telegram and dashboard; snoozed loops come back after the date
 - [ ] "Draft a follow-up" works in both, and nothing is sent automatically
-- [ ] New loops can be captured from Telegram
-- [ ] `pytest` passes offline
-- [ ] No bot token or chat id in git
+- [x] New loops can be captured from Telegram
+- [x] `pytest` passes offline
+- [x] No bot token or chat id in git

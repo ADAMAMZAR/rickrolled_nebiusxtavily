@@ -79,7 +79,7 @@ copy .env.example .env                              # then set NEBIUS_API_KEY
 hermes -p continuum gateway run                     # terminal 2
 ```
 
-Open **http://127.0.0.1:8000**. Re-run `setup_hermes.py` after changing keys or the model.
+Open **http://127.0.0.1:8000**. Re-run `setup_hermes.py` after changing keys or the model, and after updating Continuum (it copies new tools and instructions into Hermes).
 
 `requirements.txt` pins the tested versions; `-e .` installs Continuum itself so the scripts can import it.
 
@@ -92,7 +92,7 @@ To try the UI without an LLM, fill a scratch database with sample data: set `DAT
 Chat with Continuum from your phone. Hermes runs the bot, so there's no extra server and no public URL.
 
 1. In Telegram, message **@BotFather**, send `/newbot`, and copy the token. Make a new bot just for Continuum: one token can't serve two running gateways.
-2. Message **@userinfobot** to get your numeric user id.
+2. Message **@userinfobot** to get your numeric user id. (Not the number at the start of the bot token: that's the bot's id.)
 3. In `.env`, set `TELEGRAM_BOT_TOKEN=<token>` and `TELEGRAM_ALLOWED_USERS=<your id>`.
 4. Re-run `python scripts/setup_hermes.py`, then restart `hermes -p continuum gateway run`.
 5. Message your bot, e.g. *"What am I waiting on?"*
@@ -140,7 +140,7 @@ The live suite runs the acceptance inputs against real Nemotron, e.g. "Alex said
 - Goals are marked done from the dashboard only, not by chat.
 - Chat replies take a few seconds (one Nemotron tool call plus the reply, ~3–9 s in testing).
 - Telegram and the daily briefing only work while Hermes' gateway is running on your machine.
-- Telegram, the daily briefing and the `needs_attention` / `snooze_loop` chat tools are set up from Hermes' docs and tested offline, but not yet run end to end against a live Hermes.
+- The daily briefing has been triggered by hand and delivered to Telegram, but its scheduled 8:00 run hasn't been seen yet.
 
 ## License
 

@@ -42,6 +42,12 @@ def telegram_env(config: Settings) -> dict[str, str]:
             "TELEGRAM_ALLOWED_USERS must be your numeric Telegram user id (message @userinfobot to get it). "
             "Separate several with commas."
         )
+    bot_id = token.split(":", 1)[0]
+    if bot_id in users.split(","):
+        sys.exit(
+            f"TELEGRAM_ALLOWED_USERS has {bot_id}, your bot's own id (the start of the token). "
+            "Use your own numeric id from @userinfobot."
+        )
     # The daily briefing goes to the home channel: the first user's DM (a DM's chat id is the user id).
     return {"TELEGRAM_BOT_TOKEN": token, "TELEGRAM_ALLOWED_USERS": users, "TELEGRAM_HOME_CHANNEL": users.split(",")[0]}
 

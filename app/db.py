@@ -5,7 +5,7 @@ from enum import StrEnum
 from pathlib import Path
 from uuid import UUID, uuid4
 
-from sqlalchemy import Engine
+from sqlalchemy import Engine, inspect
 from sqlmodel import Field, SQLModel, create_engine
 
 
@@ -63,9 +63,19 @@ class OpenLoop(SQLModel, table=True):
 
 
 def create_db_engine(url: str) -> Engine:
-    """Create the engine and any missing tables."""
+    """Create the engine and any missing tables. There are no migrations, so an older file fails here."""
     if url.startswith("sqlite:///"):
         Path(url.removeprefix("sqlite:///")).parent.mkdir(parents=True, exist_ok=True)
     engine = create_engine(url, connect_args={"check_same_thread": False})
     SQLModel.metadata.create_all(engine)
+    db = inspect(engine)
+    for table in SQLModel.metadata.sorted_tables:
+        existing = {c["name"] for c in db.get_columns(table.name)}
+        missing = [c.name for c in table.columns if c.name not in existing]
+        if missing:
+            engine.dispose()
+            raise RuntimeError(
+                f"{engine.url.database} is from an older version of Continuum (no column {table.name}.{missing[0]}). "
+                "Delete it and restart; a new one is created."
+            )
     return engine

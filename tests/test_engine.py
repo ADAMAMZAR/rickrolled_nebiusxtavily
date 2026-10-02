@@ -1,4 +1,6 @@
+import sqlite3
 from datetime import date
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
@@ -128,3 +130,13 @@ def test_data_survives_restart(db_url: str) -> None:
         assert detail.loop.kind == LoopKind.waiting
         assert detail.loop.created_at.tzinfo is not None
     second.dispose()
+
+
+def test_outdated_database_fails_with_clear_message(tmp_path: Path) -> None:
+    """create_all doesn't add new columns, so a pre-snooze DB used to give a bare HTTP 500 on every list."""
+    path = tmp_path / "old.db"
+    old = sqlite3.connect(path)
+    old.execute("CREATE TABLE openloop (id TEXT PRIMARY KEY, title TEXT)")
+    old.close()
+    with pytest.raises(RuntimeError, match=r"old\.db .*openloop\.\w+.*Delete it"):
+        create_db_engine(f"sqlite:///{path}")

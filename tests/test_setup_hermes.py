@@ -20,8 +20,8 @@ def test_telegram_is_optional() -> None:
 
 
 def test_telegram_env_for_allowed_users() -> None:
-    assert telegram_env(config("123:abc", "123, 456")) == {
-        "TELEGRAM_BOT_TOKEN": "123:abc",
+    assert telegram_env(config("999:abc", "123, 456")) == {
+        "TELEGRAM_BOT_TOKEN": "999:abc",
         "TELEGRAM_ALLOWED_USERS": "123,456",
         "TELEGRAM_HOME_CHANNEL": "123",  # where the daily briefing goes
     }
@@ -31,6 +31,12 @@ def test_telegram_env_for_allowed_users() -> None:
 def test_telegram_needs_numeric_user_ids(users: str) -> None:
     with pytest.raises(SystemExit, match="numeric Telegram user id"):
         telegram_env(config("123:abc", users))
+
+
+def test_telegram_rejects_the_bots_own_id() -> None:
+    """The number before ':' in the token is the bot's id. Allowing it lets nobody in."""
+    with pytest.raises(SystemExit, match="bot's own id"):
+        telegram_env(config("123:abc", "456,123"))
 
 
 def test_every_platform_gets_continuum_tools_only() -> None:
