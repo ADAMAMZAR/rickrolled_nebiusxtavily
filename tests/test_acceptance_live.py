@@ -1,4 +1,4 @@
-"""Spec §11 acceptance inputs against the real LLM (LLM_PROVIDER). Run: pytest -m live -k acceptance"""
+"""Spec §11 acceptance inputs against real Nemotron on Nebius. Run: pytest -m live -k acceptance"""
 
 from datetime import date
 
@@ -11,10 +11,9 @@ from app.db import LoopKind, LoopStatus
 from app.llm import LLMClient
 from tests.conftest import NOW
 
-_key = settings.deepseek_api_key if settings.llm_provider == "deepseek" else settings.nebius_api_key
 pytestmark = [
     pytest.mark.live,
-    pytest.mark.skipif(not _key.get_secret_value(), reason="API key for LLM_PROVIDER not set"),
+    pytest.mark.skipif(not settings.nebius_api_key.get_secret_value(), reason="NEBIUS_API_KEY not set"),
 ]
 
 TOMORROW, FRIDAY = date(2026, 9, 30), date(2026, 10, 2)

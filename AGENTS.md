@@ -19,7 +19,7 @@ Start a phase only after every box in the previous phase's Done Checklist is che
 - `app/engine.py` owns all domain logic. FastAPI routes and MCP tools are thin wrappers around it.
 - Hermes = chat brain. It calls Continuum through MCP tools at `/mcp`. The UI chat proxies to the Hermes API server.
 - All LLM prompts live in `app/extraction.py`. All LLM calls go through `app/llm.py`.
-- `LLM_PROVIDER=deepseek` is a **dev stand-in only**, used while there's no Nebius key. The final demo and submission must use `nebius` (Nemotron): re-run `pytest -m live` with it before submitting. Keep prompts provider-neutral.
+- The only LLM is NVIDIA Nemotron on Nebius Token Factory (`NEBIUS_*` in `.env`), for both extraction and Hermes. Re-run `pytest -m live` before submitting.
 - Hermes runs in its own `continuum` profile (`%LOCALAPPDATA%\hermes\profiles\continuum`), built from `hermes/` by `scripts/setup_hermes.py`. Never edit the user's default Hermes profile. New MCP tools must be added to `tools.include` in `hermes/config.example.yaml`, then re-run the setup script.
 - MCP SDK is 2.x: `from mcp.server.mcpserver import MCPServer` (not `FastMCP`). Raise `ToolError` for expected failures; other exceptions reach the model only as "Error executing tool".
 - Tool docstrings (`app/mcp_tools.py`) and `hermes/SOUL.md` steer Hermes' tool choice. After editing either, re-run the setup script.
@@ -30,7 +30,7 @@ Start a phase only after every box in the previous phase's Done Checklist is che
 ```bash
 python -m venv .venv && .venv\Scripts\activate   # Windows (source .venv/bin/activate elsewhere)
 pip install -r requirements.txt -e .  # pinned, tested versions + the app itself (scripts import `app`)
-python scripts/setup_hermes.py    # once, and after changing LLM_PROVIDER or keys
+python scripts/setup_hermes.py    # once, and after changing keys or the model
 uvicorn app.main:app --reload     # Continuum on :8000 (MCP at /mcp/)
 hermes -p continuum gateway run   # Hermes API server on :8642
 pytest                            # offline, LLM mocked

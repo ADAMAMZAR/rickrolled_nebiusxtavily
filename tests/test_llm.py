@@ -27,19 +27,9 @@ def fake_client(content: str | None, **overrides: Any) -> tuple[LLMClient, FakeC
     return LLMClient(config, client=client), completions
 
 
-def test_missing_key_names_the_right_env_var() -> None:
+def test_missing_key_names_the_env_var() -> None:
     with pytest.raises(LLMError, match="NEBIUS_API_KEY"):
         LLMClient(Settings(_env_file=None, nebius_api_key=SecretStr("")))
-    with pytest.raises(LLMError, match="DEEPSEEK_API_KEY"):
-        LLMClient(Settings(_env_file=None, llm_provider="deepseek", deepseek_api_key=SecretStr("")))
-
-
-def test_provider_picks_its_model() -> None:
-    nebius, _ = fake_client("x")
-    assert (nebius.provider, nebius.model) == ("Nebius", "test-model")
-
-    deepseek, _ = fake_client("x", llm_provider="deepseek", deepseek_model="ds-model")
-    assert (deepseek.provider, deepseek.model) == ("DeepSeek", "ds-model")
 
 
 def test_complete_sends_model_and_json_mode() -> None:
@@ -60,15 +50,10 @@ def test_empty_reply_is_an_error() -> None:
         llm.complete([{"role": "user", "content": "hi"}])
 
 
-def _active_key() -> str:
-    key = settings.deepseek_api_key if settings.llm_provider == "deepseek" else settings.nebius_api_key
-    return key.get_secret_value()
-
-
 @pytest.mark.live
-@pytest.mark.skipif(not _active_key(), reason="API key for LLM_PROVIDER not set")
+@pytest.mark.skipif(not settings.nebius_api_key.get_secret_value(), reason="NEBIUS_API_KEY not set")
 def test_live_llm_call() -> None:
-    """Step 2 gate: a real call to the configured provider, plain and JSON mode."""
+    """Step 2 gate: a real Nemotron call on Nebius, plain and JSON mode."""
     llm = LLMClient(settings)
 
     reply = llm.complete([{"role": "user", "content": "Reply with the single word: pong"}])

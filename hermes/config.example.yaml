@@ -1,5 +1,5 @@
 # Merged into the Hermes "continuum" profile by: python scripts/setup_hermes.py
-# `model` is replaced from LLM_PROVIDER in .env (nebius; deepseek only as a dev stand-in).
+# `model` is filled in from NEBIUS_MODEL / NEBIUS_BASE_URL in .env.
 # `timezone` is set from TIMEZONE in .env, so Hermes' clock and the briefing schedule match Continuum's.
 
 model:
