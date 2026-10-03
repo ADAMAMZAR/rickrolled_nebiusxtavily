@@ -11,7 +11,8 @@ mcp_servers:
   continuum:
     url: "http://127.0.0.1:8000/mcp/"
     tools:
-      include: [remember, list_open_loops, needs_attention, list_goals, inspect_loop, resolve_loop, snooze_loop]
+      include: [remember, list_open_loops, needs_attention, list_goals, inspect_loop, resolve_loop, snooze_loop,
+                list_pending_actions, approve_action, reject_action]
       prompts: false
       resources: false
 

@@ -40,7 +40,7 @@ flowchart LR
 ```
 
 - **Continuum** (one Python process): FastAPI serves the dashboard, a REST API, and an MCP server at `/mcp/`. The continuity engine (`app/engine.py`) owns extraction, goal linking, dedup, the attention rules and storage.
-- **Hermes Agent** (second process) is the chat brain, for the dashboard chat, Telegram and the daily briefing. It decides when to save (`remember`) and when to answer from memory (`list_open_loops`, `needs_attention`, `list_goals`, `inspect_loop`, `resolve_loop`, `snooze_loop`). It runs in its own `continuum` profile, so your default Hermes setup is untouched. Its built-in terminal, file, web, browser and memory tools are off on every platform. It only has Continuum's tools.
+- **Hermes Agent** (second process) is the chat brain, for the dashboard chat, Telegram and the daily briefing. It decides when to save (`remember`) and when to answer from memory (`list_open_loops`, `needs_attention`, `list_goals`, `inspect_loop`, `resolve_loop`, `snooze_loop`). Proposals wait for your yes (`list_pending_actions`, `approve_action`, `reject_action`). It runs in its own `continuum` profile, so your default Hermes setup is untouched. Its built-in terminal, file, web, browser and memory tools are off on every platform. It only has Continuum's tools.
 
 ### Why Hermes
 
@@ -81,6 +81,8 @@ hermes -p continuum gateway run                     # terminal 2
 
 Open **http://127.0.0.1:8000**. Re-run `setup_hermes.py` after changing keys or the model, and after updating Continuum (it copies new tools and instructions into Hermes).
 
+Optional: `TAVILY_API_KEY` in `.env` for web watch and lookup (free key at tavily.com).
+
 `requirements.txt` pins the tested versions; `-e .` installs Continuum itself so the scripts can import it.
 
 On Windows the Hermes installer puts `hermes.exe` in `%LOCALAPPDATA%\hermes\bin`. If `hermes` isn't found, add that folder to your PATH.
@@ -117,7 +119,7 @@ The gateway (`hermes -p continuum gateway run`) must be running for it to fire. 
 
 ```bash
 pytest            # offline: LLM and Hermes are mocked
-pytest -m live    # real Nemotron + Hermes (needs keys and both servers running)
+pytest -m live    # real Nemotron + Hermes + Tavily (needs keys and both servers running)
 ```
 
 The live suite runs the acceptance inputs against real Nemotron, e.g. "Alex said he'll send me the dataset tomorrow" (a waiting loop due tomorrow), "The weather was nice today" (nothing saved), the same message twice (one loop), and "Alex sent the dataset" (loop resolved).
@@ -140,7 +142,7 @@ The live suite runs the acceptance inputs against real Nemotron, e.g. "Alex said
 - Goals are marked done from the dashboard only, not by chat.
 - Chat replies take a few seconds (one Nemotron tool call plus the reply, ~3–9 s in testing).
 - Telegram and the daily briefing only work while Hermes' gateway is running on your machine.
-- The daily briefing has been triggered by hand and delivered to Telegram, but its scheduled 8:00 run hasn't been seen yet.
+- The daily briefing only fires if the gateway is running and the PC is awake at 8:00. A missed run is skipped, not sent late.
 
 ## License
 

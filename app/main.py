@@ -17,7 +17,7 @@ from starlette.exceptions import HTTPException
 
 from app import engine as eng
 from app.config import settings
-from app.db import Goal, LoopStatus, OpenLoop, create_db_engine
+from app.db import ActionStatus, Activity, Goal, LoopStatus, OpenLoop, PendingAction, create_db_engine
 from app.extraction import Completer
 from app.hermes import HermesClient, HermesError, HermesReply
 from app.llm import LLMClient
@@ -61,6 +61,14 @@ def loop_out(session: Session, loop: OpenLoop) -> dict[str, Any]:
         "goal_title": goal.title if goal else None,
         "goal_status": goal.status.value if goal else None,
     }
+
+
+def activity_out(a: Activity) -> dict[str, Any]:
+    return {**a.model_dump(mode="json", exclude={"undo"}), "can_undo": a.undo is not None}
+
+
+def action_out(session: Session, a: PendingAction) -> dict[str, Any]:
+    return {**a.model_dump(mode="json"), "summary": eng.describe_action(session, a)}
 
 
 def create_app(
@@ -167,6 +175,30 @@ def create_app(
     def delete(loop_id: UUID, session: Session = Depends(get_session)) -> Response:
         eng.delete_loop(session, loop_id)
         return Response(status_code=204)
+
+    @app.get("/api/activity")
+    def activity(loop_id: UUID | None = None, session: Session = Depends(get_session)) -> list[dict[str, Any]]:
+        return [activity_out(a) for a in eng.list_activity(session, loop_id)]
+
+    @app.post("/api/activity/{activity_id}/undo")
+    def undo(activity_id: UUID, session: Session = Depends(get_session)) -> dict[str, Any]:
+        return loop_out(session, eng.undo_activity(session, activity_id))
+
+    @app.get("/api/actions")
+    def actions(
+        status: Literal["proposed", "done", "rejected", "failed", "all"] = "proposed",
+        session: Session = Depends(get_session),
+    ) -> list[dict[str, Any]]:
+        found = eng.list_actions(session, None if status == "all" else ActionStatus(status))
+        return [action_out(session, a) for a in found]
+
+    @app.post("/api/actions/{action_id}/approve")
+    def approve(action_id: UUID, session: Session = Depends(get_session)) -> dict[str, Any]:
+        return action_out(session, eng.approve_action(session, action_id))
+
+    @app.post("/api/actions/{action_id}/reject")
+    def reject(action_id: UUID, session: Session = Depends(get_session)) -> dict[str, Any]:
+        return action_out(session, eng.reject_action(session, action_id))
 
     app.mount("/", StaticFiles(directory=STATIC, html=True), name="ui")
     return app

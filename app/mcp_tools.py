@@ -15,7 +15,7 @@ from sqlalchemy import Engine
 from sqlmodel import Session
 
 from app import engine as eng
-from app.db import Goal, OpenLoop
+from app.db import ActivityBy, Goal, OpenLoop
 from app.extraction import Completer, ExtractionError
 from app.llm import LLMError
 
@@ -87,7 +87,7 @@ def build_mcp(get_db: Callable[[], Engine], get_llm: Callable[[], Completer]) ->
         except ValueError as e:
             raise ToolError(f"`until` must be a date like 2026-10-05, not {until!r}.") from e
         with session() as s:
-            loop = eng.snooze_loop(s, _uuid(loop_id), day)
+            loop = eng.snooze_loop(s, _uuid(loop_id), day, by=ActivityBy.chat)
             return {"snoozed": loop.title, "until": f"{day:%a %Y-%m-%d}"}
 
     @mcp.tool()
@@ -123,16 +123,38 @@ def build_mcp(get_db: Callable[[], Engine], get_llm: Callable[[], Completer]) ->
     def resolve_loop(loop_id: str) -> dict[str, Any]:
         """Mark one open loop as done. Get the id from list_open_loops."""
         with session() as s:
-            return {"resolved": eng.resolve_loop(s, _uuid(loop_id)).title}
+            return {"resolved": eng.resolve_loop(s, _uuid(loop_id), by=ActivityBy.chat).title}
+
+    @mcp.tool()
+    def list_pending_actions() -> dict[str, Any]:
+        """Things Continuum proposed that wait for the user's yes or no, e.g. "Resolve X? Found on the web".
+        Use it to find the one the user is answering before approve_action or reject_action."""
+        with session() as s:
+            return {"actions": [{"id": str(a.id), "summary": eng.describe_action(s, a)} for a in eng.list_actions(s)]}
+
+    @mcp.tool()
+    def approve_action(action_id: str) -> dict[str, Any]:
+        """Do one proposed action. Only after the user clearly said yes to that specific action.
+        Get the id from list_pending_actions."""
+        with session() as s:
+            action = eng.approve_action(s, _uuid(action_id, "action", "list_pending_actions"))
+            return {"done": eng.describe_action(s, action)}
+
+    @mcp.tool()
+    def reject_action(action_id: str) -> dict[str, Any]:
+        """Drop one proposed action the user said no to. Get the id from list_pending_actions."""
+        with session() as s:
+            action = eng.reject_action(s, _uuid(action_id, "action", "list_pending_actions"))
+            return {"rejected": eng.describe_action(s, action)}
 
     return mcp
 
 
-def _uuid(loop_id: str) -> UUID:
+def _uuid(value: str, what: str = "loop", where: str = "list_open_loops") -> UUID:
     try:
-        return UUID(loop_id)
+        return UUID(value)
     except ValueError as e:
-        raise ToolError(f"No loop with id {loop_id}. Get ids from list_open_loops.") from e
+        raise ToolError(f"No {what} with id {value}. Get ids from {where}.") from e
 
 
 def _goal_title(session: Session, loop: OpenLoop) -> str | None:

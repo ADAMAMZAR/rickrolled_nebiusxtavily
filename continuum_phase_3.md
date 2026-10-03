@@ -166,6 +166,7 @@ Flow: **propose → user yes → execute → log**.
 | `propose_gmail_draft(loop_id, to, subject, body, thread_id?)` | Same, for a draft |
 | `propose_loop_update(loop_id, due?, resolve?, source_url)` | Same, for a change found on the web (§7) |
 | `web_lookup(query)` · `watch_loop(loop_id, query)` | Read-only web search · start/stop watching a loop (§7) |
+| `list_pending_actions()` | Proposals waiting for a yes/no, so Hermes can find the one a "yes" on Telegram refers to |
 | `approve_action(id)` | Executes the action. Hermes may only call it after the user says yes to *that* action |
 | `reject_action(id)` | Marks it rejected |
 | `set_person_email(name, email)` | Links a contact |
@@ -239,9 +240,13 @@ PUT  /api/loops/{id}/watch  {query}  ·  DELETE /api/loops/{id}/watch
 Web before Google: Tavily needs one API key and no OAuth, so it's lower risk, and it's what the "Best Use of Tavily" prize judges. If time runs out before the Oct 30 deadline, the web half still ships.
 
 1. Tables: Person, Activity, Source columns, PendingAction, setting, OpenLoop watch fields.
+   *Done 2026-10-03. Delete the old `.db` (no migration); startup says so.*
 2. Activity logging + undo in the engine (works for chat changes too). Add tests.
+   *Done 2026-10-03. Changes by the user are logged without undo (Reopen/Unsnooze cover them); `created` has no undo (Delete covers it). Each change can be undone once. Repeating a loop's current value isn't logged as a change. Undo that reopens a loop under a done goal makes the goal active, like Reopen. Deleting a loop deletes its activity and proposals. UI: History in the loop detail. Checked live 2026-10-03: resolve by chat → Undo → open.*
 3. PendingAction + approve/reject + MCP tools + approval UI (shared by web and Google).
+   *Done 2026-10-03. `list_pending_actions` added (§8). Approve claims the proposal with one conditional UPDATE, so a double click or dashboard + Telegram at once runs it once. A failed approve is marked `failed` and changes nothing. The same change proposed twice for a loop is stored once; resolved loops get no proposals; `source_url` must be http(s). Checked live 2026-10-03 (dashboard + Hermes chat, not Telegram): Approve in the strip → "resolved by the web" with Undo; "anything waiting for my OK?" → `list_pending_actions`, "yes, do it" → `approve_action`, "no" → `reject_action`.*
 4. **Tavily gate:** one real search through `app/connectors/tavily.py` from a scratch script.
+   *Code done 2026-10-03 (API checked against docs.tavily.com, matches §7). Gate: `pytest -m live -k tavily` (1 credit). **Not passed yet: needs `TAVILY_API_KEY` in `.env`.***
 5. `web_lookup` + `propose_loop_update`, then web watch in `sync.py` (mocked tests, then real).
 6. Hermes cron (`no_agent`) runs `sync.py` → Telegram summary.
 7. Person linking in extraction + `set_person_email` + UI field.

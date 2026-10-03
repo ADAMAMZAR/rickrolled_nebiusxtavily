@@ -55,12 +55,12 @@ svg.i { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor;
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 [hidden] { display: none !important; }
 
-.app { display: grid; grid-template-rows: auto auto 1fr; height: 100%; max-width: 1240px; margin: 0 auto; padding: 0 20px 20px; }
+.app { display: grid; grid-template-rows: auto auto auto 1fr; height: 100%; max-width: 1240px; margin: 0 auto; padding: 0 20px 20px; }
 header { display: flex; align-items: baseline; gap: 12px; padding: 18px 2px 16px; }
 header h1 { margin: 0; font-size: var(--title); font-weight: 650; letter-spacing: -0.01em; display: flex; align-items: center; gap: 8px; }
 header h1 svg { color: var(--accent); width: 20px; height: 20px; stroke-width: 2.4; }
 header p { margin: 0; color: var(--muted); font-size: var(--body); }
-main { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: 20px; min-height: 0; }
+main { grid-row: 4; display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: 20px; min-height: 0; }  /* fills the rest, even when the strips above are hidden */
 .col { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); display: flex; flex-direction: column; min-height: 0; }
 .col > h2 { margin: 0; padding: 14px 18px 12px; font-size: var(--body); font-weight: 620; border-bottom: 1px solid var(--line); display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
 .col > h2 .spacer { flex: 1; }
@@ -72,6 +72,7 @@ main { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap:
 .attention li { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 10px; padding: 8px; border-radius: 8px; }
 .attention li:hover { background: var(--sunk); }
 .attention .late { color: var(--danger); font-weight: 600; }
+.attention small a { color: var(--accent); }
 .row-actions { display: flex; gap: 6px; }
 .btn.small { min-height: 30px; padding: 0 10px; font-size: var(--small); }
 details.menu { position: relative; }
@@ -158,9 +159,12 @@ details.loop.resolved .kind { color: var(--accent); }
 .detail dt { color: var(--muted); }
 .detail dd { margin: 0; overflow-wrap: anywhere; }
 .why { margin: 0 0 14px; }
-.why h4 { margin: 0 0 6px; font-size: var(--small); font-weight: 620; }
+.why h4, .history h4 { margin: 0 0 6px; font-size: var(--small); font-weight: 620; }
 .why blockquote { margin: 0; padding: 10px 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; font-size: var(--body); white-space: pre-wrap; }
 .why figcaption { margin-top: 6px; font-size: var(--small); color: var(--muted); }
+.history ul { list-style: none; margin: 4px 0 14px; padding: 0; }
+.history li { display: flex; gap: 8px; align-items: center; min-height: 30px; color: var(--muted); font-size: var(--small); }
+.history a { color: var(--accent); }
 .actions { display: flex; gap: 8px; }
 .skeleton { height: 14px; border-radius: 4px; background: var(--line); margin: 8px 0; animation: blink 1.2s infinite; }
 
@@ -195,6 +199,10 @@ details.loop.resolved .kind { color: var(--accent); }
     <h1><svg class="i"><use href="#i-loop"/></svg>Continuum</h1>
     <p>Remembers what's still unfinished.</p>
   </header>
+  <section class="col attention" id="pending" aria-labelledby="pending-h" hidden>
+    <h2><span id="pending-h">Pending actions</span> <span class="count" id="pending-count"></span></h2>
+    <ul id="pending-list"></ul>
+  </section>
   <section class="col attention" id="attention" aria-labelledby="attention-h" hidden>
     <h2><span id="attention-h">Needs attention</span> <span class="count" id="attention-count"></span></h2>
     <ul id="attention-list"></ul>
@@ -229,6 +237,7 @@ details.loop.resolved .kind { color: var(--accent); }
 <script>
 const EXAMPLE = "I'm applying for an NVIDIA internship. I submitted my application yesterday. Sarah said she'll get back to me next Friday. I also need to finish my portfolio before the interview.";
 const KIND = { task: "Task", waiting: "Waiting on someone", commitment: "Your promise" };
+const BY = { user: "you", chat: "chat", email: "email", web: "the web" };
 const conversation = crypto.randomUUID();  // one Hermes conversation per page load
 const $ = (id) => document.getElementById(id);
 let seen = new Map();  // loop id -> updated_at, to highlight what a chat changed
@@ -317,7 +326,33 @@ function draft(l) {
   send(`Draft a follow-up for loop ${l.id}`, `Draft a follow-up: ${l.title}`, true);
 }
 
-function refresh() { return Promise.all([loadLoops(), loadAttention()]); }
+// --- pending actions: Continuum's proposals, applied only after Approve ---
+async function loadPending() {
+  const box = $("pending"), list = $("pending-list");
+  let items;
+  try { items = await api("/api/actions"); }
+  catch (e) {
+    box.hidden = false;
+    list.replaceChildren(h("li", {}, h("span", { class: "late" }, `Couldn't load pending actions: ${e.message}`)));
+    return;
+  }
+  box.hidden = !items.length;
+  $("pending-count").textContent = `(${items.length})`;
+  const decide = (e, path) => {  // one click only: disable both buttons of this row
+    for (const b of e.currentTarget.parentElement.querySelectorAll("button")) b.disabled = true;
+    act(path, "POST");
+  };
+  list.replaceChildren(...items.map((a) =>
+    h("li", { class: "loop" },
+      h("span", { class: "kind" }, icon("loop")),
+      h("span", { class: "title" }, h("b", {}, a.summary),
+        a.payload.source_url && h("small", {}, h("a", { href: a.payload.source_url, target: "_blank", rel: "noopener" }, "Open the page"))),
+      h("span", { class: "row-actions" },
+        h("button", { class: "btn small primary", type: "button", onclick: (e) => decide(e, `/api/actions/${a.id}/approve`) }, "Approve"),
+        h("button", { class: "btn small", type: "button", onclick: (e) => decide(e, `/api/actions/${a.id}/reject`) }, "Reject")))));
+}
+
+function refresh() { return Promise.all([loadLoops(), loadAttention(), loadPending()]); }
 
 // --- loops ---
 async function loadLoops() {
@@ -395,8 +430,8 @@ function loopRow(l, fresh, open) {
 
 async function loadDetail(row, id) {
   const panel = row.querySelector(".detail");
-  let d;
-  try { d = await api(`/api/loops/${id}`); }
+  let d, history;
+  try { [d, history] = await Promise.all([api(`/api/loops/${id}`), api(`/api/activity?loop_id=${id}`)]); }
   catch (e) { panel.replaceChildren(h("p", { class: "due overdue" }, e.message)); return; }
   const said = new Date(d.source.created_at);
   const fields = [
@@ -418,6 +453,11 @@ async function loadDetail(row, id) {
       h("h4", {}, "Why Continuum knows this"),
       h("blockquote", {}, d.source.text),
       h("figcaption", {}, `You said this ${said.toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`)),
+    history.length > 0 && h("div", { class: "history" }, h("h4", {}, "History"),
+      h("ul", {}, history.map((a) => h("li", {},
+        h("span", {}, `${new Date(a.created_at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} · ${a.action.replace("_", " ")} by ${BY[a.by]}`,
+          a.detail && " · ", /^https?:\/\//.test(a.detail) ? h("a", { href: a.detail, target: "_blank", rel: "noopener" }, "source") : a.detail),
+        a.can_undo && h("button", { class: "btn small", type: "button", onclick: () => act(`/api/activity/${a.id}/undo`, "POST") }, "Undo"))))),
     h("div", { class: "actions" },
       h("button", { class: "btn primary", type: "button", onclick: () => act(`/api/loops/${id}/${resolved ? "reopen" : "resolve"}`, "POST") }, resolved ? "Reopen" : "Resolve"),
       snooze,

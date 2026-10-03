@@ -4,10 +4,14 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
-from sqlmodel import Session
+from sqlalchemy.exc import IntegrityError
+from sqlmodel import Session, select
 
 from app import engine as eng
-from app.db import Goal, GoalStatus, LoopKind, LoopStatus, OpenLoop, create_db_engine
+from app.db import (
+    ActionKind, ActionStatus, Activity, ActivityAction, ActivityBy, Goal, GoalStatus, LoopKind, LoopStatus, OpenLoop,
+    PendingAction, Person, Setting, Source, create_db_engine,
+)
 
 
 def seed(session: Session) -> tuple[Goal, OpenLoop, OpenLoop]:
@@ -140,3 +144,25 @@ def test_outdated_database_fails_with_clear_message(tmp_path: Path) -> None:
     old.close()
     with pytest.raises(RuntimeError, match=r"old\.db .*openloop\.\w+.*Delete it"):
         create_db_engine(f"sqlite:///{path}")
+
+
+def test_phase3_tables_round_trip(session: Session) -> None:
+    _, wait, _ = seed(session)
+    session.add(Person(name="Sarah", email="sarah@nvidia.com"))
+    session.add(Activity(loop_id=wait.id, action=ActivityAction.resolved, by=ActivityBy.chat,
+                         undo={"status": "open", "resolved_at": None}))
+    session.add(PendingAction(loop_id=wait.id, kind=ActionKind.loop_update,
+                              payload={"resolve": True, "source_url": "https://devpost.com/x"}))
+    session.add(Setting(key="last_sync", value="2026-10-03T08:00:00+00:00"))
+    session.commit()
+    session.expire_all()
+    assert session.exec(select(Activity)).one().undo == {"status": "open", "resolved_at": None}
+    assert session.exec(select(PendingAction)).one().status == ActionStatus.proposed
+
+
+def test_gmail_message_is_stored_once(session: Session) -> None:
+    session.add(Source(text="a", kind="email", external_id="gmail-1"))
+    session.commit()
+    session.add(Source(text="b", kind="email", external_id="gmail-1"))
+    with pytest.raises(IntegrityError):
+        session.commit()

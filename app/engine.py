@@ -2,6 +2,7 @@
 
 `add_*` helpers don't commit, so callers can group them into one transaction.
 User actions (resolve, reopen, delete) commit themselves.
+Every loop change writes an Activity row in the same transaction.
 """
 
 import logging
@@ -12,10 +13,14 @@ from typing import Any
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
-from sqlmodel import Session, col, func, or_, select
+from pydantic import BaseModel, Field, TypeAdapter, model_validator
+from sqlmodel import Session, col, delete, func, or_, select, update
 
 from app.config import settings
-from app.db import Goal, GoalStatus, LoopKind, LoopStatus, OpenLoop, Source, utcnow
+from app.db import (
+    ActionKind, ActionStatus, Activity, ActivityAction, ActivityBy, Goal, GoalStatus, LoopKind, LoopStatus, OpenLoop,
+    PendingAction, Source, utcnow,
+)
 from app.extraction import Completer, extract
 
 log = logging.getLogger("continuum.engine")
@@ -60,7 +65,9 @@ class Attention:
 # --- process a message ---
 
 
-def process_message(session: Session, llm: Completer, text: str, now: datetime | None = None) -> ChangeSet:
+def process_message(
+    session: Session, llm: Completer, text: str, now: datetime | None = None, by: ActivityBy = ActivityBy.chat
+) -> ChangeSet:
     """Extract goals and loops from one message, then save them in one transaction.
 
     The LLM runs before any write, so a failed extraction writes nothing. A message that
@@ -98,39 +105,44 @@ def process_message(session: Session, llm: Completer, text: str, now: datetime |
                 continue
             seen.add(key)
             goal = _find_or_add_goal(session, candidate.goal, None, goal_by_name, changes) if candidate.goal else None
-            changes.created_loops.append(
-                add_loop(
-                    session,
-                    source_id=source.id,
-                    goal_id=goal.id if goal else None,
-                    title=candidate.title,
-                    summary=candidate.summary,
-                    kind=LoopKind(candidate.kind),
-                    waiting_on=candidate.waiting_on,
-                    due=candidate.due,
-                    next_action=candidate.next_action,
-                )
+            created = add_loop(
+                session,
+                source_id=source.id,
+                goal_id=goal.id if goal else None,
+                title=candidate.title,
+                summary=candidate.summary,
+                kind=LoopKind(candidate.kind),
+                waiting_on=candidate.waiting_on,
+                due=candidate.due,
+                next_action=candidate.next_action,
             )
+            changes.created_loops.append(created)
+            _log(session, created, ActivityAction.created, by)
 
         stamp = utcnow()
         for update in result.updated_loops:
             loop = known.get(update.id)
             fields = update.model_dump(exclude={"id"}, exclude_none=True)
+            if loop is not None:  # the model often repeats current values; those aren't changes
+                fields = {name: value for name, value in fields.items() if getattr(loop, name) != value}
             if loop is None or not fields:
                 log.info("loop_update_dropped known=%s", loop is not None)
                 continue
+            undo = loop.model_dump(mode="json", include=set(fields))
             for name, value in fields.items():
                 setattr(loop, name, value)
             loop.updated_at = stamp
             changes.updated_loops.append(loop)
+            _log(session, loop, ActivityAction.updated, by, ", ".join(fields), undo)
 
-        for loop_id in result.resolved_loop_ids:
+        for loop_id in dict.fromkeys(result.resolved_loop_ids):  # each id once
             loop = known.get(loop_id)
             if loop is None:  # the LLM may only resolve loops we showed it
                 log.info("loop_resolve_dropped")
                 continue
             loop.status, loop.resolved_at, loop.updated_at = LoopStatus.resolved, stamp, stamp
             changes.resolved_loops.append(loop)
+            _log(session, loop, ActivityAction.resolved, by, undo={"status": LoopStatus.open.value, "resolved_at": None})
         changes.updated_loops = [l for l in changes.updated_loops if l not in changes.resolved_loops]
 
         if not (changes.created_goals or changes.created_loops or changes.updated_loops or changes.resolved_loops):
@@ -314,12 +326,17 @@ def get_loop(session: Session, loop_id: UUID) -> LoopDetail:
 # --- user actions (commit) ---
 
 
-def resolve_loop(session: Session, loop_id: UUID) -> OpenLoop:
+def resolve_loop(session: Session, loop_id: UUID, by: ActivityBy = ActivityBy.user) -> OpenLoop:
+    """Resolving a resolved loop changes nothing."""
     loop = _get(session, loop_id)
+    if loop.status == LoopStatus.resolved:
+        return loop
+    undo = loop.model_dump(mode="json", include={"status", "resolved_at"})
     now = utcnow()
     loop.status = LoopStatus.resolved
     loop.resolved_at = now
     loop.updated_at = now
+    _log(session, loop, ActivityAction.resolved, by, undo=undo)
     session.commit()
     session.refresh(loop)
     log.info("loop_resolved id=%s", loop_id)
@@ -329,25 +346,29 @@ def resolve_loop(session: Session, loop_id: UUID) -> OpenLoop:
 def reopen_loop(session: Session, loop_id: UUID) -> OpenLoop:
     """Reopen a loop. If its goal was marked done, the goal becomes active again."""
     loop = _get(session, loop_id)
+    if loop.status == LoopStatus.open:
+        return loop
     loop.status = LoopStatus.open
     loop.resolved_at = None
     loop.updated_at = utcnow()
-    goal = session.get(Goal, loop.goal_id) if loop.goal_id else None
-    if goal and goal.status == GoalStatus.done:
-        goal.status, goal.updated_at = GoalStatus.active, loop.updated_at
-        log.info("goal_reopened id=%s", goal.id)
+    _reactivate_goal(session, loop)
+    _log(session, loop, ActivityAction.reopened, ActivityBy.user)
     session.commit()
     session.refresh(loop)
     log.info("loop_reopened id=%s", loop_id)
     return loop
 
 
-def snooze_loop(session: Session, loop_id: UUID, until: date, today: date | None = None) -> OpenLoop:
+def snooze_loop(
+    session: Session, loop_id: UUID, until: date, today: date | None = None, by: ActivityBy = ActivityBy.user
+) -> OpenLoop:
     """Hide a loop from lists and attention until `until`. It shows again on that date."""
     if until <= (today or local_now().date()):
         raise InvalidRequest("Snooze date must be after today.")
     loop = _get(session, loop_id)
+    undo = loop.model_dump(mode="json", include={"snoozed_until"})
     loop.snoozed_until, loop.updated_at = until, utcnow()
+    _log(session, loop, ActivityAction.updated, by, f"snoozed until {until.isoformat()}", undo)
     session.commit()
     session.refresh(loop)
     log.info("loop_snoozed id=%s", loop_id)
@@ -357,6 +378,7 @@ def snooze_loop(session: Session, loop_id: UUID, until: date, today: date | None
 def unsnooze_loop(session: Session, loop_id: UUID) -> OpenLoop:
     loop = _get(session, loop_id)
     loop.snoozed_until, loop.updated_at = None, utcnow()
+    _log(session, loop, ActivityAction.updated, ActivityBy.user, "unsnoozed")
     session.commit()
     session.refresh(loop)
     log.info("loop_unsnoozed id=%s", loop_id)
@@ -373,6 +395,7 @@ def complete_goal(session: Session, goal_id: UUID) -> Goal:
     goal.status, goal.updated_at = GoalStatus.done, now
     for loop in list_loops(session, goal_id=goal_id):
         loop.status, loop.resolved_at, loop.updated_at = LoopStatus.resolved, now, now
+        _log(session, loop, ActivityAction.resolved, ActivityBy.user, "goal done")
     session.commit()
     session.refresh(goal)
     log.info("goal_completed id=%s", goal_id)
@@ -380,8 +403,11 @@ def complete_goal(session: Session, goal_id: UUID) -> Goal:
 
 
 def delete_loop(session: Session, loop_id: UUID) -> None:
-    """Delete a wrong loop. Its source stays, since other loops may share it."""
-    session.delete(_get(session, loop_id))
+    """Delete a wrong loop with its history and proposals. Its source stays, since other loops may share it."""
+    loop = _get(session, loop_id)
+    session.exec(delete(Activity).where(col(Activity.loop_id) == loop_id))
+    session.exec(delete(PendingAction).where(col(PendingAction.loop_id) == loop_id))
+    session.delete(loop)
     session.commit()
     log.info("loop_deleted id=%s", loop_id)
 
@@ -391,3 +417,182 @@ def _get(session: Session, loop_id: UUID) -> OpenLoop:
     if loop is None:
         raise NotFound(f"Loop {loop_id} not found")
     return loop
+
+
+def _reactivate_goal(session: Session, loop: OpenLoop) -> None:
+    """An open loop's goal must be active, or the LLM no longer sees it (no commit)."""
+    goal = session.get(Goal, loop.goal_id) if loop.goal_id else None
+    if goal and goal.status == GoalStatus.done:
+        goal.status, goal.updated_at = GoalStatus.active, loop.updated_at
+        log.info("goal_reopened id=%s", goal.id)
+
+
+# --- activity: what changed a loop, and undo ---
+
+
+def _log(
+    session: Session, loop: OpenLoop, action: ActivityAction, by: ActivityBy,
+    detail: str = "", undo: dict[str, Any] | None = None,
+) -> None:
+    """Record a change (no commit). User changes get no undo: the dashboard has Reopen/Unsnooze for them."""
+    session.add(Activity(loop_id=loop.id, action=action, by=by, detail=detail,
+                         undo=None if by == ActivityBy.user else undo))
+
+
+def _restore(loop: OpenLoop, values: dict[str, Any]) -> None:
+    """Set fields from JSON values (e.g. "2026-10-02" back to a date)."""
+    for name, value in values.items():
+        setattr(loop, name, TypeAdapter(OpenLoop.model_fields[name].annotation).validate_python(value))
+
+
+def list_activity(session: Session, loop_id: UUID | None = None) -> list[Activity]:
+    """Newest first, at most 100."""
+    query = select(Activity).order_by(col(Activity.created_at).desc()).limit(100)
+    if loop_id is not None:
+        query = query.where(Activity.loop_id == loop_id)
+    return list(session.exec(query).all())
+
+
+def undo_activity(session: Session, activity_id: UUID) -> OpenLoop:
+    """Put a loop back the way it was before an automatic change. Each change can be undone once."""
+    activity = session.get(Activity, activity_id)
+    if activity is None:
+        raise NotFound(f"Change {activity_id} not found")
+    if activity.undo is None or activity.loop_id is None:
+        raise InvalidRequest("This change can't be undone.")
+    loop = _get(session, activity.loop_id)
+    reopens = activity.undo.get("status") == LoopStatus.open and loop.status == LoopStatus.resolved
+    _restore(loop, activity.undo)
+    loop.updated_at = utcnow()
+    if reopens:
+        _reactivate_goal(session, loop)
+    activity.undo = None
+    _log(session, loop, ActivityAction.reopened if reopens else ActivityAction.updated, ActivityBy.user,
+         f"undid {activity.action.value} by {activity.by.value}")
+    session.commit()
+    session.refresh(loop)
+    log.info("activity_undone id=%s", activity_id)
+    return loop
+
+
+# --- proposals: run only after the user's yes ---
+
+
+class LoopUpdate(BaseModel):
+    """A change found on the web. Applied only when the user approves it."""
+
+    resolve: bool = False
+    due: date | None = None
+    source_url: str = Field(pattern=r"^https?://\S+$")  # shown as a link, so web pages only
+    source_title: str | None = None
+
+    @model_validator(mode="after")
+    def _changes_something(self) -> "LoopUpdate":
+        if not self.resolve and self.due is None:
+            raise ValueError("A loop update needs resolve or a new due date.")
+        return self
+
+
+def propose_loop_update(session: Session, loop_id: UUID, change: LoopUpdate) -> PendingAction:
+    """Save a proposal. If the same change already waits for an answer, return that one instead."""
+    if _get(session, loop_id).status != LoopStatus.open:
+        raise InvalidRequest("That loop is already resolved.")
+    payload = change.model_dump(mode="json")
+    for pending in list_actions(session):
+        if (pending.loop_id, pending.kind) == (loop_id, ActionKind.loop_update) and (
+            (pending.payload["resolve"], pending.payload["due"]) == (payload["resolve"], payload["due"])
+        ):
+            return pending
+    action = PendingAction(loop_id=loop_id, kind=ActionKind.loop_update, payload=payload)
+    session.add(action)
+    session.commit()
+    session.refresh(action)
+    log.info("action_proposed id=%s kind=%s", action.id, action.kind.value)
+    return action
+
+
+def list_actions(session: Session, status: ActionStatus | None = ActionStatus.proposed) -> list[PendingAction]:
+    """Oldest first. status=None means all."""
+    query = select(PendingAction).order_by(col(PendingAction.created_at))
+    if status is not None:
+        query = query.where(PendingAction.status == status)
+    return list(session.exec(query).all())
+
+
+def describe_action(session: Session, action: PendingAction) -> str:
+    """One line for the dashboard, chat and Telegram."""
+    loop = session.get(OpenLoop, action.loop_id) if action.loop_id else None
+    title = f'"{loop.title}"' if loop else "a deleted loop"
+    if action.kind == ActionKind.loop_update:
+        change = LoopUpdate.model_validate(action.payload)
+        what = f"Resolve {title}" if change.resolve else f"Set {title} due {change.due:%a %b} {change.due.day}"
+        return f"{what}? Found on the web: {change.source_title or change.source_url}"
+    return action.kind.value  # Google kinds get their wording in step 10
+
+
+def approve_action(session: Session, action_id: UUID) -> PendingAction:
+    """Run a proposed action once. Only call this after the user said yes to it."""
+    action = _decide(session, action_id, ActionStatus.done)
+    try:
+        if action.kind != ActionKind.loop_update:
+            raise InvalidRequest(f"{action.kind.value} isn't supported yet.")
+        _apply_loop_update(session, action)
+        session.commit()
+    except Exception as e:
+        session.rollback()
+        action.status, action.updated_at = ActionStatus.failed, utcnow()
+        session.commit()
+        log.warning("action_failed id=%s error=%s", action_id, type(e).__name__)
+        raise InvalidRequest(f"Couldn't do it: {e}") from e
+    session.refresh(action)
+    log.info("action_done id=%s", action_id)
+    return action
+
+
+def reject_action(session: Session, action_id: UUID) -> PendingAction:
+    action = _decide(session, action_id, ActionStatus.rejected)
+    session.commit()
+    session.refresh(action)
+    log.info("action_rejected id=%s", action_id)
+    return action
+
+
+def _decide(session: Session, action_id: UUID, status: ActionStatus) -> PendingAction:
+    """Move a proposal out of "proposed" (no commit). The conditional UPDATE lets only one of two
+    racing requests (a double click, dashboard + Telegram) through."""
+    action = _get_action(session, action_id)
+    claimed = session.exec(
+        update(PendingAction)
+        .where(col(PendingAction.id) == action_id, col(PendingAction.status) == ActionStatus.proposed)
+        .values(status=status, updated_at=utcnow())
+        .execution_options(synchronize_session=False)
+    ).rowcount
+    session.refresh(action)
+    if not claimed:
+        raise InvalidRequest(f"This was already {action.status.value}.")
+    return action
+
+
+def _apply_loop_update(session: Session, action: PendingAction) -> None:
+    change = LoopUpdate.model_validate(action.payload)
+    loop = _get(session, action.loop_id)  # type: ignore[arg-type]  # a loop_update always has a loop
+    if loop.status != LoopStatus.open:
+        raise InvalidRequest("That loop is already resolved.")
+    # Only what this change touches, so undoing a due date can't reopen a loop resolved since.
+    touched = ({"status", "resolved_at"} if change.resolve else set()) | ({"due"} if change.due else set())
+    undo = loop.model_dump(mode="json", include=touched)
+    now = utcnow()
+    if change.due:
+        loop.due = change.due
+    if change.resolve:
+        loop.status, loop.resolved_at = LoopStatus.resolved, now
+    loop.updated_at = now
+    _log(session, loop, ActivityAction.resolved if change.resolve else ActivityAction.updated,
+         ActivityBy.web, change.source_url, undo)
+
+
+def _get_action(session: Session, action_id: UUID) -> PendingAction:
+    action = session.get(PendingAction, action_id)
+    if action is None:
+        raise NotFound(f"Action {action_id} not found")
+    return action

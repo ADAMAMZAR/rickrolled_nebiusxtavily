@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     # Telegram via Hermes. Read only by scripts/setup_hermes.py, which copies them into the Hermes profile.
     telegram_bot_token: SecretStr = SecretStr("")
     telegram_allowed_users: str = ""  # comma-separated numeric Telegram user ids
+    tavily_api_key: SecretStr = SecretStr("")  # optional: web watch + lookup
     timezone: str = "Asia/Kuala_Lumpur"
     stale_days: int = 4  # days without an update before an undated loop needs attention
     database_url: str = "sqlite:///./data/continuum.db"

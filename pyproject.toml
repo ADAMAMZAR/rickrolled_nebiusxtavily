@@ -24,10 +24,10 @@ requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["app"]
+packages = ["app", "app.connectors"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]  # import app/ without installing the package
 addopts = "-m 'not live'"
-markers = ["live: calls real Nebius (needs NEBIUS_API_KEY)"]
+markers = ["live: calls real services: Nebius, Hermes, Tavily (needs keys)"]

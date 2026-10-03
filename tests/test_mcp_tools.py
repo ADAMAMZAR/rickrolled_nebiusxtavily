@@ -5,10 +5,15 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
+from uuid import UUID
+
 import pytest
 import yaml
 from fastapi.testclient import TestClient
+from sqlmodel import Session
 
+from app import engine as eng
+from app.db import create_db_engine
 from app.main import create_app
 from tests.conftest import FakeLLM
 from tests.test_process_message import DEMO, DEMO_RESULT, result
@@ -60,6 +65,7 @@ def test_lists_exactly_the_tools_hermes_includes(mcp: MCP) -> None:
     names = {t["name"] for t in mcp.rpc("tools/list")["tools"]}
     assert names == {
         "remember", "list_open_loops", "needs_attention", "list_goals", "inspect_loop", "resolve_loop", "snooze_loop",
+        "list_pending_actions", "approve_action", "reject_action",
     }
     include = yaml.safe_load(HERMES_CONFIG.read_text(encoding="utf-8"))["mcp_servers"]["continuum"]["tools"]["include"]
     assert set(include) == names  # a tool missing from tools.include is invisible to Hermes
@@ -137,3 +143,34 @@ def test_remember_nothing_and_failure(mcp: MCP, llm: FakeLLM) -> None:
 
     llm.replies += ["broken", "still broken"]
     assert "Couldn't save that" in mcp.call("remember", text="Sarah will reply Friday.")["error"]
+
+
+def test_resolve_from_chat_is_undoable(mcp: MCP, llm: FakeLLM) -> None:
+    llm.replies.append(json.dumps(DEMO_RESULT))
+    mcp.call("remember", text=DEMO)
+    loop_id = mcp.call("list_open_loops")["groups"][0]["loops"][0]["id"]
+    mcp.call("resolve_loop", loop_id=loop_id)
+    items = mcp.http.get(f"/api/activity?loop_id={loop_id}").json()
+    assert ("resolved", "chat", True) in {(a["action"], a["by"], a["can_undo"]) for a in items}
+
+
+def test_list_and_approve_pending_action(mcp: MCP, llm: FakeLLM, db_url: str) -> None:
+    llm.replies.append(json.dumps(DEMO_RESULT))
+    mcp.call("remember", text=DEMO)
+    loop_id = mcp.call("list_open_loops")["groups"][0]["loops"][0]["id"]
+    with Session(create_db_engine(db_url)) as s:
+        eng.propose_loop_update(s, UUID(loop_id), eng.LoopUpdate(resolve=True, source_url="https://x.dev"))
+    [pending] = mcp.call("list_pending_actions")["actions"]
+    assert mcp.call("approve_action", action_id=pending["id"])["done"].startswith("Resolve")
+    assert "already done" in mcp.call("approve_action", action_id=pending["id"])["error"]
+    assert mcp.call("list_pending_actions") == {"actions": []}
+
+
+def test_reject_pending_action_and_bad_ids(mcp: MCP, llm: FakeLLM, db_url: str) -> None:
+    loop_id = remember_demo(mcp, llm)["new_loops"][0]["id"]
+    with Session(create_db_engine(db_url)) as s:
+        eng.propose_loop_update(s, UUID(loop_id), eng.LoopUpdate(resolve=True, source_url="https://x.dev"))
+    [pending] = mcp.call("list_pending_actions")["actions"]
+    assert mcp.call("reject_action", action_id=pending["id"])["rejected"].startswith("Resolve")
+    assert mcp.call("list_open_loops")["groups"][0]["loops"][0]["id"] == loop_id  # still open
+    assert "No action with id nope. Get ids from list_pending_actions" in mcp.call("approve_action", action_id="nope")["error"]
