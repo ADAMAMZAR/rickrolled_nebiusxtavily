@@ -6,10 +6,12 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 import pytest
+from pydantic import SecretStr
 from sqlalchemy import Engine
 from sqlmodel import Session
 
 from app import engine as eng
+from app.config import settings
 from app.db import create_db_engine
 
 
@@ -53,3 +55,14 @@ def engine(db_url: str) -> Iterator[Engine]:
 def session(engine: Engine) -> Iterator[Session]:
     with Session(engine) as session:
         yield session
+
+
+@pytest.fixture
+def web_on(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Web features need TAVILY_API_KEY. Tests never call the real Tavily."""
+    monkeypatch.setattr(settings, "tavily_api_key", SecretStr("tvly-test"))
+
+
+@pytest.fixture
+def web_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "tavily_api_key", SecretStr(""))

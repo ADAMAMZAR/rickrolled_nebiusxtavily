@@ -44,6 +44,8 @@ Return exactly this JSON shape:
 
 INVALID_MESSAGE = "The message could not be safely converted into structured continuity data."
 
+WEB_NOTE = "These are web search results about this open loop. Only report a change a result clearly states."
+
 
 class ExtractionError(Exception):
     pass
@@ -94,22 +96,29 @@ class ExtractionResult(_Model):
 
 
 def build_messages(
-    text: str, now: datetime, goals: list[dict[str, Any]], loops: list[dict[str, Any]]
+    text: str, now: datetime, goals: list[dict[str, Any]], loops: list[dict[str, Any]], note: str | None = None
 ) -> list[dict[str, str]]:
+    """`note` says where text that isn't the user's own message came from, e.g. WEB_NOTE."""
     context = (
         f"Current date: {now:%A %Y-%m-%d} ({now.tzinfo})\n\n"
         f"Existing active goals: {json.dumps(goals) if goals else 'none'}\n\n"
         f"Existing open loops: {json.dumps(loops) if loops else 'none'}\n\n"
-        f'User message:\n"""\n{text}\n"""'
+        + (f"{note}\n\nText" if note else "User message")
+        + f':\n"""\n{text}\n"""'
     )
     return [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": context}]
 
 
 def extract(
-    llm: Completer, text: str, now: datetime, goals: list[dict[str, Any]], loops: list[dict[str, Any]]
+    llm: Completer,
+    text: str,
+    now: datetime,
+    goals: list[dict[str, Any]],
+    loops: list[dict[str, Any]],
+    note: str | None = None,
 ) -> ExtractionResult:
     """Call the LLM and validate its JSON. One retry with the error attached, then fail."""
-    messages = build_messages(text, now, goals, loops)
+    messages = build_messages(text, now, goals, loops, note)
     for attempt in (1, 2):
         raw = llm.complete(messages, json_mode=True)
         try:

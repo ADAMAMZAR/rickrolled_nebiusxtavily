@@ -200,6 +200,7 @@ POST /api/actions/{id}/reject
 GET  /api/people   ·  PATCH /api/people/{id}  {email}
 GET  /api/google/status  ·  POST /api/google/connect  ·  POST /api/google/disconnect
 PUT  /api/loops/{id}/watch  {query}  ·  DELETE /api/loops/{id}/watch
+GET  /api/web/status                  → {enabled}: the UI hides web features without TAVILY_API_KEY
 ```
 
 ---
@@ -231,7 +232,7 @@ PUT  /api/loops/{id}/watch  {query}  ·  DELETE /api/loops/{id}/watch
 - **Person linking:** name match (case-insensitive), `set_person_email`, and new waiting loops link to the person.
 - **Actions:** proposing doesn't call Google. Approve calls it exactly once. Approving twice doesn't create a duplicate. Reject → never executed. Failures → `failed` + logged.
 - **Web:** only watched open loops are searched, at most once a day. A URL seen before is skipped. A result can only touch its own loop. Findings become proposals, never direct changes. Approve applies + logs + undo works; reject leaves the loop. No key → a clear message. A Tavily error skips that loop only.
-- **Live (optional, `-m live`):** extraction on 3 sample emails (a reply that resolves, an unrelated email, an email that adds a new deadline); one real Tavily search + extraction (a page that resolves a loop, an unrelated page).
+- **Live (optional, `-m live`):** extraction on 3 sample emails (a reply that resolves, an unrelated email, an email that adds a new deadline); one real Tavily search; extraction on canned pages (one that resolves a loop, one that moves its date, an unrelated one).
 
 ---
 
@@ -248,6 +249,7 @@ Web before Google: Tavily needs one API key and no OAuth, so it's lower risk, an
 4. **Tavily gate:** one real search through `app/connectors/tavily.py` from a scratch script.
    *Code done 2026-10-03 (API checked against docs.tavily.com, matches §7). Gate: `pytest -m live -k tavily` (1 credit). **Not passed yet: needs `TAVILY_API_KEY` in `.env`.***
 5. `web_lookup` + `propose_loop_update`, then web watch in `sync.py` (mocked tests, then real).
+   *Done 2026-10-03 except a real Tavily search (no key yet). MCP: `web_lookup`, `propose_loop_update`, `watch_loop`. REST: watch routes + `GET /api/web/status`. UI: Watch the web form in the loop detail, "watching the web" in the list. `scripts/sync.py` searches each watched open loop at most once a day (marked checked before the search, so a failure waits until tomorrow) and prints new proposals and failed searches, or nothing. Each new result is extracted alone with `WEB_NOTE`, so a finding keeps its page; only that loop's resolve or new due count. A page counts as seen once it made a proposal for that loop (nothing else is stored), so pages with no finding are re-read while they stay in the week's results. Only open loops are searched: resolving stops the watch, reopening resumes it. Checked live 2026-10-03: real Nemotron on canned pages (`tests/test_web_live.py`: winners → resolve, new date → due, unrelated → nothing); real Hermes: "keep an eye on the hackathon results" → `watch_loop`, a question → `web_lookup`. `sync.py` logs to stderr: check in step 6 whether Hermes delivers stderr too.*
 6. Hermes cron (`no_agent`) runs `sync.py` → Telegram summary.
 7. Person linking in extraction + `set_person_email` + UI field.
 8. **Google gate:** OAuth connect, list the last 5 emails from one address, create one draft, create one event, all from a scratch script.

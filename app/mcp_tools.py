@@ -11,16 +11,20 @@ from uuid import UUID
 
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
+from pydantic import ValidationError
 from sqlalchemy import Engine
 from sqlmodel import Session
 
 from app import engine as eng
-from app.db import ActivityBy, Goal, OpenLoop
+from app.connectors.tavily import TavilyClient, TavilyError
+from app.db import ActivityBy, Goal, LoopStatus, OpenLoop
 from app.extraction import Completer, ExtractionError
 from app.llm import LLMError
 
 
-def build_mcp(get_db: Callable[[], Engine], get_llm: Callable[[], Completer]) -> MCPServer:
+def build_mcp(
+    get_db: Callable[[], Engine], get_llm: Callable[[], Completer], get_web: Callable[[], TavilyClient]
+) -> MCPServer:
     mcp = MCPServer("continuum")
 
     @contextmanager
@@ -147,6 +151,45 @@ def build_mcp(get_db: Callable[[], Engine], get_llm: Callable[[], Completer]) ->
             action = eng.reject_action(s, _uuid(action_id, "action", "list_pending_actions"))
             return {"rejected": eng.describe_action(s, action)}
 
+    @mcp.tool()
+    def web_lookup(query: str) -> dict[str, Any]:
+        """Search the web for a question about the outside world, e.g. "when does the Google STEP application
+        close?". Answer from it and give the link. Read-only: nothing is saved."""
+        try:
+            found = get_web().search(query, answer=True)
+        except TavilyError as e:
+            raise ToolError(str(e)) from e
+        return _clean({
+            "answer": found.answer,
+            "results": [{"title": r.title, "url": r.url, "snippet": r.content[:500]} for r in found.results],
+        })
+
+    @mcp.tool()
+    def propose_loop_update(
+        loop_id: str, source_url: str, resolve: bool = False, due: str | None = None, source_title: str | None = None
+    ) -> dict[str, Any]:
+        """Propose a change to one open loop based on a web page: resolve it, or a new due date (YYYY-MM-DD).
+        source_url is the page. Nothing changes until the user says yes, so tell them it waits for their OK.
+        Use it when the user wants something from web_lookup saved, e.g. "set that as the deadline"."""
+        try:
+            change = eng.LoopUpdate(resolve=resolve, due=due, source_url=source_url, source_title=source_title)
+        except ValidationError as e:
+            raise ToolError(f"Can't propose that: {e.errors()[0]['msg']}") from e
+        with session() as s:
+            action = eng.propose_loop_update(s, _uuid(loop_id), change)
+            return {"id": str(action.id), "proposed": eng.describe_action(s, action)}
+
+    @mcp.tool()
+    def watch_loop(loop_id: str, query: str | None = None) -> dict[str, Any]:
+        """Watch the web for one open loop, e.g. "keep an eye on the hackathon results". Continuum searches
+        `query` once a day and asks the user before changing anything. Use a short search like
+        "NVIDIA hackathon 2026 winners". Leave query empty to stop watching. Get the id from list_open_loops."""
+        with session() as s:
+            loop = eng.watch_loop(s, _uuid(loop_id), query, by=ActivityBy.chat)
+            if loop.watch_query:
+                return {"watching": loop.title, "query": loop.watch_query}
+            return {"stopped_watching": loop.title}
+
     return mcp
 
 
@@ -174,6 +217,7 @@ def _loop(session: Session, loop: OpenLoop, with_goal: bool = True) -> dict[str,
             "next_action": loop.next_action,
             "goal": _goal_title(session, loop) if with_goal else None,
             "snoozed_until": f"{loop.snoozed_until:%a %Y-%m-%d}" if snoozed else None,
+            "watching_web": loop.watch_query if loop.status == LoopStatus.open else None,
         }
     )
 

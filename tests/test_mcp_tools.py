@@ -7,12 +7,16 @@ from typing import Any
 
 from uuid import UUID
 
+import httpx
 import pytest
 import yaml
 from fastapi.testclient import TestClient
+from pydantic import SecretStr
 from sqlmodel import Session
 
 from app import engine as eng
+from app.config import Settings
+from app.connectors.tavily import TavilyClient
 from app.db import create_db_engine
 from app.main import create_app
 from tests.conftest import FakeLLM
@@ -41,14 +45,36 @@ class MCP:
         return {"error": text} if out.get("isError") else json.loads(text)
 
 
+class FakeTavily:
+    """A real TavilyClient over a fake transport. Set key = "" to act as if TAVILY_API_KEY is missing."""
+
+    def __init__(self) -> None:
+        self.key = "tvly-test"
+        self.queries: list[str] = []
+
+    def client(self) -> TavilyClient:
+        def handler(request: httpx.Request) -> httpx.Response:
+            self.queries.append(json.loads(request.content)["query"])
+            return httpx.Response(200, json={"answer": "Applications close Oct 15.", "results": [
+                {"title": "STEP 2027", "url": "https://x.dev/step", "content": "Apply by Oct 15. " + "x" * 600},
+            ]})
+        return TavilyClient(Settings(_env_file=None, tavily_api_key=SecretStr(self.key)), httpx.MockTransport(handler))
+
+
 @pytest.fixture
 def llm() -> FakeLLM:
     return FakeLLM()
 
 
 @pytest.fixture
-def mcp(db_url: str, llm: FakeLLM) -> Iterator[MCP]:
-    with TestClient(create_app(db_url, get_llm=lambda: llm), base_url="http://127.0.0.1:8000") as http:
+def web() -> FakeTavily:
+    return FakeTavily()
+
+
+@pytest.fixture
+def mcp(db_url: str, llm: FakeLLM, web: FakeTavily) -> Iterator[MCP]:
+    app = create_app(db_url, get_llm=lambda: llm, get_web=web.client)
+    with TestClient(app, base_url="http://127.0.0.1:8000") as http:
         client = MCP(http)
         client.rpc("initialize", {
             "protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "test", "version": "0"},
@@ -65,7 +91,7 @@ def test_lists_exactly_the_tools_hermes_includes(mcp: MCP) -> None:
     names = {t["name"] for t in mcp.rpc("tools/list")["tools"]}
     assert names == {
         "remember", "list_open_loops", "needs_attention", "list_goals", "inspect_loop", "resolve_loop", "snooze_loop",
-        "list_pending_actions", "approve_action", "reject_action",
+        "list_pending_actions", "approve_action", "reject_action", "web_lookup", "propose_loop_update", "watch_loop",
     }
     include = yaml.safe_load(HERMES_CONFIG.read_text(encoding="utf-8"))["mcp_servers"]["continuum"]["tools"]["include"]
     assert set(include) == names  # a tool missing from tools.include is invisible to Hermes
@@ -174,3 +200,41 @@ def test_reject_pending_action_and_bad_ids(mcp: MCP, llm: FakeLLM, db_url: str) 
     assert mcp.call("reject_action", action_id=pending["id"])["rejected"].startswith("Resolve")
     assert mcp.call("list_open_loops")["groups"][0]["loops"][0]["id"] == loop_id  # still open
     assert "No action with id nope. Get ids from list_pending_actions" in mcp.call("approve_action", action_id="nope")["error"]
+
+
+def test_web_lookup(mcp: MCP, web: FakeTavily) -> None:
+    found = mcp.call("web_lookup", query="When does Google STEP close?")
+    assert found["answer"] == "Applications close Oct 15."
+    [page] = found["results"]
+    assert (page["title"], page["url"]) == ("STEP 2027", "https://x.dev/step")
+    assert len(page["snippet"]) <= 500  # keeps tool output short
+    assert web.queries == ["When does Google STEP close?"]
+    web.key = ""
+    assert "TAVILY_API_KEY" in mcp.call("web_lookup", query="anything")["error"]
+
+
+def test_propose_loop_update_from_chat(mcp: MCP, llm: FakeLLM) -> None:
+    loop_id = remember_demo(mcp, llm)["new_loops"][0]["id"]
+    proposed = mcp.call("propose_loop_update", loop_id=loop_id, due="2026-10-15",
+                        source_url="https://x.dev/step", source_title="STEP 2027")
+    assert proposed["proposed"] == "Set \"Wait for Sarah's response\" due Thu Oct 15? Found on the web: STEP 2027 (x.dev)"
+    assert mcp.call("list_pending_actions")["actions"][0]["id"] == proposed["id"]
+    assert mcp.call("list_open_loops")["groups"][0]["loops"][0]["due"] == "Fri 2026-10-02"  # unchanged until the yes
+    for bad in ({"source_url": "https://x.dev"}, {"resolve": True, "source_url": "file:///etc/passwd"},
+                {"due": "friday", "source_url": "https://x.dev"}):
+        assert "Can't propose that" in mcp.call("propose_loop_update", loop_id=loop_id, **bad)["error"], bad
+
+
+@pytest.mark.usefixtures("web_on")
+def test_watch_loop_from_chat(mcp: MCP, llm: FakeLLM) -> None:
+    loop_id = remember_demo(mcp, llm)["new_loops"][0]["id"]
+    started = mcp.call("watch_loop", loop_id=loop_id, query="NVIDIA hackathon winners")
+    assert started == {"watching": "Wait for Sarah's response", "query": "NVIDIA hackathon winners"}
+    assert mcp.call("list_open_loops")["groups"][0]["loops"][0]["watching_web"] == "NVIDIA hackathon winners"
+    assert mcp.call("watch_loop", loop_id=loop_id) == {"stopped_watching": "Wait for Sarah's response"}
+
+
+@pytest.mark.usefixtures("web_off")
+def test_watch_loop_without_tavily_key(mcp: MCP, llm: FakeLLM) -> None:
+    loop_id = remember_demo(mcp, llm)["new_loops"][0]["id"]
+    assert "TAVILY_API_KEY" in mcp.call("watch_loop", loop_id=loop_id, query="NVIDIA hackathon")["error"]

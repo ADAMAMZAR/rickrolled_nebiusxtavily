@@ -7,9 +7,11 @@ Every loop change writes an Activity row in the same transaction.
 
 import logging
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Any
+from urllib.parse import urlparse
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
@@ -21,7 +23,9 @@ from app.db import (
     ActionKind, ActionStatus, Activity, ActivityAction, ActivityBy, Goal, GoalStatus, LoopKind, LoopStatus, OpenLoop,
     PendingAction, Source, utcnow,
 )
-from app.extraction import Completer, extract
+from app.connectors.tavily import NOT_SET_UP, TavilyError, WebResult
+from app.extraction import WEB_NOTE, Completer, ExtractionError, extract
+from app.llm import LLMError
 
 log = logging.getLogger("continuum.engine")
 
@@ -477,13 +481,15 @@ def undo_activity(session: Session, activity_id: UUID) -> OpenLoop:
 
 # --- proposals: run only after the user's yes ---
 
+WEB_URL = r"^https?://\S+$"
+
 
 class LoopUpdate(BaseModel):
     """A change found on the web. Applied only when the user approves it."""
 
     resolve: bool = False
     due: date | None = None
-    source_url: str = Field(pattern=r"^https?://\S+$")  # shown as a link, so web pages only
+    source_url: str = Field(pattern=WEB_URL)  # shown as a link, so web pages only
     source_title: str | None = None
 
     @model_validator(mode="after")
@@ -526,7 +532,9 @@ def describe_action(session: Session, action: PendingAction) -> str:
     if action.kind == ActionKind.loop_update:
         change = LoopUpdate.model_validate(action.payload)
         what = f"Resolve {title}" if change.resolve else f"Set {title} due {change.due:%a %b} {change.due.day}"
-        return f"{what}? Found on the web: {change.source_title or change.source_url}"
+        site = urlparse(change.source_url).netloc.removeprefix("www.")
+        page = f"{change.source_title} ({site})" if change.source_title else change.source_url
+        return f"{what}? Found on the web: {page}"
     return action.kind.value  # Google kinds get their wording in step 10
 
 
@@ -596,3 +604,84 @@ def _get_action(session: Session, action_id: UUID) -> PendingAction:
     if action is None:
         raise NotFound(f"Action {action_id} not found")
     return action
+
+
+# --- web watch: findings only become proposals ---
+
+
+def web_enabled() -> bool:
+    return bool(settings.tavily_api_key.get_secret_value())
+
+
+def watch_loop(session: Session, loop_id: UUID, query: str | None, by: ActivityBy = ActivityBy.user) -> OpenLoop:
+    """Search the web for news about one open loop once a day, or stop (empty query).
+    Only open loops are searched, so resolving a loop stops its watch (reopening resumes it)."""
+    loop = _get(session, loop_id)
+    query = " ".join((query or "").split()) or None
+    if query is not None:
+        if not web_enabled():
+            raise InvalidRequest(NOT_SET_UP)
+        if loop.status != LoopStatus.open:
+            raise InvalidRequest("That loop is already resolved.")
+        if len(query) > 400:
+            raise InvalidRequest("Keep the search under 400 characters.")
+    if query == loop.watch_query:
+        return loop
+    undo = loop.model_dump(mode="json", include={"watch_query", "watch_checked_on"})
+    loop.watch_query, loop.watch_checked_on, loop.updated_at = query, None, utcnow()
+    _log(session, loop, ActivityAction.updated, by, f"watching the web: {query}" if query else "stopped watching the web", undo)
+    session.commit()
+    session.refresh(loop)
+    log.info("loop_watch id=%s on=%s", loop_id, query is not None)
+    return loop
+
+
+def watch_the_web(
+    session: Session, llm: Completer, search: Callable[[str], list[WebResult]], now: datetime | None = None
+) -> tuple[list[PendingAction], list[str]]:
+    """Search each watched open loop at most once a day. Returns the new proposals, and one line per
+    loop whose search failed (it's tried again tomorrow)."""
+    now = now or local_now()
+    before = {a.id for a in list_actions(session)}
+    errors: list[str] = []
+    for loop in list_loops(session):
+        if loop.watch_query is None or (loop.watch_checked_on or date.min) >= now.date():
+            continue
+        loop.watch_checked_on = now.date()  # one search a day, even if it fails
+        session.commit()
+        try:
+            results = search(loop.watch_query)
+        except TavilyError as e:
+            log.warning("web_watch_failed id=%s error=%s", loop.id, e)
+            errors.append(f"Couldn't check the web for \"{loop.title}\": {e}")
+            continue
+        log.info("web_watch_searched id=%s results=%d", loop.id, len(results))
+        _review_web_results(session, llm, loop, results, now)
+    return [a for a in list_actions(session) if a.id not in before], errors
+
+
+def _review_web_results(session: Session, llm: Completer, loop: OpenLoop, results: list[WebResult], now: datetime) -> None:
+    """Each new result goes through extraction alone, so a finding keeps its page. Only this loop's
+    resolve or due date count; anything else the model returns is dropped."""
+    # ponytail: a page counts as seen once it made a proposal, so pages with no finding are re-read
+    # (one LLM call each) while they stay in the week's results. Store seen URLs if that costs too much.
+    seen = {a.payload.get("source_url") for a in list_actions(session, None) if a.loop_id == loop.id}
+    goal = session.get(Goal, loop.goal_id) if loop.goal_id else None
+    context = [_loop_context(loop, {goal.id: goal.title} if goal else {})]
+    for page in results:
+        if page.url in seen or not re.match(WEB_URL, page.url):
+            continue
+        seen.add(page.url)
+        try:
+            found = extract(llm, f"{page.title}\n{page.url}\n\n{page.content}", now, goals=[], loops=context, note=WEB_NOTE)
+        except (ExtractionError, LLMError) as e:
+            log.warning("web_result_unreadable id=%s error=%s", loop.id, type(e).__name__)
+            continue
+        due = next((u.due for u in found.updated_loops if u.id == str(loop.id) and u.due and u.due != loop.due), None)
+        if str(loop.id) in found.resolved_loop_ids:
+            change = LoopUpdate(resolve=True, source_url=page.url, source_title=page.title or None)
+        elif due:
+            change = LoopUpdate(due=due, source_url=page.url, source_title=page.title or None)
+        else:
+            continue
+        propose_loop_update(session, loop.id, change)

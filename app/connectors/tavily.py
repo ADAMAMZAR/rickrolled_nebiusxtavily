@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from app.config import Settings
 
 URL = "https://api.tavily.com/search"
+NOT_SET_UP = "Web lookup isn't set up. Add TAVILY_API_KEY to .env (free key at tavily.com)."
 
 
 class TavilyError(Exception):
@@ -27,7 +28,7 @@ class TavilyClient:
     def __init__(self, settings: Settings, transport: httpx.BaseTransport | None = None) -> None:
         key = settings.tavily_api_key.get_secret_value()
         if not key:
-            raise TavilyError("Web lookup isn't set up. Add TAVILY_API_KEY to .env (free key at tavily.com).")
+            raise TavilyError(NOT_SET_UP)
         self._http = httpx.Client(headers={"Authorization": f"Bearer {key}"}, timeout=30, transport=transport)
 
     def search(self, query: str, *, answer: bool = False, time_range: str | None = None, max_results: int = 3) -> WebSearch:

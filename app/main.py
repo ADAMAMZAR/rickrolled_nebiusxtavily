@@ -4,19 +4,20 @@ from contextlib import asynccontextmanager
 from datetime import date
 from functools import cache
 from pathlib import Path
-from typing import Any, Literal, Protocol
+from typing import Annotated, Any, Literal, Protocol
 from uuid import UUID
 
 from fastapi import Depends, FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints
 from sqlmodel import Session, text
 from starlette.exceptions import HTTPException
 
 from app import engine as eng
 from app.config import settings
+from app.connectors.tavily import TavilyClient
 from app.db import ActionStatus, Activity, Goal, LoopStatus, OpenLoop, PendingAction, create_db_engine
 from app.extraction import Completer
 from app.hermes import HermesClient, HermesError, HermesReply
@@ -40,9 +41,18 @@ class SnoozeIn(BaseModel):
     until: date
 
 
+class WatchIn(BaseModel):
+    query: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+
+
 @cache
 def default_hermes() -> HermesClient:
     return HermesClient(settings)
+
+
+@cache
+def default_web() -> TavilyClient:
+    return TavilyClient(settings)
 
 
 def get_session(request: Request) -> Iterator[Session]:
@@ -75,11 +85,12 @@ def create_app(
     database_url: str | None = None,
     get_llm: Callable[[], Completer] | None = None,
     get_hermes: Callable[[], Agent] | None = None,
+    get_web: Callable[[], TavilyClient] | None = None,
 ) -> FastAPI:
-    """get_llm / get_hermes are factories, so a missing key only errors when it's needed."""
+    """get_llm / get_hermes / get_web are factories, so a missing key only errors when it's needed."""
     logging.basicConfig(level=settings.log_level)
     get_hermes = get_hermes or default_hermes
-    mcp = build_mcp(lambda: app.state.db, get_llm or (lambda: LLMClient(settings)))
+    mcp = build_mcp(lambda: app.state.db, get_llm or (lambda: LLMClient(settings)), get_web or default_web)
     # Served at /mcp/. Also creates the session manager that lifespan runs.
     mcp_app = mcp.streamable_http_app(streamable_http_path="/", stateless_http=True, json_response=True)
 
@@ -175,6 +186,18 @@ def create_app(
     def delete(loop_id: UUID, session: Session = Depends(get_session)) -> Response:
         eng.delete_loop(session, loop_id)
         return Response(status_code=204)
+
+    @app.get("/api/web/status")
+    def web_status() -> dict[str, bool]:
+        return {"enabled": eng.web_enabled()}
+
+    @app.put("/api/loops/{loop_id}/watch")
+    def watch(loop_id: UUID, body: WatchIn, session: Session = Depends(get_session)) -> dict[str, Any]:
+        return loop_out(session, eng.watch_loop(session, loop_id, body.query))
+
+    @app.delete("/api/loops/{loop_id}/watch")
+    def unwatch(loop_id: UUID, session: Session = Depends(get_session)) -> dict[str, Any]:
+        return loop_out(session, eng.watch_loop(session, loop_id, None))
 
     @app.get("/api/activity")
     def activity(loop_id: UUID | None = None, session: Session = Depends(get_session)) -> list[dict[str, Any]]:

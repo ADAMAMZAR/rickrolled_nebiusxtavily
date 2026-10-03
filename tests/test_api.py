@@ -176,3 +176,21 @@ def test_actions_approve_and_reject(client: TestClient, db_url: str) -> None:
     again = client.post(f"/api/actions/{first['id']}/approve")
     assert again.status_code == 422 and "already done" in again.json()["message"]
     assert client.post("/api/actions/00000000-0000-0000-0000-000000000000/reject").status_code == 404
+
+
+@pytest.mark.usefixtures("web_on")
+def test_watch_the_web(client: TestClient) -> None:
+    wait = seed(client)[0]
+    assert client.get("/api/web/status").json() == {"enabled": True}
+    watched = client.put(f"/api/loops/{wait['id']}/watch", json={"query": " NVIDIA hackathon "}).json()
+    assert (watched["watch_query"], watched["watch_checked_on"]) == ("NVIDIA hackathon", None)
+    assert client.put(f"/api/loops/{wait['id']}/watch", json={"query": "   "}).status_code == 422
+    assert client.delete(f"/api/loops/{wait['id']}/watch").json()["watch_query"] is None
+
+
+@pytest.mark.usefixtures("web_off")
+def test_web_features_are_off_without_a_key(client: TestClient) -> None:
+    wait = seed(client)[0]
+    assert client.get("/api/web/status").json() == {"enabled": False}
+    response = client.put(f"/api/loops/{wait['id']}/watch", json={"query": "NVIDIA hackathon"})
+    assert response.status_code == 422 and "TAVILY_API_KEY" in response.json()["message"]
