@@ -40,7 +40,7 @@ flowchart LR
 ```
 
 - **Continuum** (one Python process): FastAPI serves the dashboard, a REST API, and an MCP server at `/mcp/`. The continuity engine (`app/engine.py`) owns extraction, goal linking, dedup, the attention rules and storage.
-- **Hermes Agent** (second process) is the chat brain, for the dashboard chat, Telegram and the daily briefing. It decides when to save (`remember`) and when to answer from memory (`list_open_loops`, `needs_attention`, `list_goals`, `inspect_loop`, `resolve_loop`, `snooze_loop`). Proposals wait for your yes (`list_pending_actions`, `approve_action`, `reject_action`). With a Tavily key it can look things up (`web_lookup`) and watch a loop on the web (`watch_loop`); what it finds only becomes a proposal (`propose_loop_update`). It runs in its own `continuum` profile, so your default Hermes setup is untouched. Its built-in terminal, file, web, browser and memory tools are off on every platform. It only has Continuum's tools.
+- **Hermes Agent** (second process) is the chat brain, for the dashboard chat, Telegram and the daily briefing. It decides when to save (`remember`) and when to answer from memory (`list_open_loops`, `needs_attention`, `list_goals`, `inspect_loop`, `resolve_loop`, `snooze_loop`). Proposals wait for your yes (`list_pending_actions`, `approve_action`, `reject_action`). With a Tavily key it can look things up (`web_lookup`) and watch a loop on the web (`watch_loop`); what it finds only becomes a proposal (`propose_loop_update`). With Google connected it proposes calendar events and Gmail drafts (`propose_calendar_event`, `propose_gmail_draft`), created only after your yes. It runs in its own `continuum` profile, so your default Hermes setup is untouched. Its built-in terminal, file, web, browser and memory tools are off on every platform. It only has Continuum's tools.
 
 ### Why Hermes
 
@@ -115,15 +115,15 @@ hermes -p continuum cron create "0 8 * * *" (Get-Content hermes\briefing_prompt.
 
 The gateway (`hermes -p continuum gateway run`) must be running for it to fire. To try it now: `hermes -p continuum cron list` shows the job id, and `hermes -p continuum cron run <id>` sends it within a minute.
 
-### Web watch on Telegram (optional, needs Tavily and Telegram)
+### Email and web sync on Telegram (optional, needs Telegram plus Google or Tavily)
 
-Continuum checks each loop you asked it to watch at most once a day, and sends what it found to Telegram. Reply "yes" or "no". Nothing changes without your yes. Create the job once, after `setup_hermes.py` (it installs the script the job runs):
+Every 10 minutes Continuum reads new email from people linked to open loops, and once a day it checks each loop you asked it to watch on the web. It sends what changed to Telegram: loops an email closed or updated (undo in the dashboard), and web findings, which wait for your "yes" or "no". Create the job once, after `setup_hermes.py` (it installs the script the job runs):
 
 ```bash
 hermes -p continuum cron create "every 10m" --no-agent --script continuum_sync.py --deliver telegram --name sync
 ```
 
-The job runs `scripts/sync.py` without the LLM agent. Telegram only gets a message when something was found, or when a search failed. Re-run `setup_hermes.py` after moving the project.
+The job runs `scripts/sync.py` without the LLM agent. Telegram only gets a message when something changed or was found, or when a check failed (the same error is sent once, not every 10 minutes). Re-run `setup_hermes.py` after moving the project.
 
 ### Google setup (optional)
 
@@ -132,9 +132,12 @@ Lets Continuum read email from people you're waiting on and, with your yes, save
 1. In [Google Cloud Console](https://console.cloud.google.com/), create a project and enable the **Gmail API** and the **Google Calendar API**.
 2. Under **Google Auth Platform**, set the audience to **External** and add your Google account as a **test user**.
 3. Under **Clients**, create a client of type **Desktop app**. Download its JSON and save it as `data/client_secret.json`.
-4. Run the check: `python scripts/google_gate.py someone@example.com`. Your browser opens to connect Google. The script lists the last 5 emails from that address, saves a test draft (not sent) and creates a test event tomorrow at 10:00. Delete both afterwards.
+4. In the dashboard, open **Settings** and click **Connect Google**. Your browser opens Google's sign-in.
+5. Give someone's address, in chat (*"Sarah's email is sarah@nvidia.com"*) or in a loop's **Contact email**. From then on, `python scripts/sync.py` (or the cron job above) reads their new email and updates their loops. The first run reads the last 7 days (`SYNC_LOOKBACK_DAYS`).
 
-Access asked for: read Gmail, write drafts, write calendar events. The token is saved in `data/google_token.json` (gitignored). While the Google app is in testing, Google ends the connection after 7 days: run the check again to reconnect. To disconnect, delete that file and remove Continuum at [myaccount.google.com/permissions](https://myaccount.google.com/permissions).
+To check the connection on its own: `python scripts/google_gate.py someone@example.com` lists the last 5 emails from that address, saves a test draft (not sent) and creates a test event tomorrow at 10:00. Delete both afterwards.
+
+Access asked for: read Gmail, write drafts, write calendar events. The token is saved in `data/google_token.json` (gitignored). While the Google app is in testing, Google ends the connection after 7 days: connect again in Settings. **Disconnect** in Settings revokes access and deletes the token.
 
 ## Tests
 
@@ -148,10 +151,11 @@ The live suite runs the acceptance inputs against real Nemotron, e.g. "Alex said
 ## Privacy
 
 - Everything stays local in `data/continuum.db` (SQLite). What leaves your machine: text sent to Nebius for Nemotron to do its job; your Telegram messages if you turn Telegram on (they pass through Telegram's servers); with a Tavily key, only your watch searches and lookup questions go to Tavily, never your messages. Only the names of people you wait on go to the model, not their email addresses.
+- **Email** (if you connect Google): only mail *from* people you gave an address for, and only while they have an open loop. Continuum never lists or searches the rest of your inbox. Each email's subject and new text (quotes and signature removed, at most 4,000 characters) go to Nemotron. The text is stored only if it changed a loop. Attachments are never downloaded. **Forget email data** in Settings deletes all stored email text; loops made from it stay, marked "source deleted".
 - Every loop links to the message it came from, and you can delete any loop.
-- Continuum never sends anything on your behalf. Drafts are text for you to copy.
+- Continuum never sends anything on your behalf. Drafts are text for you to copy, or Gmail drafts you send yourself.
 - Messages that change nothing (questions, small talk) aren't stored by Continuum. Hermes keeps its own chat history in its `continuum` profile folder.
-- Logs record event names, counts and ids (`extraction_ok`, `loop_created`, `loop_resolved`, `extraction_failed`), never message content or API keys.
+- Logs record event names, counts and ids (`extraction_ok`, `loop_created`, `loop_resolved`, `email_synced`), never message content, email subjects or API keys.
 
 ## Limitations
 

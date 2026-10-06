@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     # Google (optional): read mail from linked people, Gmail drafts, Calendar events. README: Google setup.
     google_client_secret_file: str = "./data/client_secret.json"
     google_token_file: str = "./data/google_token.json"  # written when you connect; never commit it
+    sync_lookback_days: int = 7  # how far back the first email sync reads
     timezone: str = "Asia/Kuala_Lumpur"
     stale_days: int = 4  # days without an update before an undated loop needs attention
     database_url: str = "sqlite:///./data/continuum.db"

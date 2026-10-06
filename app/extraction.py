@@ -47,6 +47,9 @@ INVALID_MESSAGE = "The message could not be safely converted into structured con
 
 WEB_NOTE = "These are web search results about this open loop. Only report a change a result clearly states."
 
+EMAIL_NOTE = ("This is an email to the user from {name}. The existing open loops are the ones involving {name}. "
+              "Only report what the email clearly states.")
+
 
 class ExtractionError(Exception):
     pass

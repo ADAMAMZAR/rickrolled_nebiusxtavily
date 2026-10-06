@@ -60,6 +60,13 @@ header { display: flex; align-items: baseline; gap: 12px; padding: 18px 2px 16px
 header h1 { margin: 0; font-size: var(--title); font-weight: 650; letter-spacing: -0.01em; display: flex; align-items: center; gap: 8px; }
 header h1 svg { color: var(--accent); width: 20px; height: 20px; stroke-width: 2.4; }
 header p { margin: 0; color: var(--muted); font-size: var(--body); }
+header .settings { margin-left: auto; align-self: center; }
+.settings summary { display: inline-flex; }
+.settings .menu-pop { min-width: 280px; gap: 10px; padding: 12px; font-size: var(--body); }
+.settings .menu-pop p { margin: 0; color: var(--muted); font-size: var(--small); }
+.settings .menu-pop h4 { margin: 0; font-size: var(--small); font-weight: 620; }
+.settings .menu-pop .row-actions { flex-wrap: wrap; }
+.ok { color: var(--accent); font-weight: 600; }
 main { grid-row: 4; display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: 20px; min-height: 0; }  /* fills the rest, even when the strips above are hidden */
 .col { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); display: flex; flex-direction: column; min-height: 0; }
 .col > h2 { margin: 0; padding: 14px 18px 12px; font-size: var(--body); font-weight: 620; border-bottom: 1px solid var(--line); display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
@@ -197,12 +204,17 @@ details.loop.resolved .kind { color: var(--accent); }
   <symbol id="i-commitment" viewBox="0 0 24 24"><path d="M4 12h12M12 6l6 6-6 6"/></symbol>
   <symbol id="i-done" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="3.5"/><path d="M8.5 12.2l2.4 2.4 4.6-5"/></symbol>
   <symbol id="i-send" viewBox="0 0 24 24"><path d="M5 12h13M13 6l6 6-6 6"/></symbol>
+  <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/></symbol>
 </svg>
 
 <div class="app">
   <header>
     <h1><svg class="i"><use href="#i-loop"/></svg>Continuum</h1>
     <p>Remembers what's still unfinished.</p>
+    <details class="menu settings" id="settings">
+      <summary class="btn small" aria-label="Settings"><svg class="i"><use href="#i-gear"/></svg>Settings</summary>
+      <div class="menu-pop" id="settings-panel"></div>
+    </details>
   </header>
   <section class="col attention" id="pending" aria-labelledby="pending-h" hidden>
     <h2><span id="pending-h">Pending actions</span> <span class="count" id="pending-count"></span></h2>
@@ -360,6 +372,42 @@ async function loadPending() {
 
 function refresh() { return Promise.all([loadLoops(), loadAttention(), loadPending()]); }
 
+// --- settings: Google connection and email data ---
+async function loadSettings() {
+  const panel = $("settings-panel");
+  let g;
+  try { g = await api("/api/google/status"); }
+  catch (e) { panel.replaceChildren(h("p", { class: "late" }, `Couldn't load settings: ${e.message}`)); return; }
+  const google = async (path, button, waiting) => {
+    button.disabled = true; button.textContent = waiting;
+    try { await api(path, { method: "POST" }); } catch (e) { alert(e.message); }
+    loadSettings();
+  };
+  const last = g.last_sync ? new Date(g.last_sync).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "not yet";
+  panel.replaceChildren(...[
+    h("h4", {}, "Google"),
+    g.connected
+      ? [h("p", {}, h("span", { class: "ok" }, "Connected ✓"), ` · Last email check: ${last}`),
+         h("p", {}, "Reads email only from people linked to open loops. Drafts and calendar events need your OK. Nothing is ever sent."),
+         h("span", { class: "row-actions" },
+           h("button", { class: "btn small", type: "button", onclick: (e) => google("/api/google/disconnect", e.currentTarget, "Disconnecting…") }, "Disconnect"))]
+      : g.set_up
+        ? [h("p", {}, "Not connected. Connecting opens Google's sign-in in your browser."),
+           h("span", { class: "row-actions" },
+             h("button", { class: "btn small primary", type: "button", onclick: (e) => google("/api/google/connect", e.currentTarget, "Waiting for the browser…") }, "Connect Google"))]
+        : h("p", {}, "Not set up: add your OAuth client file first (README: Google setup)."),
+    h("h4", {}, "Email data"),
+    h("p", {}, "Deletes the text of every email Continuum read. Loops made from them stay."),
+    h("span", { class: "row-actions" },
+      h("button", { class: "btn small danger", type: "button", onclick: async () => {
+        if (!confirm("Forget all email text Continuum stored? Loops stay, marked \"source deleted\".")) return;
+        try { const { forgotten } = await api("/api/google/forget", { method: "POST" }); alert(`Forgot ${forgotten} email${forgotten === 1 ? "" : "s"}.`); }
+        catch (e) { alert(e.message); }
+        refresh();
+      } }, "Forget email data")),
+  ].flat());
+}
+
 // --- loops ---
 async function loadLoops() {
   const status = $("show-resolved").checked ? "all" : "open";
@@ -420,7 +468,7 @@ function loopRow(l, fresh, open) {
   const due = l.due && !resolved ? dueInfo(l.due) : null;
   const sub = [
     l.waiting_on && `from ${l.waiting_on}`,
-    resolved && "resolved",
+    resolved && (l.resolved_by === "email" ? "closed by email" : "resolved"),
     isSnoozed(l) && `snoozed until ${shortDate(localDate(l.snoozed_until))}`,
     !resolved && l.watch_query && "watching the web",
   ].filter(Boolean).join(" · ");
@@ -458,8 +506,11 @@ async function loadDetail(row, id) {
     h("dl", {}, fields.map(([k, v]) => [h("dt", {}, k), h("dd", {}, v)])),
     h("figure", { class: "why" },
       h("h4", {}, "Why Continuum knows this"),
-      h("blockquote", {}, d.source.text),
-      h("figcaption", {}, `You said this ${said.toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`)),
+      d.source.text ? h("blockquote", {}, d.source.text) : h("p", { class: "due" }, "Source deleted."),
+      h("figcaption", {}, d.source.kind === "email"
+        ? [`✉ Email${d.source.sender ? ` from ${d.source.sender}` : ""} · ${shortDate(said)}`,
+           d.source.url && [" · ", h("a", { href: d.source.url, target: "_blank", rel: "noopener" }, "Open in Gmail")]]
+        : `You said this ${said.toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`)),
     history.length > 0 && h("div", { class: "history" }, h("h4", {}, "History"),
       h("ul", {}, history.map((a) => h("li", {},
         h("span", {}, `${new Date(a.created_at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} · ${a.action.replace("_", " ")} by ${BY[a.by]}`,
@@ -557,6 +608,7 @@ $("input").addEventListener("keydown", (e) => {
 });
 $("show-resolved").addEventListener("change", loadLoops);
 $("show-snoozed").addEventListener("change", loadLoops);
+$("settings").addEventListener("toggle", () => { if ($("settings").open) loadSettings(); });
 api("/api/web/status").then((s) => { webEnabled = s.enabled; }, (e) => console.warn("web status:", e.message)).finally(refresh);
 </script>
 </body>
