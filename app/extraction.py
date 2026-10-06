@@ -17,7 +17,8 @@ Extract:
 - new_loops: concrete unresolved items:
   - kind "task": something the user needs to do.
   - kind "commitment": something the user promised someone.
-  - kind "waiting": something the user is waiting on from someone else. Set waiting_on to that person.
+  - kind "waiting": something the user is waiting on from someone else. Set waiting_on to who they wait on, as a
+    short name (e.g. "Sarah", "NVIDIA"). If it's someone in the known people list, use that name exactly.
 - updated_loops: changes to an EXISTING open loop (by id): a new due date, next action or summary.
 - resolved_loop_ids: ids of EXISTING open loops that the message clearly says are finished or received.
 
@@ -96,12 +97,19 @@ class ExtractionResult(_Model):
 
 
 def build_messages(
-    text: str, now: datetime, goals: list[dict[str, Any]], loops: list[dict[str, Any]], note: str | None = None
+    text: str,
+    now: datetime,
+    goals: list[dict[str, Any]],
+    loops: list[dict[str, Any]],
+    note: str | None = None,
+    people: list[str] | None = None,
 ) -> list[dict[str, str]]:
-    """`note` says where text that isn't the user's own message came from, e.g. WEB_NOTE."""
+    """`note` says where text that isn't the user's own message came from, e.g. WEB_NOTE.
+    `people` are names only: their emails never go to the model."""
     context = (
         f"Current date: {now:%A %Y-%m-%d} ({now.tzinfo})\n\n"
         f"Existing active goals: {json.dumps(goals) if goals else 'none'}\n\n"
+        f"Known people: {json.dumps(people) if people else 'none'}\n\n"
         f"Existing open loops: {json.dumps(loops) if loops else 'none'}\n\n"
         + (f"{note}\n\nText" if note else "User message")
         + f':\n"""\n{text}\n"""'
@@ -116,9 +124,10 @@ def extract(
     goals: list[dict[str, Any]],
     loops: list[dict[str, Any]],
     note: str | None = None,
+    people: list[str] | None = None,
 ) -> ExtractionResult:
     """Call the LLM and validate its JSON. One retry with the error attached, then fail."""
-    messages = build_messages(text, now, goals, loops, note)
+    messages = build_messages(text, now, goals, loops, note, people)
     for attempt in (1, 2):
         raw = llm.complete(messages, json_mode=True)
         try:

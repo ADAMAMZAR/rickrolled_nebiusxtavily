@@ -18,7 +18,7 @@ from starlette.exceptions import HTTPException
 from app import engine as eng
 from app.config import settings
 from app.connectors.tavily import TavilyClient
-from app.db import ActionStatus, Activity, Goal, LoopStatus, OpenLoop, PendingAction, create_db_engine
+from app.db import ActionStatus, Activity, Goal, LoopStatus, OpenLoop, PendingAction, Person, create_db_engine
 from app.extraction import Completer
 from app.hermes import HermesClient, HermesError, HermesReply
 from app.llm import LLMClient
@@ -39,6 +39,10 @@ class ChatIn(BaseModel):
 
 class SnoozeIn(BaseModel):
     until: date
+
+
+class PersonIn(BaseModel):
+    email: str | None = None  # empty or null clears it
 
 
 class WatchIn(BaseModel):
@@ -66,10 +70,13 @@ def error(status: int, code: str, message: str) -> JSONResponse:
 
 def loop_out(session: Session, loop: OpenLoop) -> dict[str, Any]:
     goal = session.get(Goal, loop.goal_id) if loop.goal_id else None
+    person = session.get(Person, loop.person_id) if loop.person_id else None
     return {
         **loop.model_dump(mode="json"),
         "goal_title": goal.title if goal else None,
         "goal_status": goal.status.value if goal else None,
+        "person_name": person.name if person else None,
+        "person_email": person.email if person else None,
     }
 
 
@@ -186,6 +193,15 @@ def create_app(
     def delete(loop_id: UUID, session: Session = Depends(get_session)) -> Response:
         eng.delete_loop(session, loop_id)
         return Response(status_code=204)
+
+    @app.get("/api/people")
+    def people(session: Session = Depends(get_session)) -> list[dict[str, Any]]:
+        return [p.model_dump(mode="json") for p in eng.list_people(session)]
+
+    @app.patch("/api/people/{person_id}")
+    def update_person(person_id: UUID, body: PersonIn, session: Session = Depends(get_session)) -> dict[str, Any]:
+        person = eng.get_person(session, person_id)
+        return eng.set_person_email(session, person.name, body.email).model_dump(mode="json")
 
     @app.get("/api/web/status")
     def web_status() -> dict[str, bool]:

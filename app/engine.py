@@ -21,7 +21,7 @@ from sqlmodel import Session, col, delete, func, or_, select, update
 from app.config import settings
 from app.db import (
     ActionKind, ActionStatus, Activity, ActivityAction, ActivityBy, Goal, GoalStatus, LoopKind, LoopStatus, OpenLoop,
-    PendingAction, Source, utcnow,
+    PendingAction, Person, Source, utcnow,
 )
 from app.connectors.tavily import NOT_SET_UP, TavilyError, WebResult
 from app.extraction import WEB_NOTE, Completer, ExtractionError, extract
@@ -81,6 +81,7 @@ def process_message(
     goals = [s.goal for s in list_goals(session)]
     open_loops = list_loops(session)
     goal_titles = {g.id: g.title for g in goals}
+    people = {normalize(p.name): p for p in list_people(session)}
     try:
         result = extract(
             llm,
@@ -88,6 +89,7 @@ def process_message(
             now,
             goals=[{"title": g.title} for g in goals],
             loops=[_loop_context(loop, goal_titles) for loop in open_loops],
+            people=[p.name for p in people.values()],
         )
     except Exception as e:
         log.warning("extraction_failed error=%s", type(e).__name__)
@@ -120,6 +122,8 @@ def process_message(
                 due=candidate.due,
                 next_action=candidate.next_action,
             )
+            if created.kind == LoopKind.waiting and normalize(created.waiting_on or ""):
+                created.person_id = _find_or_add_person(session, created.waiting_on, people).id
             changes.created_loops.append(created)
             _log(session, created, ActivityAction.created, by)
 
@@ -685,3 +689,53 @@ def _review_web_results(session: Session, llm: Completer, loop: OpenLoop, result
         else:
             continue
         propose_loop_update(session, loop.id, change)
+
+
+# --- people: who the user waits on ---
+
+EMAIL = r"[^@\s]+@[^@\s]+\.[^@\s]+"
+
+
+def list_people(session: Session) -> list[Person]:
+    return list(session.exec(select(Person).order_by(col(Person.name))).all())
+
+
+def get_person(session: Session, person_id: UUID) -> Person:
+    person = session.get(Person, person_id)
+    if person is None:
+        raise NotFound(f"Person {person_id} not found")
+    return person
+
+
+def person_loops(session: Session, person_id: UUID) -> list[OpenLoop]:
+    """Open loops waiting on this person."""
+    return [loop for loop in list_loops(session) if loop.person_id == person_id]
+
+
+def set_person_email(session: Session, name: str, email: str | None) -> Person:
+    """Save the email the user gave for someone (empty clears it). Creates the person if new, and links
+    open waiting loops on that name that have no person yet. Emails are never guessed."""
+    name = " ".join(name.split())
+    if not normalize(name):
+        raise InvalidRequest("Say whose email this is.")
+    email = (email or "").strip().lower() or None
+    if email and not re.fullmatch(EMAIL, email):
+        raise InvalidRequest(f"{email} isn't an email address.")
+    person = _find_or_add_person(session, name, {normalize(p.name): p for p in list_people(session)})
+    person.email = email
+    for loop in list_loops(session):
+        if loop.person_id is None and loop.kind == LoopKind.waiting and normalize(loop.waiting_on or "") == normalize(name):
+            loop.person_id = person.id
+    session.commit()
+    session.refresh(person)
+    log.info("person_email_set id=%s has_email=%s", person.id, email is not None)
+    return person
+
+
+def _find_or_add_person(session: Session, name: str, people: dict[str, Person]) -> Person:
+    """Match by name, ignoring case and punctuation (no commit)."""
+    key = normalize(name)
+    if key not in people:
+        people[key] = Person(name=name)
+        session.add(people[key])
+    return people[key]

@@ -55,6 +55,8 @@ flowchart LR
 - If sync changed anything, the script prints a summary. Hermes delivers stdout to Telegram, and prints nothing when nothing changed. **Check in the docs** that empty output means no message. If not, have the script exit early and document it.
 - **Connectors** are thin wrappers in `app/connectors/`. Domain logic stays in the engine.
 - Before building, **check whether Hermes or a well-maintained MCP server already offers Gmail/Calendar access.** Only use it if it supports reading by sender and creating drafts. Otherwise build our own. Ingestion into the engine is ours either way.
+  *Checked 2026-10-06: Hermes reaches Gmail/Calendar only through Codex plugins or Google's MCP servers. Both give the agent access, not `sync.py`, and the agent shouldn't read mail directly (same reason as the web). So we build our own: `app/connectors/google.py`, OAuth via `google-auth-oauthlib` (Desktop app flow + token refresh), API calls via `httpx`.*
+- *No-agent cron, checked in the Hermes 0.21 docs and source: empty stdout = no message; non-zero exit = an error alert; stderr is shown only on failure. Scripts must live in the profile's `scripts/` folder and run with Hermes' own Python, so `setup_hermes.py` writes `continuum_sync.py` there, which runs `scripts/sync.py` with Continuum's Python.*
 
 ---
 
@@ -107,8 +109,8 @@ PendingAction:                   # NEW: anything that touches Google, and every 
 No migration, same as Phase 2: delete the old `.db` file after pulling, and `create_all` builds the new schema.
 
 **Person linking:**
-- Extraction gets the known people list (name, email) and returns `person` for new waiting loops. The engine matches it by case-insensitive name, or creates the Person.
-- The email is filled in when the user says it (*"Sarah's email is sarah@nvidia.com"*). A new tool `set_person_email(name, email)` handles that.
+- Extraction gets the known people's names (never their emails) and sets `waiting_on` to a known name when it's the same person. The engine links a new waiting loop to the Person with that name (case-insensitive), or creates one. *(Simpler than a separate `person` field: same result, no schema change.)*
+- The email is filled in when the user says it (*"Sarah's email is sarah@nvidia.com"*). A new tool `set_person_email(name, email)` handles that. It also links open waiting loops on that name that have no person yet.
 - The UI loop detail has an editable "Contact email" field.
 - No automatic email guessing.
 
@@ -251,8 +253,11 @@ Web before Google: Tavily needs one API key and no OAuth, so it's lower risk, an
 5. `web_lookup` + `propose_loop_update`, then web watch in `sync.py` (mocked tests, then real).
    *Done 2026-10-03 except a real Tavily search (no key yet). MCP: `web_lookup`, `propose_loop_update`, `watch_loop`. REST: watch routes + `GET /api/web/status`. UI: Watch the web form in the loop detail, "watching the web" in the list. `scripts/sync.py` searches each watched open loop at most once a day (marked checked before the search, so a failure waits until tomorrow) and prints new proposals and failed searches, or nothing. Each new result is extracted alone with `WEB_NOTE`, so a finding keeps its page; only that loop's resolve or new due count. A page counts as seen once it made a proposal for that loop (nothing else is stored), so pages with no finding are re-read while they stay in the week's results. Only open loops are searched: resolving stops the watch, reopening resumes it. Checked live 2026-10-03: real Nemotron on canned pages (`tests/test_web_live.py`: winners → resolve, new date → due, unrelated → nothing); real Hermes: "keep an eye on the hackathon results" → `watch_loop`, a question → `web_lookup`. `sync.py` logs to stderr: check in step 6 whether Hermes delivers stderr too.*
 6. Hermes cron (`no_agent`) runs `sync.py` → Telegram summary.
+   *Done 2026-10-06. `setup_hermes.py` writes `continuum_sync.py` into the profile's `scripts/`; it runs `scripts/sync.py` with Continuum's Python, keeps Hermes' Python paths out, and passes UTF-8 through. README has the one `cron create` command. Checked through the real Hermes scheduler with a temporary local-delivery job: a run with nothing to report is silent; a stub's proposal line with non-ASCII text came through intact. Telegram delivery is the same path as the briefing (checked in Phase 2).*
 7. Person linking in extraction + `set_person_email` + UI field.
+   *Done 2026-10-06. See §5. REST: `GET /api/people`, `PATCH /api/people/{id}`. UI: Contact email in the loop detail. Checked live: Nemotron reuses a known name ("Sarah" → "Sarah Chen", `tests/test_acceptance_live.py`); real Hermes: "Sarah's email is …" → `set_person_email`.*
 8. **Google gate:** OAuth connect, list the last 5 emails from one address, create one draft, create one event, all from a scratch script.
+   *Code done 2026-10-06: `app/connectors/google.py` (mocked tests) + `scripts/google_gate.py`. **Gate not passed yet: needs your OAuth client (README: Google setup) and your consent in the browser.** In testing mode Google ends the connection after 7 days.*
 9. `ingest_email` in `sync.py` with mocked tests, then real Gmail.
 10. Google proposals (calendar event, Gmail draft).
 11. Run the §1 demo end to end. Add a Phase 3 section + Google and Tavily setup to the README.

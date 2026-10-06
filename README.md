@@ -115,6 +115,27 @@ hermes -p continuum cron create "0 8 * * *" (Get-Content hermes\briefing_prompt.
 
 The gateway (`hermes -p continuum gateway run`) must be running for it to fire. To try it now: `hermes -p continuum cron list` shows the job id, and `hermes -p continuum cron run <id>` sends it within a minute.
 
+### Web watch on Telegram (optional, needs Tavily and Telegram)
+
+Continuum checks each loop you asked it to watch at most once a day, and sends what it found to Telegram. Reply "yes" or "no". Nothing changes without your yes. Create the job once, after `setup_hermes.py` (it installs the script the job runs):
+
+```bash
+hermes -p continuum cron create "every 10m" --no-agent --script continuum_sync.py --deliver telegram --name sync
+```
+
+The job runs `scripts/sync.py` without the LLM agent. Telegram only gets a message when something was found, or when a search failed. Re-run `setup_hermes.py` after moving the project.
+
+### Google setup (optional)
+
+Lets Continuum read email from people you're waiting on and, with your yes, save Gmail drafts and calendar events. It never sends email.
+
+1. In [Google Cloud Console](https://console.cloud.google.com/), create a project and enable the **Gmail API** and the **Google Calendar API**.
+2. Under **Google Auth Platform**, set the audience to **External** and add your Google account as a **test user**.
+3. Under **Clients**, create a client of type **Desktop app**. Download its JSON and save it as `data/client_secret.json`.
+4. Run the check: `python scripts/google_gate.py someone@example.com`. Your browser opens to connect Google. The script lists the last 5 emails from that address, saves a test draft (not sent) and creates a test event tomorrow at 10:00. Delete both afterwards.
+
+Access asked for: read Gmail, write drafts, write calendar events. The token is saved in `data/google_token.json` (gitignored). While the Google app is in testing, Google ends the connection after 7 days: run the check again to reconnect. To disconnect, delete that file and remove Continuum at [myaccount.google.com/permissions](https://myaccount.google.com/permissions).
+
 ## Tests
 
 ```bash
@@ -126,7 +147,7 @@ The live suite runs the acceptance inputs against real Nemotron, e.g. "Alex said
 
 ## Privacy
 
-- Everything stays local in `data/continuum.db` (SQLite). The only data that leaves your machine is what goes to Nebius for Nemotron to do its job, plus your Telegram messages if you turn Telegram on (they pass through Telegram's servers).
+- Everything stays local in `data/continuum.db` (SQLite). What leaves your machine: text sent to Nebius for Nemotron to do its job; your Telegram messages if you turn Telegram on (they pass through Telegram's servers); with a Tavily key, only your watch searches and lookup questions go to Tavily, never your messages. Only the names of people you wait on go to the model, not their email addresses.
 - Every loop links to the message it came from, and you can delete any loop.
 - Continuum never sends anything on your behalf. Drafts are text for you to copy.
 - Messages that change nothing (questions, small talk) aren't stored by Continuum. Hermes keeps its own chat history in its `continuum` profile folder.
@@ -142,7 +163,7 @@ The live suite runs the acceptance inputs against real Nemotron, e.g. "Alex said
 - Goals are marked done from the dashboard only, not by chat.
 - Chat replies take a few seconds (one Nemotron tool call plus the reply, ~3–9 s in testing).
 - Telegram and the daily briefing only work while Hermes' gateway is running on your machine.
-- The daily briefing only fires if the gateway is running and the PC is awake at 8:00. A missed run is skipped, not sent late.
+- Scheduled jobs (the daily briefing, web watch) only run while the gateway is running. A briefing missed while it was off is sent once when the gateway starts again, so it can arrive late.
 
 ## License
 

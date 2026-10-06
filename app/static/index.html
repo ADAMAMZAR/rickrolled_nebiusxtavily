@@ -165,11 +165,11 @@ details.loop.resolved .kind { color: var(--accent); }
 .history ul { list-style: none; margin: 4px 0 14px; padding: 0; }
 .history li { display: flex; gap: 8px; align-items: center; min-height: 30px; color: var(--muted); font-size: var(--small); }
 .history a { color: var(--accent); }
-.watch { margin: 0 0 14px; }
-.watch h4 { margin: 0 0 4px; font-size: var(--small); font-weight: 620; }
-.watch p { margin: 0 0 6px; color: var(--muted); font-size: var(--small); }
-.watch .row { display: flex; gap: 6px; }
-.watch input { flex: 1; min-width: 0; padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); }
+.field { margin: 0 0 14px; }
+.field h4 { margin: 0 0 4px; font-size: var(--small); font-weight: 620; }
+.field p { margin: 0 0 6px; color: var(--muted); font-size: var(--small); }
+.field .row { display: flex; gap: 6px; }
+.field input { flex: 1; min-width: 0; padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); }
 .actions { display: flex; gap: 8px; }
 .skeleton { height: 14px; border-radius: 4px; background: var(--line); margin: 8px 0; animation: blink 1.2s infinite; }
 
@@ -454,7 +454,7 @@ async function loadDetail(row, id) {
   const snooze = !resolved && (isSnoozed(d)
     ? h("button", { class: "btn", type: "button", onclick: () => act(`/api/loops/${id}/unsnooze`, "POST") }, "Unsnooze")
     : snoozeMenu(id));
-  panel.replaceChildren(
+  panel.replaceChildren(...[  // native replaceChildren would print false/null as text; h() skips them, this doesn't
     h("dl", {}, fields.map(([k, v]) => [h("dt", {}, k), h("dd", {}, v)])),
     h("figure", { class: "why" },
       h("h4", {}, "Why Continuum knows this"),
@@ -465,18 +465,31 @@ async function loadDetail(row, id) {
         h("span", {}, `${new Date(a.created_at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} · ${a.action.replace("_", " ")} by ${BY[a.by]}`,
           a.detail && " · ", /^https?:\/\//.test(a.detail) ? h("a", { href: a.detail, target: "_blank", rel: "noopener" }, "source") : a.detail),
         a.can_undo && h("button", { class: "btn small", type: "button", onclick: () => act(`/api/activity/${a.id}/undo`, "POST") }, "Undo"))))),
+    d.person_id && contactForm(d),
     webEnabled && !resolved && watchForm(d),
     h("div", { class: "actions" },
       h("button", { class: "btn primary", type: "button", onclick: () => act(`/api/loops/${id}/${resolved ? "reopen" : "resolve"}`, "POST") }, resolved ? "Reopen" : "Resolve"),
       snooze,
-      h("button", { class: "btn danger", type: "button", onclick: () => confirm(`Delete "${d.title}"? This can't be undone.`) && act(`/api/loops/${id}`, "DELETE") }, "Delete")));
+      h("button", { class: "btn danger", type: "button", onclick: () => confirm(`Delete "${d.title}"? This can't be undone.`) && act(`/api/loops/${id}`, "DELETE") }, "Delete"))].filter(Boolean));
+}
+
+function contactForm(d) {
+  const input = h("input", { type: "email", value: d.person_email || "", placeholder: `${d.person_name}'s email`,
+    "aria-label": `${d.person_name}'s email` });
+  return h("form", { class: "field", onsubmit: (e) => {
+      e.preventDefault();
+      act(`/api/people/${d.person_id}`, "PATCH", { email: input.value.trim() || null });
+    } },
+    h("h4", {}, "Contact email"),
+    h("p", {}, `Lets Continuum notice when ${d.person_name} replies. It never sends email.`),
+    h("div", { class: "row" }, input, h("button", { class: "btn small", type: "submit" }, "Save")));
 }
 
 function watchForm(d) {
   const input = h("input", { type: "text", maxlength: 400, "aria-label": "Web search",
     value: d.watch_query || [d.goal_title, d.title].filter(Boolean).join(" ") });
   const checked = d.watch_checked_on ? ` Last checked ${shortDate(localDate(d.watch_checked_on))}.` : "";
-  return h("form", { class: "watch", onsubmit: (e) => {
+  return h("form", { class: "field", onsubmit: (e) => {
       e.preventDefault();
       if (input.value.trim()) act(`/api/loops/${d.id}/watch`, "PUT", { query: input.value.trim() });
     } },

@@ -17,7 +17,7 @@ from sqlmodel import Session
 
 from app import engine as eng
 from app.connectors.tavily import TavilyClient, TavilyError
-from app.db import ActivityBy, Goal, LoopStatus, OpenLoop
+from app.db import ActivityBy, Goal, LoopStatus, OpenLoop, Person
 from app.extraction import Completer, ExtractionError
 from app.llm import LLMError
 
@@ -112,8 +112,10 @@ def build_mcp(
         with session() as s:
             detail = eng.get_loop(s, _uuid(loop_id))
             loop = detail.loop
+            person = s.get(Person, loop.person_id) if loop.person_id else None
             return {
                 **_loop(s, loop),
+                **_clean({"contact_email": person.email if person else None}),
                 "summary": loop.summary,
                 "status": loop.status.value,
                 "source": {
@@ -150,6 +152,18 @@ def build_mcp(
         with session() as s:
             action = eng.reject_action(s, _uuid(action_id, "action", "list_pending_actions"))
             return {"rejected": eng.describe_action(s, action)}
+
+    @mcp.tool()
+    def set_person_email(name: str, email: str) -> dict[str, Any]:
+        """Save someone's email address when the user gives it, e.g. "Sarah's email is sarah@nvidia.com".
+        Continuum uses it to notice their replies and never sends email. Never guess an address."""
+        with session() as s:
+            person = eng.set_person_email(s, name, email)
+            return {
+                "person": person.name,
+                "email": person.email,
+                "waiting_on_them": [loop.title for loop in eng.person_loops(s, person.id)],
+            }
 
     @mcp.tool()
     def web_lookup(query: str) -> dict[str, Any]:

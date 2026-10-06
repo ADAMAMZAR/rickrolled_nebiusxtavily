@@ -194,3 +194,15 @@ def test_web_features_are_off_without_a_key(client: TestClient) -> None:
     assert client.get("/api/web/status").json() == {"enabled": False}
     response = client.put(f"/api/loops/{wait['id']}/watch", json={"query": "NVIDIA hackathon"})
     assert response.status_code == 422 and "TAVILY_API_KEY" in response.json()["message"]
+
+
+def test_people_and_contact_email(client: TestClient) -> None:
+    wait = next(l for l in seed(client) if l["waiting_on"] == "Sarah")
+    assert (wait["person_name"], wait["person_email"]) == ("Sarah", None)
+    [sarah] = client.get("/api/people").json()
+    updated = client.patch(f"/api/people/{sarah['id']}", json={"email": "sarah@nvidia.com"}).json()
+    assert updated["email"] == "sarah@nvidia.com"
+    assert client.get(f"/api/loops/{wait['id']}").json()["person_email"] == "sarah@nvidia.com"
+    assert client.patch(f"/api/people/{sarah['id']}", json={"email": "nope"}).status_code == 422
+    assert client.patch(f"/api/people/{sarah['id']}", json={"email": None}).json()["email"] is None
+    assert client.patch("/api/people/00000000-0000-0000-0000-000000000000", json={"email": None}).status_code == 404

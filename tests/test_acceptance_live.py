@@ -80,3 +80,11 @@ def test_unrelated_loop_gets_no_goal(session: Session, llm: LLMClient) -> None:
     prep = say(session, llm, "I need to prepare for the NVIDIA interview.").created_loops
     assert len(prep) == 1 and prep[0].goal_id is not None
     assert len(eng.list_goals(session)) == 1
+
+
+def test_a_known_person_keeps_their_name(session: Session, llm: LLMClient) -> None:
+    """Spec §5: the model reuses a known person's name, so the loop links to that Person."""
+    sarah = eng.set_person_email(session, "Sarah Chen", "sarah@nvidia.com")
+    changes = say(session, llm, "Sarah said she'll send the offer letter next week.")
+    [loop] = changes.created_loops
+    assert (loop.kind, loop.person_id) == (LoopKind.waiting, sarah.id), loop.waiting_on

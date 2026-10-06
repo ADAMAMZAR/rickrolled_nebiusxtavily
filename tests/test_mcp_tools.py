@@ -92,6 +92,7 @@ def test_lists_exactly_the_tools_hermes_includes(mcp: MCP) -> None:
     assert names == {
         "remember", "list_open_loops", "needs_attention", "list_goals", "inspect_loop", "resolve_loop", "snooze_loop",
         "list_pending_actions", "approve_action", "reject_action", "web_lookup", "propose_loop_update", "watch_loop",
+        "set_person_email",
     }
     include = yaml.safe_load(HERMES_CONFIG.read_text(encoding="utf-8"))["mcp_servers"]["continuum"]["tools"]["include"]
     assert set(include) == names  # a tool missing from tools.include is invisible to Hermes
@@ -238,3 +239,12 @@ def test_watch_loop_from_chat(mcp: MCP, llm: FakeLLM) -> None:
 def test_watch_loop_without_tavily_key(mcp: MCP, llm: FakeLLM) -> None:
     loop_id = remember_demo(mcp, llm)["new_loops"][0]["id"]
     assert "TAVILY_API_KEY" in mcp.call("watch_loop", loop_id=loop_id, query="NVIDIA hackathon")["error"]
+
+
+def test_set_person_email_from_chat(mcp: MCP, llm: FakeLLM) -> None:
+    remember_demo(mcp, llm)
+    saved = mcp.call("set_person_email", name="sarah", email="sarah@nvidia.com")
+    assert saved == {"person": "Sarah", "email": "sarah@nvidia.com", "waiting_on_them": ["Wait for Sarah's response"]}
+    loop_id = mcp.call("list_open_loops")["groups"][0]["loops"][0]["id"]
+    assert mcp.call("inspect_loop", loop_id=loop_id)["contact_email"] == "sarah@nvidia.com"
+    assert "isn't an email address" in mcp.call("set_person_email", name="Sarah", email="sarah")["error"]
