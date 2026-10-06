@@ -117,7 +117,7 @@ The gateway (`hermes -p continuum gateway run`) must be running for it to fire. 
 
 ### Email and web sync on Telegram (optional, needs Telegram plus Google or Tavily)
 
-Every 10 minutes Continuum reads new email from people linked to open loops, and once a day it checks each loop you asked it to watch on the web. It sends what changed to Telegram: loops an email closed or updated (undo in the dashboard), and web findings, which wait for your "yes" or "no". Create the job once, after `setup_hermes.py` (it installs the script the job runs):
+Every 10 minutes Continuum reads new email from people linked to open loops, and once a day it checks each loop you asked it to watch on the web. It sends what changed to Telegram: loops an email closed or updated (undo in the dashboard), a calendar event when an email sets a date and time, and web findings. Events and web findings wait for your "yes" or "no". Create the job once, after `setup_hermes.py` (it installs the script the job runs):
 
 ```bash
 hermes -p continuum cron create "every 10m" --no-agent --script continuum_sync.py --deliver telegram --name sync

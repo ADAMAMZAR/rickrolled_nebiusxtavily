@@ -26,7 +26,7 @@ from app.db import (
 from app.connectors import google
 from app.connectors.google import Email, GoogleClient, GoogleError
 from app.connectors.tavily import NOT_SET_UP, TavilyError, WebResult
-from app.extraction import EMAIL_NOTE, WEB_NOTE, Completer, ExtractionError, extract
+from app.extraction import EMAIL_NOTE, WEB_NOTE, Completer, EventCandidate, ExtractionError, extract
 from app.llm import LLMError
 
 log = logging.getLogger("continuum.engine")
@@ -47,6 +47,7 @@ class ChangeSet:
     created_loops: list[OpenLoop] = field(default_factory=list)
     updated_loops: list[OpenLoop] = field(default_factory=list)
     resolved_loops: list[OpenLoop] = field(default_factory=list)
+    events: list[EventCandidate] = field(default_factory=list)  # from an email, to propose for the calendar
 
 
 @dataclass
@@ -110,7 +111,7 @@ def process_message(
         else:
             session.add(source)
         link = source.url or ""  # an email's Gmail thread, shown as the change's source
-        changes = ChangeSet(source=source)
+        changes = ChangeSet(source=source, events=result.events if person else [])
         for candidate in result.goals:
             _find_or_add_goal(session, candidate.title, candidate.description, goal_by_name, changes)
 
@@ -881,6 +882,7 @@ def sync_email(
             continue
         if changes.source is not None:
             lines.append(describe_email(person, changes))
+        lines += [f"{describe_action(session, a)} (yes/no)" for a in _propose_events(session, person, changes, now)]
     if not errors:  # otherwise the same window is read again next run
         _set_setting(session, LAST_EMAIL_SYNC, started.isoformat())
     log.info("email_synced people=%d messages=%d changed=%d", len(people), len(inbox), len(lines))
@@ -892,6 +894,21 @@ def ingest_email(session: Session, llm: Completer, person: Person, email: Email,
     Every change is logged as by "email" with undo, linked to the Gmail thread."""
     source = Source(kind="email", text=email.text, external_id=email.id, url=email.url, sender=person.name)
     return process_message(session, llm, email.text, now, ActivityBy.email, person=person, source=source)
+
+
+def _propose_events(session: Session, person: Person, changes: ChangeSet, now: datetime) -> list[PendingAction]:
+    """Each future event in the email becomes a calendar proposal on the loop the email was about."""
+    loops = changes.created_loops + changes.updated_loops + changes.resolved_loops + person_loops(session, person.id)
+    proposed = []
+    for candidate in changes.events if loops else []:
+        try:
+            event = CalendarEvent(title=candidate.title, start=candidate.start, end=candidate.end)
+            if event.start <= now.astimezone(ZoneInfo(settings.timezone)).replace(tzinfo=None):
+                continue  # already past
+            proposed.append(propose_google(session, loops[0].id, event))
+        except (ValueError, InvalidRequest) as e:  # pydantic's ValidationError is a ValueError
+            log.info("event_not_proposed error=%s", type(e).__name__)
+    return proposed
 
 
 def describe_email(person: Person, changes: ChangeSet) -> str:

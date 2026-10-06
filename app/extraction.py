@@ -5,7 +5,7 @@ import logging
 from datetime import date, datetime
 from typing import Any, Literal, Protocol
 
-from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
+from pydantic import BaseModel, ConfigDict, ValidationError, field_validator, model_validator
 
 log = logging.getLogger("continuum.extraction")
 
@@ -48,7 +48,9 @@ INVALID_MESSAGE = "The message could not be safely converted into structured con
 WEB_NOTE = "These are web search results about this open loop. Only report a change a result clearly states."
 
 EMAIL_NOTE = ("This is an email to the user from {name}. The existing open loops are the ones involving {name}. "
-              "Only report what the email clearly states.")
+              "Only report what the email clearly states. If it sets a meeting, call or interview with both a date and "
+              'a time, also return "events": [{{"title": "...", "start": "YYYY-MM-DDTHH:MM", "end": null}}] '
+              "in the email's local time. No time stated = no event.")
 
 
 class ExtractionError(Exception):
@@ -92,11 +94,32 @@ class LoopUpdate(_Model):
     next_action: str | None = None
 
 
+class EventCandidate(_Model):
+    title: str
+    start: datetime
+    end: datetime | None = None
+
+
 class ExtractionResult(_Model):
     goals: list[GoalCandidate] = []
     new_loops: list[LoopCandidate] = []
     updated_loops: list[LoopUpdate] = []
     resolved_loop_ids: list[str] = []
+    events: list[EventCandidate] = []  # emails only (EMAIL_NOTE)
+
+    @field_validator("events", mode="before")
+    @classmethod
+    def _drop_bad_events(cls, events: Any) -> list[Any]:
+        """A malformed event is dropped, not a reason to fail the whole email."""
+        if not isinstance(events, list):
+            return []
+        valid = []
+        for event in events:
+            try:
+                valid.append(EventCandidate.model_validate(event))
+            except ValidationError:
+                log.info("event_dropped")
+        return valid
 
 
 def build_messages(

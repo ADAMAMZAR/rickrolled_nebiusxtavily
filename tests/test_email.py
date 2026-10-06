@@ -2,9 +2,12 @@
 
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
 from sqlmodel import Session, select
 
 from app import engine as eng
+from app.config import settings
 from app.connectors.google import Email, GoogleError
 from app.db import LoopStatus, Source
 from app.extraction import EMAIL_NOTE
@@ -151,3 +154,46 @@ def test_forget_email_data(session: Session) -> None:
     llm, mailbox = FakeLLM(), FakeMailbox({SARAH: [email()]})
     sync(session, llm, mailbox, now=NOW + timedelta(minutes=10))
     assert mailbox.queries and llm.calls == []  # a forgotten email is never read again
+
+
+# --- calendar events in an email become proposals (spec §1 step 3) ---
+
+
+@pytest.fixture
+def google_on(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    token = tmp_path / "google_token.json"
+    token.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(settings, "google_token_file", str(token))
+
+
+@pytest.mark.usefixtures("google_on")
+def test_an_event_in_an_email_becomes_a_calendar_proposal(session: Session) -> None:
+    wait, _ = linked(session)
+    reply = result(resolved=[str(wait.id)], new=[loop("Prepare for NVIDIA interview", due="2026-10-08")])
+    reply["events"] = [{"title": "NVIDIA interview", "start": "2026-10-08T10:00", "end": None}]
+    llm = FakeLLM(reply)
+    lines, _ = sync(session, llm, FakeMailbox({SARAH: [email()]}))
+    assert lines[1] == 'Add "NVIDIA interview" to your calendar, Thu Oct 8 10:00? (yes/no)'
+    [action] = eng.list_actions(session)
+    prepare = next(l for l in eng.list_loops(session) if l.title == "Prepare for NVIDIA interview")
+    assert action.loop_id == prepare.id  # on the loop the email created
+    assert '"events"' in llm.calls[0][1]["content"]
+
+
+@pytest.mark.usefixtures("google_on")
+def test_past_and_malformed_events_are_skipped(session: Session) -> None:
+    linked(session)
+    reply = result()
+    reply["events"] = [
+        {"title": "Yesterday's call", "start": "2026-09-28T10:00"},
+        {"title": "No time", "start": "next week"},
+        {"title": "Ends before it starts", "start": "2026-10-08T10:00", "end": "2026-10-08T09:00"},
+    ]
+    assert sync(session, FakeLLM(reply), FakeMailbox({SARAH: [email()]})) == ([], [])
+    assert eng.list_actions(session) == []
+
+
+def test_chat_messages_never_propose_events(session: Session) -> None:
+    reply = result(new=[loop("Interview", due="2026-10-08")])
+    reply["events"] = [{"title": "Interview", "start": "2026-10-08T10:00"}]
+    assert process(session, reply, "Interview on Oct 8 at 10.").events == []
