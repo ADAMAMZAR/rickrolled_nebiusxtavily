@@ -17,6 +17,8 @@ from starlette.exceptions import HTTPException
 
 from app import engine as eng
 from app.config import settings
+from app.connectors import google
+from app.connectors.google import GoogleClient, GoogleError
 from app.connectors.tavily import TavilyClient
 from app.db import ActionStatus, Activity, Goal, LoopStatus, OpenLoop, PendingAction, Person, create_db_engine
 from app.extraction import Completer
@@ -77,6 +79,7 @@ def loop_out(session: Session, loop: OpenLoop) -> dict[str, Any]:
         "goal_status": goal.status.value if goal else None,
         "person_name": person.name if person else None,
         "person_email": person.email if person else None,
+        "resolved_by": eng.resolved_by(session, loop),
     }
 
 
@@ -93,11 +96,13 @@ def create_app(
     get_llm: Callable[[], Completer] | None = None,
     get_hermes: Callable[[], Agent] | None = None,
     get_web: Callable[[], TavilyClient] | None = None,
+    get_google: Callable[[], GoogleClient] | None = None,
 ) -> FastAPI:
-    """get_llm / get_hermes / get_web are factories, so a missing key only errors when it's needed."""
+    """get_llm / get_hermes / get_web / get_google are factories, so a missing key only errors when it's needed."""
     logging.basicConfig(level=settings.log_level)
     get_hermes = get_hermes or default_hermes
-    mcp = build_mcp(lambda: app.state.db, get_llm or (lambda: LLMClient(settings)), get_web or default_web)
+    get_google = get_google or (lambda: GoogleClient.from_settings(settings))
+    mcp = build_mcp(lambda: app.state.db, get_llm or (lambda: LLMClient(settings)), get_web or default_web, get_google)
     # Served at /mcp/. Also creates the session manager that lifespan runs.
     mcp_app = mcp.streamable_http_app(streamable_http_path="/", stateless_http=True, json_response=True)
 
@@ -117,6 +122,10 @@ def create_app(
 
     @app.exception_handler(eng.InvalidRequest)
     def invalid_action(request: Request, e: eng.InvalidRequest) -> JSONResponse:
+        return error(422, "invalid_request", str(e))
+
+    @app.exception_handler(GoogleError)
+    def google_error(request: Request, e: GoogleError) -> JSONResponse:
         return error(422, "invalid_request", str(e))
 
     @app.exception_handler(HTTPException)  # unknown paths, wrong methods
@@ -233,11 +242,36 @@ def create_app(
 
     @app.post("/api/actions/{action_id}/approve")
     def approve(action_id: UUID, session: Session = Depends(get_session)) -> dict[str, Any]:
-        return action_out(session, eng.approve_action(session, action_id))
+        return action_out(session, eng.approve_action(session, action_id, get_google))
 
     @app.post("/api/actions/{action_id}/reject")
     def reject(action_id: UUID, session: Session = Depends(get_session)) -> dict[str, Any]:
         return action_out(session, eng.reject_action(session, action_id))
+
+    @app.get("/api/google/status")
+    def google_status(session: Session = Depends(get_session)) -> dict[str, Any]:
+        return {
+            "connected": google.connected(settings),
+            "set_up": Path(settings.google_client_secret_file).exists(),  # the OAuth client file is there
+            "last_sync": eng.get_setting(session, eng.LAST_EMAIL_SYNC),
+        }
+
+    @app.post("/api/google/connect")
+    def google_connect(session: Session = Depends(get_session)) -> dict[str, Any]:
+        """Opens Google's consent screen in this computer's browser and waits (up to 5 minutes)."""
+        google.connect(settings)
+        log.info("google_connected")
+        return google_status(session)
+
+    @app.post("/api/google/disconnect")
+    def google_disconnect(session: Session = Depends(get_session)) -> dict[str, Any]:
+        google.disconnect(settings)
+        log.info("google_disconnected")
+        return google_status(session)
+
+    @app.post("/api/google/forget")
+    def forget_email(session: Session = Depends(get_session)) -> dict[str, int]:
+        return {"forgotten": eng.forget_email_data(session)}
 
     app.mount("/", StaticFiles(directory=STATIC, html=True), name="ui")
     return app

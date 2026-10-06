@@ -259,7 +259,9 @@ Web before Google: Tavily needs one API key and no OAuth, so it's lower risk, an
 8. **Google gate:** OAuth connect, list the last 5 emails from one address, create one draft, create one event, all from a scratch script.
    *Code done 2026-10-06: `app/connectors/google.py` (mocked tests) + `scripts/google_gate.py`. **Gate not passed yet: needs your OAuth client (README: Google setup) and your consent in the browser.** In testing mode Google ends the connection after 7 days.*
 9. `ingest_email` in `sync.py` with mocked tests, then real Gmail.
+   *Code done 2026-10-06 (mocked tests). `engine.sync_email` reads only people with an email and an open loop, fetches all their mail first (a Google error writes nothing), then processes oldest first. `process_message(person=, source=)` shows the model only that person's loops (`EMAIL_NOTE`) and drops any other id. Changes log `by="email"` with the Gmail thread URL as detail and undo. An email that changes nothing isn't stored; `last_sync` doesn't advance if an email couldn't be read, so it's retried. The same error is printed once, not every 10 minutes. The connector now reads the plain-text body (quotes and signature stripped, 4k cap). Also done: `/api/google/status|connect|disconnect|forget`, Settings panel, "✉ Email from … · Open in Gmail", "closed by email", Forget email data (blanks text, keeps Gmail ids so mail isn't re-read). **Real Gmail not checked yet: needs the OAuth client.***
 10. Google proposals (calendar event, Gmail draft).
+   *Code done 2026-10-06 (mocked tests). MCP `propose_calendar_event`, `propose_gmail_draft` (in `tools.include`, SOUL.md rules). Approve now commits the claim before calling Google, so a slow call can't run twice. Drafts to the loop's person reply in their latest email thread. Proposals work on resolved loops (thank-you drafts). Email events (§1 step 3) done 2026-10-06: for emails only, `EMAIL_NOTE` asks for `events` with a stated date and time; malformed or past ones are dropped. Each becomes a `calendar_event` proposal on the loop the email created or touched, printed by `sync.py` as a yes/no line. Not checked with real Nemotron yet.*
 11. Run the §1 demo end to end. Add a Phase 3 section + Google and Tavily setup to the README.
 
 ---
@@ -267,12 +269,22 @@ Web before Google: Tavily needs one API key and no OAuth, so it's lower risk, an
 ## 15. Done Checklist
 
 - [ ] §1 demo works with a real email and a real calendar
+  *Code for every step is in (steps 1-10, including the email's calendar proposal). Needs the OAuth client + Tavily key.*
 - [ ] Only emails from linked people are read (checked in logs)
-- [ ] No email is ever sent; drafts only
-- [ ] Every automatic change shows in the activity timeline and can be undone
+  *Code + tests done (`test_only_people_with_an_email_and_an_open_loop_are_read`). Logs check needs real Gmail.*
+- [x] No email is ever sent; drafts only
+  *Checked 2026-10-06: the connector only calls `drafts` (no send endpoint anywhere in `app/` or `scripts/`); `test_draft_is_saved_not_sent`.*
+- [x] Every automatic change shows in the activity timeline and can be undone
+  *Chat, email and web changes all log with undo (tests in `test_activity.py`, `test_email.py`, `test_actions.py`). Checked live for chat and web 2026-10-03; email live check comes with the §1 demo.*
 - [ ] Approve/reject works from Telegram and the dashboard, with no duplicates
+  *Dashboard + Hermes chat checked live (step 3); Google kinds tested offline. Telegram not checked yet.*
 - [ ] Web watch finds a real public update and proposes it; nothing changes without a yes
+  *Code + canned-page live test done (step 5). Needs `TAVILY_API_KEY` for a real search.*
 - [ ] Only watched loops and explicit lookups reach Tavily (checked in logs)
+  *Code + tests done. Logs check needs the Tavily key.*
 - [ ] Disconnect + Forget email data work
-- [ ] `pytest` passes offline
-- [ ] No tokens or client secrets in git
+  *Code + offline tests done (revoke, token delete, forget keeps loops). Real revoke needs a connected account.*
+- [x] `pytest` passes offline
+  *152 passed, 2026-10-06.*
+- [x] No tokens or client secrets in git
+  *Checked 2026-10-06: no `.env`, `*.db`, token or client secret files tracked; no key patterns in tracked files.*

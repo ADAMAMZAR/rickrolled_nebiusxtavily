@@ -4,6 +4,7 @@ Uses an OAuth "Desktop app" client (README: Google setup). The token is saved to
 """
 
 import base64
+import re
 from datetime import UTC, datetime, timedelta
 from email.message import EmailMessage
 from pathlib import Path
@@ -13,7 +14,8 @@ import httpx
 from google.auth.exceptions import RefreshError, TransportError
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
+from google_auth_oauthlib.flow import InstalledAppFlow, WSGITimeoutError
+from oauthlib.oauth2 import OAuth2Error
 from pydantic import BaseModel
 
 from app.config import Settings
@@ -25,7 +27,9 @@ SCOPES = [
 ]
 GMAIL = "https://gmail.googleapis.com/gmail/v1/users/me"
 EVENTS = "https://www.googleapis.com/calendar/v3/calendars/primary/events"
-RECONNECT = "Connect again: python scripts/google_gate.py <email>"
+REVOKE = "https://oauth2.googleapis.com/revoke"
+RECONNECT = "Connect again in the dashboard (Settings)."
+MAX_TEXT = 4000  # characters of an email that go to the LLM
 
 
 class GoogleError(Exception):
@@ -39,10 +43,16 @@ class Email(BaseModel):
     subject: str
     received: datetime
     snippet: str
+    body: str = ""  # plain text, quotes and signature removed
 
     @property
     def url(self) -> str:
         return f"https://mail.google.com/mail/u/0/#all/{self.thread_id}"
+
+    @property
+    def text(self) -> str:
+        """What extraction reads: subject + body (or Gmail's snippet if there's no plain-text part), cut to MAX_TEXT."""
+        return f"Subject: {self.subject}\n\n{self.body or self.snippet}"[:MAX_TEXT]
 
 
 class Event(BaseModel):
@@ -56,7 +66,37 @@ def connect(settings: Settings) -> None:
     if not secret.exists():
         raise GoogleError(f"Google isn't set up: no OAuth client file at {secret}. See README: Google setup.")
     flow = InstalledAppFlow.from_client_secrets_file(str(secret), SCOPES)
-    _save(settings, flow.run_local_server(port=0, prompt="consent"))  # consent: always returns a refresh token
+    try:  # consent: always returns a refresh token
+        credentials = flow.run_local_server(port=0, prompt="consent", timeout_seconds=300)
+    except WSGITimeoutError as e:
+        raise GoogleError("Google sign-in timed out after 5 minutes. Try again.") from e
+    except OAuth2Error as e:  # e.g. the user clicked Cancel
+        raise GoogleError(f"Google sign-in didn't finish: {e.description or e.error}") from e
+    _save(settings, credentials)
+
+
+def connected(settings: Settings) -> bool:
+    return Path(settings.google_token_file).exists()
+
+
+def disconnect(settings: Settings, transport: httpx.BaseTransport | None = None) -> None:
+    """Revoke Continuum's access at Google and delete the saved token. The token is deleted even if
+    Google can't be reached; then the error says where to remove access by hand."""
+    path = Path(settings.google_token_file)
+    if not path.exists():
+        return
+    try:
+        token = Credentials.from_authorized_user_file(str(path), SCOPES).refresh_token
+    except ValueError:  # damaged: nothing to revoke
+        token = None
+    path.unlink()
+    if token:
+        try:  # 400 = already invalid, which is fine
+            with httpx.Client(timeout=15, transport=transport) as http:
+                http.post(REVOKE, data={"token": token})
+        except httpx.HTTPError as e:
+            raise GoogleError("Disconnected here, but couldn't reach Google to revoke access. "
+                              "Remove Continuum at https://myaccount.google.com/permissions") from e
 
 
 def _save(settings: Settings, credentials: Credentials) -> None:
@@ -91,17 +131,17 @@ class GoogleClient:
         return cls(credentials.token, settings.timezone)
 
     def messages_from(self, sender: str, after: datetime | None = None, limit: int = 5) -> list[Email]:
-        """Newest first. Reads the From/Subject headers and Gmail's snippet, not the body."""
+        """Newest first. Attachments aren't downloaded."""
         query = f"from:{sender}" + (f" after:{int(after.timestamp())}" if after else "")
         found = self._call("GET", f"{GMAIL}/messages", params={"q": query, "maxResults": limit})
         return [self._email(m["id"]) for m in found.get("messages", [])]
 
     def _email(self, message_id: str) -> Email:
-        m = self._call("GET", f"{GMAIL}/messages/{message_id}",
-                       params={"format": "metadata", "metadataHeaders": ["From", "Subject"]})
+        m = self._call("GET", f"{GMAIL}/messages/{message_id}", params={"format": "full"})
         headers = {h["name"].lower(): h["value"] for h in m["payload"].get("headers", [])}
         return Email(id=m["id"], thread_id=m["threadId"], sender=headers.get("from", ""),
                      subject=headers.get("subject", ""), snippet=m.get("snippet", ""),
+                     body=strip_reply(_plain_text(m["payload"])),
                      received=datetime.fromtimestamp(int(m["internalDate"]) / 1000, UTC))
 
     def create_draft(self, to: str, subject: str, body: str, thread_id: str | None = None) -> str:
@@ -135,6 +175,27 @@ class GoogleClient:
         if response.is_error:
             raise GoogleError(f"Google returned HTTP {response.status_code}: {_reason(response)}")
         return response.json()
+
+
+def _plain_text(part: dict[str, Any]) -> str:
+    """The first text/plain part of a Gmail payload, or "" (HTML-only mail falls back to the snippet)."""
+    if part.get("mimeType") == "text/plain" and part.get("body", {}).get("data"):
+        return base64.urlsafe_b64decode(part["body"]["data"]).decode("utf-8", errors="replace")
+    return next((text for p in part.get("parts", []) if (text := _plain_text(p))), "")
+
+
+# "On Tue, Oct 6, 2026 at 9:00 AM Sarah <sarah@x.com> wrote:" (often wrapped over two lines)
+_QUOTE_HEADER = re.compile(r"^On\b.{0,300}?\bwrote:[ \t]*$", re.MULTILINE | re.DOTALL)
+
+
+def strip_reply(body: str) -> str:
+    """Drop the quoted earlier messages and the signature: only the new text matters, and is stored."""
+    body = body.replace("\r\n", "\n")
+    if match := _QUOTE_HEADER.search(body):
+        body = body[: match.start()]
+    body = body.split("\n-- \n")[0]  # standard signature separator
+    lines = [line for line in body.split("\n") if not line.startswith(">")]
+    return "\n".join(lines).strip()
 
 
 def _reason(response: httpx.Response) -> str:

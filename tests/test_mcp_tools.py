@@ -92,7 +92,7 @@ def test_lists_exactly_the_tools_hermes_includes(mcp: MCP) -> None:
     assert names == {
         "remember", "list_open_loops", "needs_attention", "list_goals", "inspect_loop", "resolve_loop", "snooze_loop",
         "list_pending_actions", "approve_action", "reject_action", "web_lookup", "propose_loop_update", "watch_loop",
-        "set_person_email",
+        "set_person_email", "propose_calendar_event", "propose_gmail_draft",
     }
     include = yaml.safe_load(HERMES_CONFIG.read_text(encoding="utf-8"))["mcp_servers"]["continuum"]["tools"]["include"]
     assert set(include) == names  # a tool missing from tools.include is invisible to Hermes

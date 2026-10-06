@@ -16,6 +16,7 @@ from sqlalchemy import Engine
 from sqlmodel import Session
 
 from app import engine as eng
+from app.connectors.google import GoogleClient
 from app.connectors.tavily import TavilyClient, TavilyError
 from app.db import ActivityBy, Goal, LoopStatus, OpenLoop, Person
 from app.extraction import Completer, ExtractionError
@@ -23,7 +24,8 @@ from app.llm import LLMError
 
 
 def build_mcp(
-    get_db: Callable[[], Engine], get_llm: Callable[[], Completer], get_web: Callable[[], TavilyClient]
+    get_db: Callable[[], Engine], get_llm: Callable[[], Completer], get_web: Callable[[], TavilyClient],
+    get_google: Callable[[], GoogleClient],
 ) -> MCPServer:
     mcp = MCPServer("continuum")
 
@@ -118,11 +120,13 @@ def build_mcp(
                 **_clean({"contact_email": person.email if person else None}),
                 "summary": loop.summary,
                 "status": loop.status.value,
-                "source": {
+                "source": _clean({
                     "kind": detail.source.kind,
+                    "from": detail.source.sender,
                     "said_at": f"{detail.source.created_at:%Y-%m-%d %H:%M} UTC",
-                    "text": detail.source.text,
-                },
+                    "text": detail.source.text or "(deleted)",
+                }),
+                **_clean({"email_thread_id": eng.email_thread(s, loop)}),
             }
 
     @mcp.tool()
@@ -143,7 +147,7 @@ def build_mcp(
         """Do one proposed action. Only after the user clearly said yes to that specific action.
         Get the id from list_pending_actions."""
         with session() as s:
-            action = eng.approve_action(s, _uuid(action_id, "action", "list_pending_actions"))
+            action = eng.approve_action(s, _uuid(action_id, "action", "list_pending_actions"), get_google)
             return {"done": eng.describe_action(s, action)}
 
     @mcp.tool()
@@ -164,6 +168,33 @@ def build_mcp(
                 "email": person.email,
                 "waiting_on_them": [loop.title for loop in eng.person_loops(s, person.id)],
             }
+
+    @mcp.tool()
+    def propose_calendar_event(loop_id: str, title: str, start: str, end: str | None = None) -> dict[str, Any]:
+        """Propose adding an event to the user's Google Calendar, e.g. an interview from an email.
+        start/end are local times like 2026-10-08T10:00 (no end = one hour). If the date or time is unclear,
+        ask the user, never guess. Nothing is created until the user says yes, so tell them it waits for their OK."""
+        try:
+            event = eng.CalendarEvent(title=title, start=start, end=end)
+        except ValidationError as e:
+            raise ToolError(f"Can't propose that: {e.errors()[0]['msg']}") from e
+        with session() as s:
+            action = eng.propose_google(s, _uuid(loop_id), event)
+            return {"id": str(action.id), "proposed": eng.describe_action(s, action)}
+
+    @mcp.tool()
+    def propose_gmail_draft(loop_id: str, to: str, subject: str, body: str, thread_id: str | None = None) -> dict[str, Any]:
+        """Propose saving an email as a Gmail draft, e.g. "draft a thank-you reply to Sarah". Write the full body.
+        `to` must be the person's real address (inspect_loop shows contact_email; never guess). A draft to the
+        loop's person replies in their email thread. Continuum never sends email: after the user's yes, the draft
+        waits in Gmail for them to send. Tell them it waits for their OK."""
+        try:
+            draft = eng.GmailDraft(to=to.strip(), subject=subject.strip(), body=body, thread_id=thread_id)
+        except ValidationError as e:
+            raise ToolError(f"Can't propose that: {e.errors()[0]['msg']}") from e
+        with session() as s:
+            action = eng.propose_google(s, _uuid(loop_id), draft)
+            return {"id": str(action.id), "proposed": eng.describe_action(s, action)}
 
     @mcp.tool()
     def web_lookup(query: str) -> dict[str, Any]:

@@ -11,7 +11,7 @@ import httpx
 import pytest
 
 from app.config import Settings
-from app.connectors.google import GoogleClient, GoogleError, connect
+from app.connectors.google import GoogleClient, GoogleError, connect, disconnect
 
 MESSAGE = {
     "id": "m1", "threadId": "t1", "internalDate": "1790000000000", "snippet": "Great news, we'd like to interview you",
@@ -35,9 +35,64 @@ def test_messages_from_one_sender() -> None:
     [email] = google(handler).messages_from("sarah@nvidia.com", after=datetime.fromtimestamp(1789990000))
     assert seen[0].headers["Authorization"] == "Bearer token-1"
     assert seen[0].url.params["q"] == "from:sarah@nvidia.com after:1789990000"
-    assert seen[1].url.params.get_list("metadataHeaders") == ["From", "Subject"]  # headers only, no body
+    assert seen[1].url.params["format"] == "full"
     assert (email.sender, email.subject, email.thread_id) == ("Sarah <sarah@nvidia.com>", "Interview", "t1")
     assert email.received.year == 2026 and email.url.endswith("#all/t1")
+    assert email.text == "Subject: Interview\n\nGreat news, we'd like to interview you"  # no plain-text part: snippet
+
+
+def b64(text: str) -> str:
+    return base64.urlsafe_b64encode(text.encode()).decode()
+
+
+def test_the_body_is_plain_text_without_quotes_or_signature() -> None:
+    body = ("Great news, we'd like to interview you on Oct 8 at 10am.\r\n\r\n-- \r\nSarah Chen\r\nRecruiter\r\n\r\n"
+            "On Mon, Oct 5, 2026 at 9:00 AM Me <me@x.com>\r\nwrote:\r\n> Any update?\r\n")
+    message = {**MESSAGE, "payload": {**MESSAGE["payload"], "mimeType": "multipart/alternative", "parts": [
+        {"mimeType": "text/html", "body": {"data": b64("<p>ignored</p>")}},
+        {"mimeType": "text/plain", "body": {"data": b64(body)}},
+    ]}}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/messages"):
+            return httpx.Response(200, json={"messages": [{"id": "m1"}]})
+        return httpx.Response(200, json=message)
+
+    [email] = google(handler).messages_from("sarah@nvidia.com")
+    assert email.body == "Great news, we'd like to interview you on Oct 8 at 10am."
+
+
+def test_long_mail_is_cut() -> None:
+    from app.connectors.google import MAX_TEXT, Email
+    email = Email(id="m", thread_id="t", sender="s", subject="S", received=datetime.now(), snippet="", body="x" * 9000)
+    assert len(email.text) == MAX_TEXT
+
+
+def test_disconnect_revokes_and_deletes_the_token(tmp_path: Path) -> None:
+    token = tmp_path / "google_token.json"
+    token.write_text(json.dumps({"refresh_token": "r1", "client_id": "c", "client_secret": "s"}), encoding="utf-8")
+    settings = Settings(_env_file=None, google_token_file=str(token))
+    revoked: list[bytes] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        revoked.append(request.content)
+        return httpx.Response(200)
+
+    disconnect(settings, transport=httpx.MockTransport(handler))
+    assert not token.exists() and revoked == [b"token=r1"]
+    disconnect(settings)  # already disconnected: nothing to do
+
+
+def test_disconnect_offline_still_deletes_the_token(tmp_path: Path) -> None:
+    token = tmp_path / "google_token.json"
+    token.write_text(json.dumps({"refresh_token": "r1", "client_id": "c", "client_secret": "s"}), encoding="utf-8")
+
+    def down(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("no network")
+
+    with pytest.raises(GoogleError, match="myaccount.google.com/permissions"):
+        disconnect(Settings(_env_file=None, google_token_file=str(token)), transport=httpx.MockTransport(down))
+    assert not token.exists()
 
 
 def test_no_messages() -> None:

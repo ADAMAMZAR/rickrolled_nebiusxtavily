@@ -9,22 +9,24 @@ import logging
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import date, datetime
-from typing import Any
+from datetime import UTC, date, datetime, timedelta
+from typing import Any, Protocol
 from urllib.parse import urlparse
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
-from pydantic import BaseModel, Field, TypeAdapter, model_validator
+from pydantic import BaseModel, Field, TypeAdapter, field_validator, model_validator
 from sqlmodel import Session, col, delete, func, or_, select, update
 
 from app.config import settings
 from app.db import (
     ActionKind, ActionStatus, Activity, ActivityAction, ActivityBy, Goal, GoalStatus, LoopKind, LoopStatus, OpenLoop,
-    PendingAction, Person, Source, utcnow,
+    PendingAction, Person, Setting, Source, utcnow,
 )
+from app.connectors import google
+from app.connectors.google import Email, GoogleClient, GoogleError
 from app.connectors.tavily import NOT_SET_UP, TavilyError, WebResult
-from app.extraction import WEB_NOTE, Completer, ExtractionError, extract
+from app.extraction import EMAIL_NOTE, WEB_NOTE, Completer, EventCandidate, ExtractionError, extract
 from app.llm import LLMError
 
 log = logging.getLogger("continuum.engine")
@@ -45,6 +47,7 @@ class ChangeSet:
     created_loops: list[OpenLoop] = field(default_factory=list)
     updated_loops: list[OpenLoop] = field(default_factory=list)
     resolved_loops: list[OpenLoop] = field(default_factory=list)
+    events: list[EventCandidate] = field(default_factory=list)  # from an email, to propose for the calendar
 
 
 @dataclass
@@ -70,16 +73,19 @@ class Attention:
 
 
 def process_message(
-    session: Session, llm: Completer, text: str, now: datetime | None = None, by: ActivityBy = ActivityBy.chat
+    session: Session, llm: Completer, text: str, now: datetime | None = None, by: ActivityBy = ActivityBy.chat,
+    person: Person | None = None, source: Source | None = None,
 ) -> ChangeSet:
     """Extract goals and loops from one message, then save them in one transaction.
 
     The LLM runs before any write, so a failed extraction writes nothing. A message that
     changes nothing isn't stored either (privacy: keep only what the system needs).
+    `person` + `source`: an email from that person. It may only update or resolve their loops.
     """
     now = now or local_now()
     goals = [s.goal for s in list_goals(session)]
     open_loops = list_loops(session)
+    in_scope = [loop for loop in open_loops if person is None or loop.person_id == person.id]
     goal_titles = {g.id: g.title for g in goals}
     people = {normalize(p.name): p for p in list_people(session)}
     try:
@@ -88,19 +94,24 @@ def process_message(
             text,
             now,
             goals=[{"title": g.title} for g in goals],
-            loops=[_loop_context(loop, goal_titles) for loop in open_loops],
+            loops=[_loop_context(loop, goal_titles) for loop in in_scope],
+            note=EMAIL_NOTE.format(name=person.name) if person else None,
             people=[p.name for p in people.values()],
         )
     except Exception as e:
         log.warning("extraction_failed error=%s", type(e).__name__)
         raise
 
-    known = {str(loop.id): loop for loop in open_loops}
+    known = {str(loop.id): loop for loop in in_scope}
     goal_by_name = {normalize(g.title): g for g in goals}
     seen = {_loop_key(loop.title, loop.waiting_on) for loop in open_loops}
     try:
-        source = add_source(session, text)
-        changes = ChangeSet(source=source)
+        if source is None:
+            source = add_source(session, text)
+        else:
+            session.add(source)
+        link = source.url or ""  # an email's Gmail thread, shown as the change's source
+        changes = ChangeSet(source=source, events=result.events if person else [])
         for candidate in result.goals:
             _find_or_add_goal(session, candidate.title, candidate.description, goal_by_name, changes)
 
@@ -125,7 +136,7 @@ def process_message(
             if created.kind == LoopKind.waiting and normalize(created.waiting_on or ""):
                 created.person_id = _find_or_add_person(session, created.waiting_on, people).id
             changes.created_loops.append(created)
-            _log(session, created, ActivityAction.created, by)
+            _log(session, created, ActivityAction.created, by, link)
 
         stamp = utcnow()
         for update in result.updated_loops:
@@ -141,7 +152,7 @@ def process_message(
                 setattr(loop, name, value)
             loop.updated_at = stamp
             changes.updated_loops.append(loop)
-            _log(session, loop, ActivityAction.updated, by, ", ".join(fields), undo)
+            _log(session, loop, ActivityAction.updated, by, link or ", ".join(fields), undo)
 
         for loop_id in dict.fromkeys(result.resolved_loop_ids):  # each id once
             loop = known.get(loop_id)
@@ -150,7 +161,7 @@ def process_message(
                 continue
             loop.status, loop.resolved_at, loop.updated_at = LoopStatus.resolved, stamp, stamp
             changes.resolved_loops.append(loop)
-            _log(session, loop, ActivityAction.resolved, by, undo={"status": LoopStatus.open.value, "resolved_at": None})
+            _log(session, loop, ActivityAction.resolved, by, link, {"status": LoopStatus.open.value, "resolved_at": None})
         changes.updated_loops = [l for l in changes.updated_loops if l not in changes.resolved_loops]
 
         if not (changes.created_goals or changes.created_loops or changes.updated_loops or changes.resolved_loops):
@@ -486,6 +497,8 @@ def undo_activity(session: Session, activity_id: UUID) -> OpenLoop:
 # --- proposals: run only after the user's yes ---
 
 WEB_URL = r"^https?://\S+$"
+EMAIL = r"[^@\s]+@[^@\s]+\.[^@\s]+"
+GOOGLE_NOT_CONNECTED = "Google isn't connected. Connect it in the dashboard (Settings)."
 
 
 class LoopUpdate(BaseModel):
@@ -513,7 +526,59 @@ def propose_loop_update(session: Session, loop_id: UUID, change: LoopUpdate) -> 
             (pending.payload["resolve"], pending.payload["due"]) == (payload["resolve"], payload["due"])
         ):
             return pending
-    action = PendingAction(loop_id=loop_id, kind=ActionKind.loop_update, payload=payload)
+    return _add_action(session, loop_id, ActionKind.loop_update, payload)
+
+
+class CalendarEvent(BaseModel):
+    """Times are in the user's TIMEZONE. No end = one hour."""
+
+    title: str = Field(min_length=1, max_length=200)
+    start: datetime
+    end: datetime | None = None
+
+    @field_validator("start", "end")
+    @classmethod
+    def _local(cls, value: datetime | None) -> datetime | None:
+        if value is not None and value.tzinfo is not None:
+            value = value.astimezone(ZoneInfo(settings.timezone)).replace(tzinfo=None)
+        return value
+
+    @model_validator(mode="after")
+    def _ends_after_start(self) -> "CalendarEvent":
+        if self.end is not None and self.end <= self.start:
+            raise ValueError("The event must end after it starts.")
+        return self
+
+
+class GmailDraft(BaseModel):
+    """Saved in Gmail's Drafts for the user to send. Continuum never sends it."""
+
+    to: str = Field(pattern=f"^{EMAIL}$")
+    subject: str = Field(min_length=1, max_length=300, pattern=r"^[^\r\n]*$")
+    body: str = Field(min_length=1, max_length=20000)
+    thread_id: str | None = None  # reply in this Gmail thread
+
+
+def propose_google(session: Session, loop_id: UUID, change: CalendarEvent | GmailDraft) -> PendingAction:
+    """Propose a calendar event or a Gmail draft for a loop (open or resolved: a thank-you often follows
+    a closed loop). A draft to the loop's person replies in their latest email thread."""
+    if not google.connected(settings):
+        raise InvalidRequest(GOOGLE_NOT_CONNECTED)
+    loop = _get(session, loop_id)
+    if isinstance(change, GmailDraft) and change.thread_id is None:
+        person = session.get(Person, loop.person_id) if loop.person_id else None
+        if person and person.email == change.to.lower():
+            change = change.model_copy(update={"thread_id": email_thread(session, loop)})
+    kind = ActionKind.calendar_event if isinstance(change, CalendarEvent) else ActionKind.gmail_draft
+    payload = change.model_dump(mode="json")
+    for pending in list_actions(session):
+        if (pending.loop_id, pending.kind, pending.payload) == (loop_id, kind, payload):
+            return pending
+    return _add_action(session, loop_id, kind, payload)
+
+
+def _add_action(session: Session, loop_id: UUID, kind: ActionKind, payload: dict[str, Any]) -> PendingAction:
+    action = PendingAction(loop_id=loop_id, kind=kind, payload=payload)
     session.add(action)
     session.commit()
     session.refresh(action)
@@ -539,16 +604,25 @@ def describe_action(session: Session, action: PendingAction) -> str:
         site = urlparse(change.source_url).netloc.removeprefix("www.")
         page = f"{change.source_title} ({site})" if change.source_title else change.source_url
         return f"{what}? Found on the web: {page}"
-    return action.kind.value  # Google kinds get their wording in step 10
+    if action.kind == ActionKind.calendar_event:
+        event = CalendarEvent.model_validate(action.payload)
+        return f'Add "{event.title}" to your calendar, {event.start:%a %b} {event.start.day} {event.start:%H:%M}?'
+    draft = GmailDraft.model_validate(action.payload)
+    return f'Save a Gmail draft to {draft.to}: "{draft.subject}"? It won\'t be sent.'
 
 
-def approve_action(session: Session, action_id: UUID) -> PendingAction:
-    """Run a proposed action once. Only call this after the user said yes to it."""
+def approve_action(
+    session: Session, action_id: UUID, get_google: Callable[[], GoogleClient] | None = None
+) -> PendingAction:
+    """Run a proposed action once. Only call this after the user said yes to it.
+    Calendar events and drafts use `get_google` (default: the saved Google token)."""
     action = _decide(session, action_id, ActionStatus.done)
+    session.commit()  # claimed first, so a second approve fails even while Google is slow
     try:
-        if action.kind != ActionKind.loop_update:
-            raise InvalidRequest(f"{action.kind.value} isn't supported yet.")
-        _apply_loop_update(session, action)
+        if action.kind == ActionKind.loop_update:
+            _apply_loop_update(session, action)
+        else:
+            _run_google(session, action, (get_google or (lambda: GoogleClient.from_settings(settings)))())
         session.commit()
     except Exception as e:
         session.rollback()
@@ -601,6 +675,20 @@ def _apply_loop_update(session: Session, action: PendingAction) -> None:
     loop.updated_at = now
     _log(session, loop, ActivityAction.resolved if change.resolve else ActivityAction.updated,
          ActivityBy.web, change.source_url, undo)
+
+
+def _run_google(session: Session, action: PendingAction, client: GoogleClient) -> None:
+    if action.kind == ActionKind.calendar_event:
+        event = CalendarEvent.model_validate(action.payload)
+        created = client.create_event(event.title, event.start, event.end)
+        action.external_id, detail = created.id, created.link or f'calendar event "{event.title}"'
+    else:
+        draft = GmailDraft.model_validate(action.payload)
+        action.external_id = client.create_draft(draft.to, draft.subject, draft.body, draft.thread_id)
+        detail = "Gmail draft saved, not sent"
+    loop = session.get(OpenLoop, action.loop_id) if action.loop_id else None
+    if loop is not None:
+        _log(session, loop, ActivityAction.action_done, ActivityBy.user, detail)
 
 
 def _get_action(session: Session, action_id: UUID) -> PendingAction:
@@ -693,8 +781,6 @@ def _review_web_results(session: Session, llm: Completer, loop: OpenLoop, result
 
 # --- people: who the user waits on ---
 
-EMAIL = r"[^@\s]+@[^@\s]+\.[^@\s]+"
-
 
 def list_people(session: Session) -> list[Person]:
     return list(session.exec(select(Person).order_by(col(Person.name))).all())
@@ -739,3 +825,140 @@ def _find_or_add_person(session: Session, name: str, people: dict[str, Person]) 
         people[key] = Person(name=name)
         session.add(people[key])
     return people[key]
+
+
+# --- email: replies from people linked to open loops ---
+
+LAST_EMAIL_SYNC = "email_last_sync"  # Setting keys
+LAST_SYNC_ERROR = "email_sync_error"
+
+
+class Mailbox(Protocol):
+    def messages_from(self, sender: str, after: datetime | None = None, limit: int = 5) -> list[Email]: ...
+
+
+def get_setting(session: Session, key: str) -> str | None:
+    row = session.get(Setting, key)
+    return row.value if row else None
+
+
+def _set_setting(session: Session, key: str, value: str | None) -> None:
+    """No commit. None deletes the key."""
+    row = session.get(Setting, key)
+    if value is None:
+        if row:
+            session.delete(row)
+    elif row:
+        row.value = value
+    else:
+        session.add(Setting(key=key, value=value))
+
+
+def sync_email(
+    session: Session, llm: Completer, mailbox: Mailbox, now: datetime | None = None
+) -> tuple[list[str], list[str]]:
+    """Read new mail from people who have an email and an open loop, nobody else. Returns one line per
+    email that changed something, and error lines (each error is reported once, not every run)."""
+    now = now or local_now()
+    started = now.astimezone(UTC)
+    last = get_setting(session, LAST_EMAIL_SYNC)
+    after = datetime.fromisoformat(last) if last else started - timedelta(days=settings.sync_lookback_days)
+    people = [p for p in list_people(session) if p.email and person_loops(session, p.id)]
+    try:  # fetch everything first: a Google error writes nothing
+        # ponytail: newest 10 per person per run; raise the limit if someone sends more than that in 10 minutes
+        inbox = [(p, e) for p in people for e in mailbox.messages_from(p.email, after=after, limit=10)]  # type: ignore[arg-type]
+    except GoogleError as e:
+        log.warning("email_sync_failed error=%s", type(e).__name__)
+        return [], report_sync_errors(session, [str(e)])
+    lines, errors = [], []
+    for person, email in sorted(inbox, key=lambda pe: pe[1].received):  # oldest first, so a later email wins
+        if session.exec(select(Source).where(Source.external_id == email.id)).first():
+            continue
+        try:
+            changes = ingest_email(session, llm, person, email, now)
+        except (ExtractionError, LLMError) as e:
+            log.warning("email_unreadable id=%s error=%s", email.id, type(e).__name__)
+            errors.append(f"Couldn't read an email from {person.name}: {e}")
+            continue
+        if changes.source is not None:
+            lines.append(describe_email(person, changes))
+        lines += [f"{describe_action(session, a)} (yes/no)" for a in _propose_events(session, person, changes, now)]
+    if not errors:  # otherwise the same window is read again next run
+        _set_setting(session, LAST_EMAIL_SYNC, started.isoformat())
+    log.info("email_synced people=%d messages=%d changed=%d", len(people), len(inbox), len(lines))
+    return lines, report_sync_errors(session, errors)
+
+
+def ingest_email(session: Session, llm: Completer, person: Person, email: Email, now: datetime | None = None) -> ChangeSet:
+    """One email from a linked person. It may close or update only their loops, and add new ones.
+    Every change is logged as by "email" with undo, linked to the Gmail thread."""
+    source = Source(kind="email", text=email.text, external_id=email.id, url=email.url, sender=person.name)
+    return process_message(session, llm, email.text, now, ActivityBy.email, person=person, source=source)
+
+
+def _propose_events(session: Session, person: Person, changes: ChangeSet, now: datetime) -> list[PendingAction]:
+    """Each future event in the email becomes a calendar proposal on the loop the email was about."""
+    loops = changes.created_loops + changes.updated_loops + changes.resolved_loops + person_loops(session, person.id)
+    proposed = []
+    for candidate in changes.events if loops else []:
+        try:
+            event = CalendarEvent(title=candidate.title, start=candidate.start, end=candidate.end)
+            if event.start <= now.astimezone(ZoneInfo(settings.timezone)).replace(tzinfo=None):
+                continue  # already past
+            proposed.append(propose_google(session, loops[0].id, event))
+        except (ValueError, InvalidRequest) as e:  # pydantic's ValidationError is a ValueError
+            log.info("event_not_proposed error=%s", type(e).__name__)
+    return proposed
+
+
+def describe_email(person: Person, changes: ChangeSet) -> str:
+    """One line for Telegram, e.g. 'Email from Sarah: closed "Wait for Sarah's response"; new "Prepare for interview" (due Thu Oct 8).'"""
+    def due(loop: OpenLoop) -> str:
+        return f" (due {loop.due:%a %b} {loop.due.day})" if loop.due else ""
+    parts = [f'closed "{l.title}"' for l in changes.resolved_loops]
+    parts += [f'updated "{l.title}"{due(l)}' for l in changes.updated_loops]
+    parts += [f'new "{l.title}"{due(l)}' for l in changes.created_loops]
+    parts += [f'new goal "{g.title}"' for g in changes.created_goals]
+    return f"Email from {person.name}: {'; '.join(parts)}."
+
+
+def report_sync_errors(session: Session, errors: list[str]) -> list[str]:
+    """Sync runs every 10 minutes: repeat an error only when it changes (commits)."""
+    text = "\n".join(errors) or None
+    repeat = text == get_setting(session, LAST_SYNC_ERROR)
+    _set_setting(session, LAST_SYNC_ERROR, text)
+    session.commit()
+    return [] if repeat else errors
+
+
+def email_thread(session: Session, loop: OpenLoop) -> str | None:
+    """The Gmail thread id of the latest email about this loop, or None."""
+    urls = [a.detail for a in list_activity(session, loop.id) if a.by == ActivityBy.email and a.detail]
+    source = session.get(Source, loop.source_id)
+    if source is not None and source.url:
+        urls.append(source.url)
+    return urls[0].rsplit("/", 1)[-1] if urls else None  # urls end in /<thread id> (Email.url)
+
+
+def resolved_by(session: Session, loop: OpenLoop) -> ActivityBy | None:
+    """Who closed a resolved loop, for the "closed by email" tag."""
+    if loop.status != LoopStatus.resolved:
+        return None
+    last = session.exec(
+        select(Activity).where(Activity.loop_id == loop.id, Activity.action == ActivityAction.resolved)
+        .order_by(col(Activity.created_at).desc())
+    ).first()
+    return last.by if last else None
+
+
+def forget_email_data(session: Session) -> int:
+    """Delete the text, sender and links of every email Continuum read. Loops made from one stay, with
+    "source deleted". Gmail message ids stay, so sync never reads those emails again. Returns the count."""
+    sources = session.exec(select(Source).where(Source.kind == "email")).all()
+    for source in sources:
+        source.text, source.sender, source.url = "", None, None
+    for activity in session.exec(select(Activity).where(Activity.by == ActivityBy.email)).all():
+        activity.detail = ""
+    session.commit()
+    log.info("email_data_forgotten sources=%d", len(sources))
+    return len(sources)

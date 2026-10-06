@@ -200,7 +200,9 @@ POST /api/loops/{id}/unsnooze
 - [x] Briefing arrives on Telegram at the scheduled time, with correct items
 - [x] Empty day → "Nothing urgent today."
 - [ ] Snooze via Telegram and dashboard; snoozed loops come back after the date
+  *Telegram checked live (step 5); come-back tested offline (`test_attention.py`). Left: one live dashboard Snooze.*
 - [ ] "Draft a follow-up" works in both, and nothing is sent automatically
+  *Telegram checked live (step 5). Left: dashboard Draft button with Hermes running (reply + Copy).*
 - [x] New loops can be captured from Telegram
 - [x] `pytest` passes offline
 - [x] No bot token or chat id in git
