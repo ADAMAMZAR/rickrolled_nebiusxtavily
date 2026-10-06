@@ -26,7 +26,8 @@ Rules:
 1. Extract only what the message states. Never invent people, dates or commitments. Unknown = null.
 2. Ignore facts with no future action, e.g. "I like pizza" or "The meeting went well". Return empty lists.
 3. Dates: convert relative dates to YYYY-MM-DD using the current date given. "Friday", "next Friday",
-   "by Friday" and "before Friday" all mean the nearest upcoming Friday. If unsure, use null.
+   "by Friday" and "before Friday" all mean the nearest upcoming Friday. A date with no year ("October 5") is its
+   next occurrence. If unsure, use null.
 4. If the message is about an existing open loop, use updated_loops or resolved_loop_ids. Never add it again to new_loops.
 5. Resolve a loop only when the message clearly says it is done or has arrived.
 6. Set each new loop's "goal" to a goal's exact title (an existing goal or one in your goals list) only if the message
@@ -48,7 +49,10 @@ INVALID_MESSAGE = "The message could not be safely converted into structured con
 WEB_NOTE = "These are web search results about this open loop. Only report a change a result clearly states."
 
 EMAIL_NOTE = ("This is an email to the user from {name}. The existing open loops are the ones involving {name}. "
-              "Only report what the email clearly states. If it sets a meeting, call or interview with both a date and "
+              "Only report what the email clearly states. Resolve a waiting loop when the email gives what the user "
+              "waited for (e.g. a decision), even if it brings a next step; add that step as a new loop. Don't resolve "
+              "it if the email only says it's still pending or asks for something before deciding. A request to the "
+              "user is a new task with its own due date. If it sets a meeting, call or interview with both a date and "
               'a time, also return "events": [{{"title": "...", "start": "YYYY-MM-DDTHH:MM", "end": null}}] '
               "in the email's local time. No time stated = no event.")
 
