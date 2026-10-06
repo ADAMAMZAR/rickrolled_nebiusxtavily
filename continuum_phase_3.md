@@ -55,6 +55,8 @@ flowchart LR
 - If sync changed anything, the script prints a summary. Hermes delivers stdout to Telegram, and prints nothing when nothing changed. **Check in the docs** that empty output means no message. If not, have the script exit early and document it.
 - **Connectors** are thin wrappers in `app/connectors/`. Domain logic stays in the engine.
 - Before building, **check whether Hermes or a well-maintained MCP server already offers Gmail/Calendar access.** Only use it if it supports reading by sender and creating drafts. Otherwise build our own. Ingestion into the engine is ours either way.
+  *Checked 2026-10-06: Hermes reaches Gmail/Calendar only through Codex plugins or Google's MCP servers. Both give the agent access, not `sync.py`, and the agent shouldn't read mail directly (same reason as the web). So we build our own: `app/connectors/google.py`, OAuth via `google-auth-oauthlib` (Desktop app flow + token refresh), API calls via `httpx`.*
+- *No-agent cron, checked in the Hermes 0.21 docs and source: empty stdout = no message; non-zero exit = an error alert; stderr is shown only on failure. Scripts must live in the profile's `scripts/` folder and run with Hermes' own Python, so `setup_hermes.py` writes `continuum_sync.py` there, which runs `scripts/sync.py` with Continuum's Python.*
 
 ---
 
@@ -107,8 +109,8 @@ PendingAction:                   # NEW: anything that touches Google, and every 
 No migration, same as Phase 2: delete the old `.db` file after pulling, and `create_all` builds the new schema.
 
 **Person linking:**
-- Extraction gets the known people list (name, email) and returns `person` for new waiting loops. The engine matches it by case-insensitive name, or creates the Person.
-- The email is filled in when the user says it (*"Sarah's email is sarah@nvidia.com"*). A new tool `set_person_email(name, email)` handles that.
+- Extraction gets the known people's names (never their emails) and sets `waiting_on` to a known name when it's the same person. The engine links a new waiting loop to the Person with that name (case-insensitive), or creates one. *(Simpler than a separate `person` field: same result, no schema change.)*
+- The email is filled in when the user says it (*"Sarah's email is sarah@nvidia.com"*). A new tool `set_person_email(name, email)` handles that. It also links open waiting loops on that name that have no person yet.
 - The UI loop detail has an editable "Contact email" field.
 - No automatic email guessing.
 
@@ -166,6 +168,7 @@ Flow: **propose → user yes → execute → log**.
 | `propose_gmail_draft(loop_id, to, subject, body, thread_id?)` | Same, for a draft |
 | `propose_loop_update(loop_id, due?, resolve?, source_url)` | Same, for a change found on the web (§7) |
 | `web_lookup(query)` · `watch_loop(loop_id, query)` | Read-only web search · start/stop watching a loop (§7) |
+| `list_pending_actions()` | Proposals waiting for a yes/no, so Hermes can find the one a "yes" on Telegram refers to |
 | `approve_action(id)` | Executes the action. Hermes may only call it after the user says yes to *that* action |
 | `reject_action(id)` | Marks it rejected |
 | `set_person_email(name, email)` | Links a contact |
@@ -199,6 +202,7 @@ POST /api/actions/{id}/reject
 GET  /api/people   ·  PATCH /api/people/{id}  {email}
 GET  /api/google/status  ·  POST /api/google/connect  ·  POST /api/google/disconnect
 PUT  /api/loops/{id}/watch  {query}  ·  DELETE /api/loops/{id}/watch
+GET  /api/web/status                  → {enabled}: the UI hides web features without TAVILY_API_KEY
 ```
 
 ---
@@ -230,7 +234,7 @@ PUT  /api/loops/{id}/watch  {query}  ·  DELETE /api/loops/{id}/watch
 - **Person linking:** name match (case-insensitive), `set_person_email`, and new waiting loops link to the person.
 - **Actions:** proposing doesn't call Google. Approve calls it exactly once. Approving twice doesn't create a duplicate. Reject → never executed. Failures → `failed` + logged.
 - **Web:** only watched open loops are searched, at most once a day. A URL seen before is skipped. A result can only touch its own loop. Findings become proposals, never direct changes. Approve applies + logs + undo works; reject leaves the loop. No key → a clear message. A Tavily error skips that loop only.
-- **Live (optional, `-m live`):** extraction on 3 sample emails (a reply that resolves, an unrelated email, an email that adds a new deadline); one real Tavily search + extraction (a page that resolves a loop, an unrelated page).
+- **Live (optional, `-m live`):** extraction on 3 sample emails (a reply that resolves, an unrelated email, an email that adds a new deadline); one real Tavily search; extraction on canned pages (one that resolves a loop, one that moves its date, an unrelated one).
 
 ---
 
@@ -239,13 +243,21 @@ PUT  /api/loops/{id}/watch  {query}  ·  DELETE /api/loops/{id}/watch
 Web before Google: Tavily needs one API key and no OAuth, so it's lower risk, and it's what the "Best Use of Tavily" prize judges. If time runs out before the Oct 30 deadline, the web half still ships.
 
 1. Tables: Person, Activity, Source columns, PendingAction, setting, OpenLoop watch fields.
+   *Done 2026-10-03. Delete the old `.db` (no migration); startup says so.*
 2. Activity logging + undo in the engine (works for chat changes too). Add tests.
+   *Done 2026-10-03. Changes by the user are logged without undo (Reopen/Unsnooze cover them); `created` has no undo (Delete covers it). Each change can be undone once. Repeating a loop's current value isn't logged as a change. Undo that reopens a loop under a done goal makes the goal active, like Reopen. Deleting a loop deletes its activity and proposals. UI: History in the loop detail. Checked live 2026-10-03: resolve by chat → Undo → open.*
 3. PendingAction + approve/reject + MCP tools + approval UI (shared by web and Google).
+   *Done 2026-10-03. `list_pending_actions` added (§8). Approve claims the proposal with one conditional UPDATE, so a double click or dashboard + Telegram at once runs it once. A failed approve is marked `failed` and changes nothing. The same change proposed twice for a loop is stored once; resolved loops get no proposals; `source_url` must be http(s). Checked live 2026-10-03 (dashboard + Hermes chat, not Telegram): Approve in the strip → "resolved by the web" with Undo; "anything waiting for my OK?" → `list_pending_actions`, "yes, do it" → `approve_action`, "no" → `reject_action`.*
 4. **Tavily gate:** one real search through `app/connectors/tavily.py` from a scratch script.
+   *Code done 2026-10-03 (API checked against docs.tavily.com, matches §7). Gate: `pytest -m live -k tavily` (1 credit). **Not passed yet: needs `TAVILY_API_KEY` in `.env`.***
 5. `web_lookup` + `propose_loop_update`, then web watch in `sync.py` (mocked tests, then real).
+   *Done 2026-10-03 except a real Tavily search (no key yet). MCP: `web_lookup`, `propose_loop_update`, `watch_loop`. REST: watch routes + `GET /api/web/status`. UI: Watch the web form in the loop detail, "watching the web" in the list. `scripts/sync.py` searches each watched open loop at most once a day (marked checked before the search, so a failure waits until tomorrow) and prints new proposals and failed searches, or nothing. Each new result is extracted alone with `WEB_NOTE`, so a finding keeps its page; only that loop's resolve or new due count. A page counts as seen once it made a proposal for that loop (nothing else is stored), so pages with no finding are re-read while they stay in the week's results. Only open loops are searched: resolving stops the watch, reopening resumes it. Checked live 2026-10-03: real Nemotron on canned pages (`tests/test_web_live.py`: winners → resolve, new date → due, unrelated → nothing); real Hermes: "keep an eye on the hackathon results" → `watch_loop`, a question → `web_lookup`. `sync.py` logs to stderr: check in step 6 whether Hermes delivers stderr too.*
 6. Hermes cron (`no_agent`) runs `sync.py` → Telegram summary.
+   *Done 2026-10-06. `setup_hermes.py` writes `continuum_sync.py` into the profile's `scripts/`; it runs `scripts/sync.py` with Continuum's Python, keeps Hermes' Python paths out, and passes UTF-8 through. README has the one `cron create` command. Checked through the real Hermes scheduler with a temporary local-delivery job: a run with nothing to report is silent; a stub's proposal line with non-ASCII text came through intact. Telegram delivery is the same path as the briefing (checked in Phase 2).*
 7. Person linking in extraction + `set_person_email` + UI field.
+   *Done 2026-10-06. See §5. REST: `GET /api/people`, `PATCH /api/people/{id}`. UI: Contact email in the loop detail. Checked live: Nemotron reuses a known name ("Sarah" → "Sarah Chen", `tests/test_acceptance_live.py`); real Hermes: "Sarah's email is …" → `set_person_email`.*
 8. **Google gate:** OAuth connect, list the last 5 emails from one address, create one draft, create one event, all from a scratch script.
+   *Code done 2026-10-06: `app/connectors/google.py` (mocked tests) + `scripts/google_gate.py`. **Gate not passed yet: needs your OAuth client (README: Google setup) and your consent in the browser.** In testing mode Google ends the connection after 7 days.*
 9. `ingest_email` in `sync.py` with mocked tests, then real Gmail.
 10. Google proposals (calendar event, Gmail draft).
 11. Run the §1 demo end to end. Add a Phase 3 section + Google and Tavily setup to the README.

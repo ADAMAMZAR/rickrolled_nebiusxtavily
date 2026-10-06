@@ -190,14 +190,14 @@ POST /api/loops/{id}/unsnooze
 5. **Telegram gate:** chatting with Continuum through Telegram works.
    *Config done 2026-10-02 (§8). Live check done 2026-10-02: capture → `remember`, urgent → `needs_attention`, snooze → `snooze_loop`, draft → `inspect_loop` with no writes. The first message was blocked because `TELEGRAM_ALLOWED_USERS` held the bot's own id (the start of the token); setup now rejects that.*
 6. Cron briefing → trigger it by hand, check delivery. Then schedule it.
-   *Code done 2026-10-02: `hermes/briefing_prompt.md`, cron toolset, timezone, home channel, README command (§7). Triggered by hand 2026-10-02, both delivered to Telegram: empty day → "Nothing urgent today.", 2 items → the §7 list. **Scheduled 08:00 run not seen yet.***
+   *Code done 2026-10-02: `hermes/briefing_prompt.md`, cron toolset, timezone, home channel, README command (§7). Triggered by hand 2026-10-02, both delivered to Telegram: empty day → "Nothing urgent today.", 2 items → the §7 list. Scheduled run seen 2026-10-03 (a one-off job at 22:30): fired on its own and was delivered with the right item. It only fires while the gateway runs and the PC is awake.*
 7. Run the §1 demo. Add a Phase 2 section to the README.
 
 ---
 
 ## 13. Done Checklist
 
-- [ ] Briefing arrives on Telegram at the scheduled time, with correct items
+- [x] Briefing arrives on Telegram at the scheduled time, with correct items
 - [x] Empty day → "Nothing urgent today."
 - [ ] Snooze via Telegram and dashboard; snoozed loops come back after the date
 - [ ] "Draft a follow-up" works in both, and nothing is sent automatically

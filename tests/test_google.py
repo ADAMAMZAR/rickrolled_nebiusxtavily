@@ -1,0 +1,115 @@
+"""Google connector with a fake HTTP transport: no real account is touched."""
+
+import base64
+import json
+from collections.abc import Callable
+from datetime import datetime
+from email import message_from_bytes
+from pathlib import Path
+
+import httpx
+import pytest
+
+from app.config import Settings
+from app.connectors.google import GoogleClient, GoogleError, connect
+
+MESSAGE = {
+    "id": "m1", "threadId": "t1", "internalDate": "1790000000000", "snippet": "Great news, we'd like to interview you",
+    "payload": {"headers": [{"name": "From", "value": "Sarah <sarah@nvidia.com>"}, {"name": "Subject", "value": "Interview"}]},
+}
+
+
+def google(handler: Callable[[httpx.Request], httpx.Response]) -> GoogleClient:
+    return GoogleClient("token-1", timezone="Asia/Kuala_Lumpur", transport=httpx.MockTransport(handler))
+
+
+def test_messages_from_one_sender() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if request.url.path.endswith("/messages"):
+            return httpx.Response(200, json={"messages": [{"id": "m1", "threadId": "t1"}]})
+        return httpx.Response(200, json=MESSAGE)
+
+    [email] = google(handler).messages_from("sarah@nvidia.com", after=datetime.fromtimestamp(1789990000))
+    assert seen[0].headers["Authorization"] == "Bearer token-1"
+    assert seen[0].url.params["q"] == "from:sarah@nvidia.com after:1789990000"
+    assert seen[1].url.params.get_list("metadataHeaders") == ["From", "Subject"]  # headers only, no body
+    assert (email.sender, email.subject, email.thread_id) == ("Sarah <sarah@nvidia.com>", "Interview", "t1")
+    assert email.received.year == 2026 and email.url.endswith("#all/t1")
+
+
+def test_no_messages() -> None:
+    assert google(lambda r: httpx.Response(200, json={"resultSizeEstimate": 0})).messages_from("a@b.co") == []
+
+
+def test_draft_is_saved_not_sent() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json={"id": "d1"})
+
+    assert google(handler).create_draft("sarah@nvidia.com", "Thanks", "Thank you, Sarah!", thread_id="t1") == "d1"
+    assert seen[0].url.path == "/gmail/v1/users/me/drafts"  # drafts only: there is no send call
+    message = json.loads(seen[0].content)["message"]
+    mail = message_from_bytes(base64.urlsafe_b64decode(message["raw"]))
+    assert (mail["To"], mail["Subject"], message["threadId"]) == ("sarah@nvidia.com", "Thanks", "t1")
+    assert mail.get_payload(decode=True).decode().strip() == "Thank you, Sarah!"
+
+
+def test_a_line_break_cant_add_headers() -> None:
+    with pytest.raises(ValueError):
+        google(lambda r: httpx.Response(200, json={"id": "d1"})).create_draft("a@b.co", "Hi\nBcc: x@evil.co", "body")
+
+
+def test_event_uses_the_users_timezone_and_lasts_an_hour() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json={"id": "e1", "htmlLink": "https://calendar.google.com/event?eid=e1"})
+
+    event = google(handler).create_event("NVIDIA interview", datetime(2026, 10, 8, 10, 0))
+    assert (event.id, event.link) == ("e1", "https://calendar.google.com/event?eid=e1")
+    assert json.loads(seen[0].content) == {
+        "summary": "NVIDIA interview",
+        "start": {"dateTime": "2026-10-08T10:00:00", "timeZone": "Asia/Kuala_Lumpur"},
+        "end": {"dateTime": "2026-10-08T11:00:00", "timeZone": "Asia/Kuala_Lumpur"},
+    }
+
+
+@pytest.mark.parametrize(("response", "message"), [
+    (httpx.Response(401), "rejected the sign-in"),
+    (httpx.Response(403, json={"error": {"message": "Gmail API has not been used in project 1"}}),
+     "HTTP 403: Gmail API has not been used in project 1"),
+    (httpx.Response(500, text="oops"), "HTTP 500"),
+])
+def test_errors_are_clear(response: httpx.Response, message: str) -> None:
+    with pytest.raises(GoogleError, match=message):
+        google(lambda r: response).messages_from("a@b.co")
+
+
+def test_unreachable_is_clear() -> None:
+    def down(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("no network")
+    with pytest.raises(GoogleError, match="Couldn't reach Google"):
+        google(down).create_draft("a@b.co", "s", "b")
+
+
+def test_setup_errors_are_clear(tmp_path: Path) -> None:
+    settings = Settings(_env_file=None, google_client_secret_file=str(tmp_path / "client_secret.json"),
+                        google_token_file=str(tmp_path / "google_token.json"))
+    with pytest.raises(GoogleError, match="no OAuth client file"):
+        connect(settings)
+    with pytest.raises(GoogleError, match="isn't connected"):
+        GoogleClient.from_settings(settings)
+
+
+def test_a_damaged_token_is_clear(tmp_path: Path) -> None:
+    token = tmp_path / "google_token.json"
+    token.write_text("{}", encoding="utf-8")
+    settings = Settings(_env_file=None, google_token_file=str(token))
+    with pytest.raises(GoogleError, match="is damaged. Delete it, then connect again"):
+        GoogleClient.from_settings(settings)

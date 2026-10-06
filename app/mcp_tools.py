@@ -11,16 +11,20 @@ from uuid import UUID
 
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
+from pydantic import ValidationError
 from sqlalchemy import Engine
 from sqlmodel import Session
 
 from app import engine as eng
-from app.db import Goal, OpenLoop
+from app.connectors.tavily import TavilyClient, TavilyError
+from app.db import ActivityBy, Goal, LoopStatus, OpenLoop, Person
 from app.extraction import Completer, ExtractionError
 from app.llm import LLMError
 
 
-def build_mcp(get_db: Callable[[], Engine], get_llm: Callable[[], Completer]) -> MCPServer:
+def build_mcp(
+    get_db: Callable[[], Engine], get_llm: Callable[[], Completer], get_web: Callable[[], TavilyClient]
+) -> MCPServer:
     mcp = MCPServer("continuum")
 
     @contextmanager
@@ -87,7 +91,7 @@ def build_mcp(get_db: Callable[[], Engine], get_llm: Callable[[], Completer]) ->
         except ValueError as e:
             raise ToolError(f"`until` must be a date like 2026-10-05, not {until!r}.") from e
         with session() as s:
-            loop = eng.snooze_loop(s, _uuid(loop_id), day)
+            loop = eng.snooze_loop(s, _uuid(loop_id), day, by=ActivityBy.chat)
             return {"snoozed": loop.title, "until": f"{day:%a %Y-%m-%d}"}
 
     @mcp.tool()
@@ -108,8 +112,10 @@ def build_mcp(get_db: Callable[[], Engine], get_llm: Callable[[], Completer]) ->
         with session() as s:
             detail = eng.get_loop(s, _uuid(loop_id))
             loop = detail.loop
+            person = s.get(Person, loop.person_id) if loop.person_id else None
             return {
                 **_loop(s, loop),
+                **_clean({"contact_email": person.email if person else None}),
                 "summary": loop.summary,
                 "status": loop.status.value,
                 "source": {
@@ -123,16 +129,89 @@ def build_mcp(get_db: Callable[[], Engine], get_llm: Callable[[], Completer]) ->
     def resolve_loop(loop_id: str) -> dict[str, Any]:
         """Mark one open loop as done. Get the id from list_open_loops."""
         with session() as s:
-            return {"resolved": eng.resolve_loop(s, _uuid(loop_id)).title}
+            return {"resolved": eng.resolve_loop(s, _uuid(loop_id), by=ActivityBy.chat).title}
+
+    @mcp.tool()
+    def list_pending_actions() -> dict[str, Any]:
+        """Things Continuum proposed that wait for the user's yes or no, e.g. "Resolve X? Found on the web".
+        Use it to find the one the user is answering before approve_action or reject_action."""
+        with session() as s:
+            return {"actions": [{"id": str(a.id), "summary": eng.describe_action(s, a)} for a in eng.list_actions(s)]}
+
+    @mcp.tool()
+    def approve_action(action_id: str) -> dict[str, Any]:
+        """Do one proposed action. Only after the user clearly said yes to that specific action.
+        Get the id from list_pending_actions."""
+        with session() as s:
+            action = eng.approve_action(s, _uuid(action_id, "action", "list_pending_actions"))
+            return {"done": eng.describe_action(s, action)}
+
+    @mcp.tool()
+    def reject_action(action_id: str) -> dict[str, Any]:
+        """Drop one proposed action the user said no to. Get the id from list_pending_actions."""
+        with session() as s:
+            action = eng.reject_action(s, _uuid(action_id, "action", "list_pending_actions"))
+            return {"rejected": eng.describe_action(s, action)}
+
+    @mcp.tool()
+    def set_person_email(name: str, email: str) -> dict[str, Any]:
+        """Save someone's email address when the user gives it, e.g. "Sarah's email is sarah@nvidia.com".
+        Continuum uses it to notice their replies and never sends email. Never guess an address."""
+        with session() as s:
+            person = eng.set_person_email(s, name, email)
+            return {
+                "person": person.name,
+                "email": person.email,
+                "waiting_on_them": [loop.title for loop in eng.person_loops(s, person.id)],
+            }
+
+    @mcp.tool()
+    def web_lookup(query: str) -> dict[str, Any]:
+        """Search the web for a question about the outside world, e.g. "when does the Google STEP application
+        close?". Answer from it and give the link. Read-only: nothing is saved."""
+        try:
+            found = get_web().search(query, answer=True)
+        except TavilyError as e:
+            raise ToolError(str(e)) from e
+        return _clean({
+            "answer": found.answer,
+            "results": [{"title": r.title, "url": r.url, "snippet": r.content[:500]} for r in found.results],
+        })
+
+    @mcp.tool()
+    def propose_loop_update(
+        loop_id: str, source_url: str, resolve: bool = False, due: str | None = None, source_title: str | None = None
+    ) -> dict[str, Any]:
+        """Propose a change to one open loop based on a web page: resolve it, or a new due date (YYYY-MM-DD).
+        source_url is the page. Nothing changes until the user says yes, so tell them it waits for their OK.
+        Use it when the user wants something from web_lookup saved, e.g. "set that as the deadline"."""
+        try:
+            change = eng.LoopUpdate(resolve=resolve, due=due, source_url=source_url, source_title=source_title)
+        except ValidationError as e:
+            raise ToolError(f"Can't propose that: {e.errors()[0]['msg']}") from e
+        with session() as s:
+            action = eng.propose_loop_update(s, _uuid(loop_id), change)
+            return {"id": str(action.id), "proposed": eng.describe_action(s, action)}
+
+    @mcp.tool()
+    def watch_loop(loop_id: str, query: str | None = None) -> dict[str, Any]:
+        """Watch the web for one open loop, e.g. "keep an eye on the hackathon results". Continuum searches
+        `query` once a day and asks the user before changing anything. Use a short search like
+        "NVIDIA hackathon 2026 winners". Leave query empty to stop watching. Get the id from list_open_loops."""
+        with session() as s:
+            loop = eng.watch_loop(s, _uuid(loop_id), query, by=ActivityBy.chat)
+            if loop.watch_query:
+                return {"watching": loop.title, "query": loop.watch_query}
+            return {"stopped_watching": loop.title}
 
     return mcp
 
 
-def _uuid(loop_id: str) -> UUID:
+def _uuid(value: str, what: str = "loop", where: str = "list_open_loops") -> UUID:
     try:
-        return UUID(loop_id)
+        return UUID(value)
     except ValueError as e:
-        raise ToolError(f"No loop with id {loop_id}. Get ids from list_open_loops.") from e
+        raise ToolError(f"No {what} with id {value}. Get ids from {where}.") from e
 
 
 def _goal_title(session: Session, loop: OpenLoop) -> str | None:
@@ -152,6 +231,7 @@ def _loop(session: Session, loop: OpenLoop, with_goal: bool = True) -> dict[str,
             "next_action": loop.next_action,
             "goal": _goal_title(session, loop) if with_goal else None,
             "snoozed_until": f"{loop.snoozed_until:%a %Y-%m-%d}" if snoozed else None,
+            "watching_web": loop.watch_query if loop.status == LoopStatus.open else None,
         }
     )
 

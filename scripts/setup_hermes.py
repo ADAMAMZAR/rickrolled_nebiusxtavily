@@ -21,6 +21,34 @@ sys.path.insert(0, str(ROOT))  # so `app` imports without installing the package
 from app.config import Settings, settings  # noqa: E402
 
 PROFILE = "continuum"
+SYNC_SCRIPT = "continuum_sync.py"  # what the sync cron job runs (README: Watch the web)
+
+# Hermes runs cron scripts from its own scripts/ folder with its own Python, so this hands over to
+# Continuum's Python. Its stdout is what the cron job delivers; empty stdout sends nothing.
+SYNC_WRAPPER = """\"\"\"Runs Continuum's scripts/sync.py for the Hermes cron job. Written by Continuum's
+scripts/setup_hermes.py: re-run that after moving the project or its .venv.\"\"\"
+
+import os
+import subprocess
+import sys
+
+ROOT = {root!r}
+PYTHON = {python!r}
+
+# Keep Hermes' Python paths out of Continuum's, and pass text through as UTF-8 (titles can be any language).
+env = {{k: v for k, v in os.environ.items() if k not in ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV")}}
+env["PYTHONIOENCODING"] = "utf-8"
+try:
+    done = subprocess.run(
+        [PYTHON, os.path.join("scripts", "sync.py")], cwd=ROOT, env=env, capture_output=True, encoding="utf-8", errors="replace"
+    )
+except OSError as e:  # the project or its .venv moved
+    sys.exit(f"Can't run Continuum's sync ({{e}}). Re-run scripts/setup_hermes.py in the Continuum folder.")
+for stream, text in ((sys.stdout, done.stdout), (sys.stderr, done.stderr)):
+    stream.reconfigure(encoding="utf-8")
+    stream.write(text)
+sys.exit(done.returncode)
+"""
 
 
 def hermes_root() -> Path:
@@ -50,6 +78,13 @@ def telegram_env(config: Settings) -> dict[str, str]:
         )
     # The daily briefing goes to the home channel: the first user's DM (a DM's chat id is the user id).
     return {"TELEGRAM_BOT_TOKEN": token, "TELEGRAM_ALLOWED_USERS": users, "TELEGRAM_HOME_CHANNEL": users.split(",")[0]}
+
+
+def write_sync_script(scripts_dir: Path, root: Path, python: str) -> Path:
+    scripts_dir.mkdir(parents=True, exist_ok=True)
+    path = scripts_dir / SYNC_SCRIPT
+    path.write_text(SYNC_WRAPPER.format(root=str(root), python=python), encoding="utf-8")
+    return path
 
 
 def merge(base: dict, extra: dict) -> dict:
@@ -94,6 +129,7 @@ def main() -> None:
     template["timezone"] = settings.timezone  # Hermes' clock and cron schedules follow it
     config_path.write_text(yaml.safe_dump(merge(config, template), sort_keys=False), encoding="utf-8")
     shutil.copyfile(ROOT / "hermes" / "SOUL.md", profile_dir / "SOUL.md")
+    write_sync_script(profile_dir / "scripts", ROOT, sys.executable)  # this Python has Continuum's packages
 
     api_key = settings.hermes_api_key.get_secret_value() or secrets.token_urlsafe(24)
     port = str(urlsplit(settings.hermes_api_url).port or 8642)

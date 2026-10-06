@@ -1,3 +1,6 @@
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -5,7 +8,7 @@ import yaml
 from pydantic import SecretStr
 
 from app.config import Settings
-from scripts.setup_hermes import telegram_env
+from scripts.setup_hermes import telegram_env, write_sync_script
 
 HERMES = Path(__file__).parent.parent / "hermes"
 CONFIG = HERMES / "config.example.yaml"
@@ -49,3 +52,29 @@ def test_every_platform_gets_continuum_tools_only() -> None:
 def test_briefing_prompt_has_no_double_quotes() -> None:
     """The README passes it as a command argument; Windows PowerShell 5.1 drops double quotes there."""
     assert '"' not in (HERMES / "briefing_prompt.md").read_text(encoding="utf-8")
+
+
+def test_cron_wrapper_runs_sync_with_continuums_python(tmp_path: Path) -> None:
+    """Hermes runs cron scripts with its own Python. The wrapper hands over to Continuum's,
+    relays stdout (what Telegram gets) and the exit code, and keeps Hermes' paths out."""
+    root = tmp_path / "continuum"
+    (root / "scripts").mkdir(parents=True)
+    (root / "scripts" / "sync.py").write_text(
+        "import os, sys\n"
+        "print('Resolve “Wait for Sarah’s reply”? ✅')\n"
+        "print(os.environ.get('PYTHONPATH', 'clean'), os.path.basename(os.getcwd()), file=sys.stderr)\n"
+        "sys.exit(3)\n",
+        encoding="utf-8",
+    )
+    wrapper = write_sync_script(tmp_path / "hermes-scripts", root, sys.executable)
+    hermes_env = {**os.environ, "PYTHONPATH": "C:/hermes/site-packages", "PYTHONIOENCODING": "cp1252"}
+    done = subprocess.run([sys.executable, str(wrapper)], env=hermes_env, capture_output=True, encoding="utf-8")
+    assert done.stdout.strip() == "Resolve “Wait for Sarah’s reply”? ✅"
+    assert done.stderr.strip() == "clean continuum"
+    assert done.returncode == 3
+
+
+def test_cron_wrapper_explains_a_moved_project(tmp_path: Path) -> None:
+    wrapper = write_sync_script(tmp_path, tmp_path / "moved", str(tmp_path / "moved" / "python.exe"))
+    done = subprocess.run([sys.executable, str(wrapper)], capture_output=True, encoding="utf-8")
+    assert done.returncode == 1 and "Re-run scripts/setup_hermes.py" in done.stderr

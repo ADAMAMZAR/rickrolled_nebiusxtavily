@@ -4,20 +4,21 @@ from contextlib import asynccontextmanager
 from datetime import date
 from functools import cache
 from pathlib import Path
-from typing import Any, Literal, Protocol
+from typing import Annotated, Any, Literal, Protocol
 from uuid import UUID
 
 from fastapi import Depends, FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints
 from sqlmodel import Session, text
 from starlette.exceptions import HTTPException
 
 from app import engine as eng
 from app.config import settings
-from app.db import Goal, LoopStatus, OpenLoop, create_db_engine
+from app.connectors.tavily import TavilyClient
+from app.db import ActionStatus, Activity, Goal, LoopStatus, OpenLoop, PendingAction, Person, create_db_engine
 from app.extraction import Completer
 from app.hermes import HermesClient, HermesError, HermesReply
 from app.llm import LLMClient
@@ -40,9 +41,22 @@ class SnoozeIn(BaseModel):
     until: date
 
 
+class PersonIn(BaseModel):
+    email: str | None = None  # empty or null clears it
+
+
+class WatchIn(BaseModel):
+    query: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+
+
 @cache
 def default_hermes() -> HermesClient:
     return HermesClient(settings)
+
+
+@cache
+def default_web() -> TavilyClient:
+    return TavilyClient(settings)
 
 
 def get_session(request: Request) -> Iterator[Session]:
@@ -56,22 +70,34 @@ def error(status: int, code: str, message: str) -> JSONResponse:
 
 def loop_out(session: Session, loop: OpenLoop) -> dict[str, Any]:
     goal = session.get(Goal, loop.goal_id) if loop.goal_id else None
+    person = session.get(Person, loop.person_id) if loop.person_id else None
     return {
         **loop.model_dump(mode="json"),
         "goal_title": goal.title if goal else None,
         "goal_status": goal.status.value if goal else None,
+        "person_name": person.name if person else None,
+        "person_email": person.email if person else None,
     }
+
+
+def activity_out(a: Activity) -> dict[str, Any]:
+    return {**a.model_dump(mode="json", exclude={"undo"}), "can_undo": a.undo is not None}
+
+
+def action_out(session: Session, a: PendingAction) -> dict[str, Any]:
+    return {**a.model_dump(mode="json"), "summary": eng.describe_action(session, a)}
 
 
 def create_app(
     database_url: str | None = None,
     get_llm: Callable[[], Completer] | None = None,
     get_hermes: Callable[[], Agent] | None = None,
+    get_web: Callable[[], TavilyClient] | None = None,
 ) -> FastAPI:
-    """get_llm / get_hermes are factories, so a missing key only errors when it's needed."""
+    """get_llm / get_hermes / get_web are factories, so a missing key only errors when it's needed."""
     logging.basicConfig(level=settings.log_level)
     get_hermes = get_hermes or default_hermes
-    mcp = build_mcp(lambda: app.state.db, get_llm or (lambda: LLMClient(settings)))
+    mcp = build_mcp(lambda: app.state.db, get_llm or (lambda: LLMClient(settings)), get_web or default_web)
     # Served at /mcp/. Also creates the session manager that lifespan runs.
     mcp_app = mcp.streamable_http_app(streamable_http_path="/", stateless_http=True, json_response=True)
 
@@ -167,6 +193,51 @@ def create_app(
     def delete(loop_id: UUID, session: Session = Depends(get_session)) -> Response:
         eng.delete_loop(session, loop_id)
         return Response(status_code=204)
+
+    @app.get("/api/people")
+    def people(session: Session = Depends(get_session)) -> list[dict[str, Any]]:
+        return [p.model_dump(mode="json") for p in eng.list_people(session)]
+
+    @app.patch("/api/people/{person_id}")
+    def update_person(person_id: UUID, body: PersonIn, session: Session = Depends(get_session)) -> dict[str, Any]:
+        person = eng.get_person(session, person_id)
+        return eng.set_person_email(session, person.name, body.email).model_dump(mode="json")
+
+    @app.get("/api/web/status")
+    def web_status() -> dict[str, bool]:
+        return {"enabled": eng.web_enabled()}
+
+    @app.put("/api/loops/{loop_id}/watch")
+    def watch(loop_id: UUID, body: WatchIn, session: Session = Depends(get_session)) -> dict[str, Any]:
+        return loop_out(session, eng.watch_loop(session, loop_id, body.query))
+
+    @app.delete("/api/loops/{loop_id}/watch")
+    def unwatch(loop_id: UUID, session: Session = Depends(get_session)) -> dict[str, Any]:
+        return loop_out(session, eng.watch_loop(session, loop_id, None))
+
+    @app.get("/api/activity")
+    def activity(loop_id: UUID | None = None, session: Session = Depends(get_session)) -> list[dict[str, Any]]:
+        return [activity_out(a) for a in eng.list_activity(session, loop_id)]
+
+    @app.post("/api/activity/{activity_id}/undo")
+    def undo(activity_id: UUID, session: Session = Depends(get_session)) -> dict[str, Any]:
+        return loop_out(session, eng.undo_activity(session, activity_id))
+
+    @app.get("/api/actions")
+    def actions(
+        status: Literal["proposed", "done", "rejected", "failed", "all"] = "proposed",
+        session: Session = Depends(get_session),
+    ) -> list[dict[str, Any]]:
+        found = eng.list_actions(session, None if status == "all" else ActionStatus(status))
+        return [action_out(session, a) for a in found]
+
+    @app.post("/api/actions/{action_id}/approve")
+    def approve(action_id: UUID, session: Session = Depends(get_session)) -> dict[str, Any]:
+        return action_out(session, eng.approve_action(session, action_id))
+
+    @app.post("/api/actions/{action_id}/reject")
+    def reject(action_id: UUID, session: Session = Depends(get_session)) -> dict[str, Any]:
+        return action_out(session, eng.reject_action(session, action_id))
 
     app.mount("/", StaticFiles(directory=STATIC, html=True), name="ui")
     return app

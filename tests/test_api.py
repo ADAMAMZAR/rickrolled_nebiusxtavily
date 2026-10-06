@@ -1,9 +1,13 @@
 import json
 from collections.abc import Iterator
+from uuid import UUID
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlmodel import Session
 
+from app import engine as eng
+from app.db import create_db_engine
 from app.hermes import HermesError, HermesReply
 from app.main import create_app
 from tests.conftest import FakeLLM
@@ -145,3 +149,60 @@ def test_errors_are_json(client: TestClient) -> None:
     assert unknown.status_code == 404 and unknown.json()["error"] == "not_found"
     wrong_method = client.put("/api/goals")
     assert wrong_method.status_code == 405 and wrong_method.json()["error"] == "invalid_request"
+
+
+def test_activity_and_undo(client: TestClient) -> None:
+    wait = next(l for l in seed(client) if l["waiting_on"] == "Sarah")
+    client.post(f"/api/loops/{wait['id']}/resolve")
+    items = client.get(f"/api/activity?loop_id={wait['id']}").json()
+    assert {(a["action"], a["by"], a["can_undo"]) for a in items} == {("created", "chat", False), ("resolved", "user", False)}
+    assert "undo" not in items[0]
+    created = next(a for a in items if a["action"] == "created")
+    assert client.post(f"/api/activity/{created['id']}/undo").status_code == 422
+    assert client.post("/api/activity/00000000-0000-0000-0000-000000000000/undo").status_code == 404
+
+
+def test_actions_approve_and_reject(client: TestClient, db_url: str) -> None:
+    wait, portfolio = sorted(seed(client), key=lambda l: l["title"], reverse=True)
+    with Session(create_db_engine(db_url)) as s:
+        for loop in (wait, portfolio):
+            eng.propose_loop_update(s, UUID(loop["id"]), eng.LoopUpdate(resolve=True, source_url="https://x.dev"))
+    first, second = client.get("/api/actions").json()
+    assert first["summary"].startswith("Resolve") and first["payload"]["source_url"] == "https://x.dev"
+    assert client.post(f"/api/actions/{first['id']}/approve").json()["status"] == "done"
+    assert client.post(f"/api/actions/{second['id']}/reject").json()["status"] == "rejected"
+    assert client.get("/api/actions").json() == []
+    assert [a["status"] for a in client.get("/api/actions?status=all").json()] == ["done", "rejected"]
+    again = client.post(f"/api/actions/{first['id']}/approve")
+    assert again.status_code == 422 and "already done" in again.json()["message"]
+    assert client.post("/api/actions/00000000-0000-0000-0000-000000000000/reject").status_code == 404
+
+
+@pytest.mark.usefixtures("web_on")
+def test_watch_the_web(client: TestClient) -> None:
+    wait = seed(client)[0]
+    assert client.get("/api/web/status").json() == {"enabled": True}
+    watched = client.put(f"/api/loops/{wait['id']}/watch", json={"query": " NVIDIA hackathon "}).json()
+    assert (watched["watch_query"], watched["watch_checked_on"]) == ("NVIDIA hackathon", None)
+    assert client.put(f"/api/loops/{wait['id']}/watch", json={"query": "   "}).status_code == 422
+    assert client.delete(f"/api/loops/{wait['id']}/watch").json()["watch_query"] is None
+
+
+@pytest.mark.usefixtures("web_off")
+def test_web_features_are_off_without_a_key(client: TestClient) -> None:
+    wait = seed(client)[0]
+    assert client.get("/api/web/status").json() == {"enabled": False}
+    response = client.put(f"/api/loops/{wait['id']}/watch", json={"query": "NVIDIA hackathon"})
+    assert response.status_code == 422 and "TAVILY_API_KEY" in response.json()["message"]
+
+
+def test_people_and_contact_email(client: TestClient) -> None:
+    wait = next(l for l in seed(client) if l["waiting_on"] == "Sarah")
+    assert (wait["person_name"], wait["person_email"]) == ("Sarah", None)
+    [sarah] = client.get("/api/people").json()
+    updated = client.patch(f"/api/people/{sarah['id']}", json={"email": "sarah@nvidia.com"}).json()
+    assert updated["email"] == "sarah@nvidia.com"
+    assert client.get(f"/api/loops/{wait['id']}").json()["person_email"] == "sarah@nvidia.com"
+    assert client.patch(f"/api/people/{sarah['id']}", json={"email": "nope"}).status_code == 422
+    assert client.patch(f"/api/people/{sarah['id']}", json={"email": None}).json()["email"] is None
+    assert client.patch("/api/people/00000000-0000-0000-0000-000000000000", json={"email": None}).status_code == 404
