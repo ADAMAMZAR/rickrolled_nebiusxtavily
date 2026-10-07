@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Annotated, Any, Literal, Protocol
 from uuid import UUID
 
-from fastapi import Depends, FastAPI, Request, Response
+from fastapi import Depends, FastAPI, File, Form, Request, Response, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -16,6 +16,7 @@ from sqlmodel import Session, text
 from starlette.exceptions import HTTPException
 
 from app import engine as eng
+from app import investigation as inv
 from app.config import settings
 from app.connectors import google
 from app.connectors.google import GoogleClient, GoogleError
@@ -85,6 +86,20 @@ def loop_out(session: Session, loop: OpenLoop) -> dict[str, Any]:
 
 def activity_out(a: Activity) -> dict[str, Any]:
     return {**a.model_dump(mode="json", exclude={"undo"}), "can_undo": a.undo is not None}
+
+
+def investigation_out(detail: inv.InvestigationDetail) -> dict[str, Any]:
+    def rows(items: list[Any]) -> list[dict[str, Any]]:
+        return [r.model_dump(mode="json", exclude={"investigation_id"}) for r in items]
+
+    return {
+        **detail.investigation.model_dump(mode="json", exclude={"screenshot_path"}),
+        "has_screenshot": detail.investigation.screenshot_path is not None,
+        "entities": rows(detail.entities),
+        "claims": rows(detail.claims),
+        "evidence": rows(detail.evidence),
+        "signals": rows(detail.signals),
+    }
 
 
 def action_out(session: Session, a: PendingAction) -> dict[str, Any]:
@@ -247,6 +262,29 @@ def create_app(
     @app.post("/api/actions/{action_id}/reject")
     def reject(action_id: UUID, session: Session = Depends(get_session)) -> dict[str, Any]:
         return action_out(session, eng.reject_action(session, action_id))
+
+    @app.post("/api/investigations", status_code=201)
+    def create_investigation(
+        text: Annotated[str | None, Form()] = None,
+        url: Annotated[str | None, Form()] = None,
+        screenshot: Annotated[UploadFile | None, File()] = None,
+        session: Session = Depends(get_session),
+    ) -> dict[str, Any]:
+        # Read one byte past the limit, so an oversized file is rejected without reading all of it.
+        data = screenshot.file.read(inv.MAX_SCREENSHOT + 1) if screenshot and screenshot.filename else None
+        created = inv.create_investigation(session, text, url, data)
+        return {"id": str(created.id)}
+
+    @app.get("/api/investigations")
+    def investigations(session: Session = Depends(get_session)) -> list[dict[str, Any]]:
+        return [
+            i.model_dump(mode="json", include={"id", "status", "risk_level", "input_text", "input_url", "created_at"})
+            for i in inv.list_investigations(session)
+        ]
+
+    @app.get("/api/investigations/{investigation_id}")
+    def investigation(investigation_id: UUID, session: Session = Depends(get_session)) -> dict[str, Any]:
+        return investigation_out(inv.get_investigation(session, investigation_id))
 
     @app.get("/api/google/status")
     def google_status(session: Session = Depends(get_session)) -> dict[str, Any]:

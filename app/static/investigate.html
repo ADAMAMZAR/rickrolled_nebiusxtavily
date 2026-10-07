@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ScamGraph · Continuum</title>
+<style>
+/* Bare H0 page. The full five-screen UI comes in H4 (spec §11). Tokens match index.html. */
+:root {
+  --bg: oklch(0.975 0.004 170); --panel: oklch(1 0 0); --line: oklch(0.9 0.008 170);
+  --ink: oklch(0.24 0.015 200); --muted: oklch(0.47 0.015 200);
+  --accent: oklch(0.47 0.09 170); --accent-ink: oklch(0.99 0 0); --danger: oklch(0.52 0.17 27);
+  --radius: 10px; color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: oklch(0.19 0.01 200); --panel: oklch(0.23 0.012 200); --line: oklch(0.32 0.012 200);
+    --ink: oklch(0.93 0.008 170); --muted: oklch(0.72 0.012 190);
+    --accent: oklch(0.72 0.1 170); --accent-ink: oklch(0.17 0.02 180); --danger: oklch(0.72 0.15 27);
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+button, input, textarea { font: inherit; color: inherit; }
+main { max-width: 760px; margin: 0 auto; padding: 18px 16px 40px; }
+header { display: flex; align-items: baseline; gap: 12px; }
+header h1 { margin: 0; font-size: 1.15rem; }
+header a { margin-left: auto; color: var(--muted); }
+form, #result { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; margin-top: 16px; display: grid; gap: 10px; }
+label { display: grid; gap: 4px; color: var(--muted); font-size: 0.8125rem; }
+textarea, input[type=url] { width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
+textarea { min-height: 120px; resize: vertical; }
+button { justify-self: start; padding: 8px 16px; border: 0; border-radius: 8px; background: var(--accent); color: var(--accent-ink); font-weight: 600; cursor: pointer; }
+button:disabled { opacity: 0.6; cursor: default; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.error { color: var(--danger); }
+ol { margin: 0; padding-left: 20px; }
+.muted { color: var(--muted); font-size: 0.8125rem; }
+[hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <header><h1>ScamGraph</h1><span class="muted">Paste it before you pay.</span><a href="/">Back to Continuum</a></header>
+  <form id="form">
+    <label>Suspicious message<textarea name="text" maxlength="8000" placeholder="Paste the message you received…"></textarea></label>
+    <label>Link (optional)<input type="url" name="url" maxlength="2000" placeholder="https://…"></label>
+    <label>Screenshot (optional)<input type="file" name="screenshot" accept="image/png,image/jpeg,image/webp"></label>
+    <button id="go" type="submit">Investigate</button>
+    <p class="error" id="error" role="alert" hidden></p>
+  </form>
+  <section id="result" aria-live="polite" hidden>
+    <p><strong id="status"></strong> <span class="muted" id="rid"></span></p>
+    <ol id="steps"></ol>
+  </section>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+let timer = null;
+
+async function show(id) {
+  clearTimeout(timer);
+  const res = await fetch(`/api/investigations/${id}`);
+  const data = await res.json();
+  if (!res.ok) { $("error").textContent = data.message || "Couldn't load that investigation."; $("error").hidden = false; return; }
+  $("result").hidden = false;
+  $("status").textContent = data.status === "running" ? "Investigating…" : data.status === "failed" ? "Failed" : "Done";
+  $("rid").textContent = new Date(data.created_at).toLocaleString();
+  $("steps").replaceChildren(...data.steps.map((s) => Object.assign(document.createElement("li"), { textContent: s.text })));
+  if (data.status === "running") timer = setTimeout(() => show(id), 1000);
+}
+
+$("form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  $("error").hidden = true;
+  $("go").disabled = true;
+  try {
+    const res = await fetch("/api/investigations", { method: "POST", body: new FormData($("form")) });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.message || "Couldn't start the investigation.");
+    location.hash = data.id;
+  } catch (err) {
+    $("error").textContent = err.message;
+    $("error").hidden = false;
+  } finally {
+    $("go").disabled = false;
+  }
+});
+
+window.addEventListener("hashchange", () => location.hash.length > 1 && show(location.hash.slice(1)));
+if (location.hash.length > 1) show(location.hash.slice(1));
+</script>
+</body>
+</html>
