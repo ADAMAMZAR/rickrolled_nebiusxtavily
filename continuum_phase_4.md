@@ -14,9 +14,9 @@
 
 1. **Phase gate.** *Decided 2026-10-07:* proceed with Phase 4. Phase 3's code is done; its open boxes are live checks someone else runs and ticks under its tracking issue.
 2. **Phase 3 "Out" items this phase needs:**
-   - **Tavily Extract** fetches named URLs (Phase 3 ruled out "crawling or browsing"). *Recommended:* allow Extract; crawling stays out.
+   - **Tavily Extract** fetches named URLs (Phase 3 ruled out "crawling or browsing"). *Decided 2026-10-07:* allowed, for submitted links and research pages. Crawling stays out.
    - **Cloud hosting** (the source plan's Done list needs a deployed URL). *Recommended:* one VM with a fresh demo DB and `APP_PASSWORD`; see §11.
-   - **Open: confirm before H1 (Extract) and H4 (hosting).**
+   - **Open: confirm hosting before H4.**
 3. **Hackathon framing.** *Decided 2026-10-07:* follow AGENTS.md (Nebius x NVIDIA, Personal AI track). The source plan's track and prize names were a mistake; ignore them.
 4. **Product shape.** *Decided 2026-10-07:* ScamGraph plus Continuum's loops. §9 stays.
 5. **Screenshots.** No Nemotron model on Token Factory reads images (H0 check). *Decided 2026-10-07:* screenshots only go to `google/gemma-3-27b-it` on Token Factory (`NEBIUS_VISION_MODEL`), which turns the image into text. Every other call stays on Nemotron.
@@ -441,7 +441,12 @@ Every milestone ends at its gate. P1 starts only after the full P0 demo works.
      - *A bare `investigate.html`, linked from the dashboard, that polls while a run is in progress.*
      - *`python-multipart` pinned: the form upload needs it; it was already installed through another package.*
      - *Gate passed: an investigation created through the real server reads back unchanged after a restart. Also covered by `test_persists_across_restart`. `pytest`: 168 passed.*
-   - *Not done: scenario entities A-E (needs your pick).*
+   - *Scenario entities picked 2026-10-07 (user asked to choose from the SC/BNM lists via Tavily). Inputs are in `tests/scenarios/`, each labelled as a test sample:*
+     - *A: FalconRise Capital (BNM FCA list, added 3 Aug 2026).*
+     - *B: "T. Rowe Price Group Sdn. Bhd." (BNM lists T Rowe Price clones, 3 Aug 2026; real domain troweprice.com).*
+     - *C: Maybank, official domain and hotline.*
+     - *D: a job scam with no entity.*
+     - *E: "Doo Prime Malaysia Berhad Investment Scheme" (BNM potential clone, 2021) next to the real broker Doo Prime.*
 2. **H1 Extract:**
    - `llm.py` image content + model override (`NEBIUS_VISION_MODEL`).
    - `ask_json()` (the retry loop from `extract()`, reused).
@@ -449,6 +454,24 @@ Every milestone ends at its gate. P1 starts only after the full P0 demo works.
    - Input-quote check.
    - Screenshot and URL intake.
    **Gate:** scenarios A–E give valid entities and claims (live); bad output is rejected (offline).
+   *Done 2026-10-07:*
+   - *`llm.complete(..., model=)` + image content. `NEBIUS_VISION_MODEL` (Gemma 3) for screenshots.*
+   - *`ask_json()` shared with loop extraction.*
+   - *`SCAM_EXTRACT_PROMPT` (marks the text untrusted) and `ScamExtraction`: a malformed item is dropped, not the whole reply.*
+   - *Tavily `extract()` + `include_domains`.*
+   - *Pipeline in `run_investigation`, run as a FastAPI background task after `POST`.*
+   - *Guards:*
+     - *An entity the text doesn't contain is dropped (phones compared by digits).*
+     - *A behaviour quote not in the text is dropped.*
+     - *The submitted link becomes url + domain entities without the model.*
+     - *One signal per behaviour kind, with its §7.4 weight.*
+   - *A link Tavily can't read leaves a step line and keeps going with the other inputs. No text at all = `failed`.*
+   - *Offline tests can no longer reach Nebius/Tavily by accident: a `conftest` autouse fixture blanks both keys unless the test is `live`.*
+   - *Gate passed:*
+     - *`pytest -m live -k scam_live`: A–E plus the scenario D screenshot (`tests/scenarios/d_sparse.png`), 6 passed.*
+     - *Real page driven in Chrome: text + screenshot → "Found 4 names and contacts, 7 claims, 2 pressure tactics".*
+     - *`pytest`: 186 passed.*
+   - ***Latency:** about 37s per Nemotron Super call and 36s for Gemma, so intake + extraction alone take about 75s. That's the §6 budget for the whole run. Settle before H2: raise the budget, or move extraction/classification to Nemotron Nano (§3).*
 3. **H2 Investigate:**
    - Tavily `include_domains`, `extract`, cache.
    - Plan + fixed searches.
@@ -482,10 +505,11 @@ Every milestone ends at its gate. P1 starts only after the full P0 demo works.
 ## 15. Done Checklist
 
 - [ ] §0 decisions settled and recorded here
-  *All but §0.2 (Extract, hosting) on 2026-10-07.*
+  *All but §0.2 hosting (needed for H4) on 2026-10-07.*
 - [x] Text, URL and screenshot can be submitted
   *Done 2026-10-07 (H0): all three are validated and stored. Reading the screenshot and URL is H1.*
-- [ ] Entities, claims and behaviours are extracted, schema-validated
+- [x] Entities, claims and behaviours are extracted, schema-validated
+  *Done 2026-10-07 (H1): live A-E + screenshot; invented entities and quotes dropped.*
 - [ ] An investigation plan is generated (Nemotron + fixed regulator searches)
 - [ ] Tavily performs live search and extract; evidence is persisted with its source
 - [ ] Claims get verdicts; signals, score, level and confidence come from code only

@@ -26,11 +26,21 @@ class FakeLLM:
 
     def __init__(self, *replies: dict[str, Any] | str) -> None:
         self.replies = [r if isinstance(r, str) else json.dumps(r) for r in replies]
-        self.calls: list[list[dict[str, str]]] = []
+        self.calls: list[list[dict[str, Any]]] = []
+        self.models: list[str | None] = []
 
-    def complete(self, messages: list[dict[str, str]], json_mode: bool = False) -> str:
+    def complete(self, messages: list[dict[str, Any]], json_mode: bool = False, model: str | None = None) -> str:
         self.calls.append(messages)
+        self.models.append(model)
         return self.replies.pop(0)
+
+
+@pytest.fixture(autouse=True)
+def no_real_services(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Offline tests can't reach Nebius or Tavily by accident: their keys are blanked unless the test is `live`."""
+    if request.node.get_closest_marker("live") is None:
+        monkeypatch.setattr(settings, "nebius_api_key", SecretStr(""))
+        monkeypatch.setattr(settings, "tavily_api_key", SecretStr(""))
 
 
 @pytest.fixture

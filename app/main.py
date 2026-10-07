@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Annotated, Any, Literal, Protocol
 from uuid import UUID
 
-from fastapi import Depends, FastAPI, File, Form, Request, Response, UploadFile
+from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, Request, Response, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -117,7 +117,9 @@ def create_app(
     logging.basicConfig(level=settings.log_level)
     get_hermes = get_hermes or default_hermes
     get_google = get_google or (lambda: GoogleClient.from_settings(settings))
-    mcp = build_mcp(lambda: app.state.db, get_llm or (lambda: LLMClient(settings)), get_web or default_web, get_google)
+    get_llm = get_llm or (lambda: LLMClient(settings))
+    get_web = get_web or default_web
+    mcp = build_mcp(lambda: app.state.db, get_llm, get_web, get_google)
     # Served at /mcp/. Also creates the session manager that lifespan runs.
     mcp_app = mcp.streamable_http_app(streamable_http_path="/", stateless_http=True, json_response=True)
 
@@ -265,6 +267,7 @@ def create_app(
 
     @app.post("/api/investigations", status_code=201)
     def create_investigation(
+        background: BackgroundTasks,
         text: Annotated[str | None, Form()] = None,
         url: Annotated[str | None, Form()] = None,
         screenshot: Annotated[UploadFile | None, File()] = None,
@@ -273,6 +276,7 @@ def create_app(
         # Read one byte past the limit, so an oversized file is rejected without reading all of it.
         data = screenshot.file.read(inv.MAX_SCREENSHOT + 1) if screenshot and screenshot.filename else None
         created = inv.create_investigation(session, text, url, data)
+        background.add_task(inv.run_investigation, app.state.db, created.id, get_llm, get_web)
         return {"id": str(created.id)}
 
     @app.get("/api/investigations")

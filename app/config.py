@@ -9,6 +9,8 @@ class Settings(BaseSettings):
     nebius_api_key: SecretStr = SecretStr("")
     nebius_base_url: str = "https://api.tokenfactory.nebius.com/v1/"
     nebius_model: str = "nvidia/nemotron-3-super-120b-a12b"
+    # No Nemotron model on Token Factory reads images, so screenshots alone go here (Phase 4 §0.5).
+    nebius_vision_model: str = "google/gemma-3-27b-it"
     llm_timeout: float = 60
 
     hermes_api_url: str = "http://127.0.0.1:8642/v1"
