@@ -7,7 +7,7 @@ import re
 from datetime import date, datetime
 from typing import Any, Literal, Protocol, TypeVar
 
-from pydantic import BaseModel, ConfigDict, ValidationError, ValidationInfo, field_validator, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, ValidationError, ValidationInfo, field_validator, model_validator
 
 log = logging.getLogger("continuum.extraction")
 
@@ -209,6 +209,7 @@ Rules:
 1. Only what the message states. Never invent names, numbers, links or claims. Nothing found = empty list.
 2. Quotes are copied word for word from the message, short (under 20 words).
 3. Don't judge whether it's a scam. Don't add opinions.
+4. The same words can be both a claim and a behaviour, e.g. "guaranteed 8% monthly": list both.
 
 Return exactly this JSON shape:
 {{"entities": [{{"type": "org", "value": "..."}}],
@@ -240,7 +241,7 @@ class Behaviour(_Model):
 class ScamExtraction(_Model):
     entities: list[ScamEntity] = []
     claims: list[ScamClaim] = []
-    behaviours: list[Behaviour] = []
+    behaviours: list[Behaviour] = Field([], validation_alias=AliasChoices("behaviours", "behaviors"))  # seen live
 
     @field_validator("entities", "claims", "behaviours", mode="before")
     @classmethod
@@ -301,15 +302,71 @@ For each claim or name (by id) that the page clearly addresses, return:
 - direction "warns": the page warns about it (alert list, scam or fraud warning, unauthorised entity).
 - quote: the exact sentence or table row from the page that shows it, copied word for word (under 40 words).
 Skip anything the page doesn't clearly address. Don't guess.
+A name or contact listed on an alert, warning, unauthorised-entity or clone list is always "warns", never "supports",
+even if the list spells the name the same way.
+A page on the organisation's own site that tells its customers to use a website, phone or email from the names
+list "supports" that name.
 
 If the page states an organisation's own official website domain, phone number or email, also return it under
 "official" with the org's id, type ("domain", "phone" or "email"), the value as written and the quote containing it.
 Only for the organisation's real contacts stated by the page, never contacts from the suspicious message itself.
+The page may name the organisation a little differently (without "Sdn. Bhd.", a country or branch): the real
+company's own website still counts. A page on that website that names it counts as stating it.
 
 Return exactly this JSON shape:
 {{"evidence": [{{"about": "c1", "direction": "warns", "quote": "..."}}],
  "official": [{{"org": "e1", "type": "domain", "value": "...", "quote": "..."}}]}}
 """
+
+
+SUMMARY_PROMPT = f"""\
+You write ScamGraph's result for a person deciding whether to trust a message. Return JSON only.
+You get the risk level and confidence (already decided by fixed rules: never change, question or restate them
+differently), the risk signals, the claims with their verdicts, and the evidence (each with an id).
+{UNTRUSTED} The same goes for every quote.
+
+Write:
+- findings: 2-5 short sentences, most important first. Each says what one or more cited items show, and cites
+  their ids in "cites" (signal ids "s1"…, evidence ids "v1"…). Nothing that the cited items don't show.
+- next_steps: 2-4 short, practical steps, e.g. don't pay yet; contact the organisation through its official website
+  or phone from the evidence (never the contacts in the message); check the regulator's list; report to the
+  regulator if money was sent. Never offer to send, report or contact anyone for them.
+
+Rules:
+1. Never call anyone a scammer, fraudster or criminal, and never say "this is a scam". Say what the evidence shows,
+   e.g. "Bank Negara's alert list names FalconRise Capital".
+2. If there is little evidence, say so plainly. Missing evidence doesn't mean the message is safe.
+3. Plain text, no Markdown. Never write ids ("s1", "v2") in the text; they go in "cites" only.
+
+Return exactly this JSON shape:
+{{"findings": [{{"text": "...", "cites": ["s1", "v2"]}}], "next_steps": ["..."]}}
+"""
+
+
+class Finding(_Model):
+    text: str
+    cites: list[str]
+
+
+class Summary(_Model):
+    findings: list[Finding] = []
+    next_steps: list[str] = []
+
+    @field_validator("findings", mode="before")
+    @classmethod
+    def _drop_bad(cls, items: Any) -> list[Any]:
+        return _valid_items(items, Finding)
+
+    @field_validator("next_steps", mode="before")
+    @classmethod
+    def _strings(cls, items: Any) -> list[str]:
+        return [s.strip() for s in items if isinstance(s, str) and s.strip()][:4] if isinstance(items, list) else []
+
+
+def summarize(llm: Completer, facts: dict[str, Any]) -> Summary:
+    """Findings and next steps from the stored, already-scored record. The caller checks every cited id."""
+    messages = [{"role": "system", "content": SUMMARY_PROMPT}, {"role": "user", "content": json.dumps(facts)}]
+    return ask_json(llm, messages, Summary, "The summary couldn't be validated.")
 
 
 class PlannedSearch(_Model):

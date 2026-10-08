@@ -19,8 +19,8 @@
    - **Open: confirm hosting before H4.**
 3. **Hackathon framing.** *Decided 2026-10-07:* follow AGENTS.md (Nebius x NVIDIA, Personal AI track). The source plan's track and prize names were a mistake; ignore them.
 4. **Product shape.** *Decided 2026-10-07:* ScamGraph plus Continuum's loops. §9 stays.
-6. **Time budget.** Measured in H1: one Nemotron Super call takes 11-37s, Gemma about 36s. Nano (27s, needed a retry) and 3.5 Lightning (64s) weren't faster. *Decided 2026-10-08:* keep Super; the time limit covers research only (§6); the `investigate` tool waits about 100s, then answers with the dashboard link (§9).
 5. **Screenshots.** No Nemotron model on Token Factory reads images (H0 check). *Decided 2026-10-07:* screenshots only go to `google/gemma-3-27b-it` on Token Factory (`NEBIUS_VISION_MODEL`), which turns the image into text. Every other call stays on Nemotron.
+6. **Time budget.** Measured in H1: one Nemotron Super call takes 11-37s, Gemma about 36s. Nano (27s, needed a retry) and 3.5 Lightning (64s) weren't faster. *Decided 2026-10-08:* keep Super; the time limit covers research only (§6); the `investigate` tool waits about 100s, then answers with the dashboard link (§9).
 
 ---
 
@@ -151,7 +151,7 @@ Investigation:                   # NEW
     score: int | None
     confidence: "LOW" | "MEDIUM" | "HIGH" | None
     identity: "verified" | "mismatch" | "unverified" | None
-    findings: JSON               # [{text, evidence_ids}] from the summary step, ids checked
+    findings: JSON               # [{text, evidence_ids, signal_ids}] from the summary step, ids checked
     next_steps: JSON             # [str]
     steps: JSON                  # [{at, text}] progress log the page polls
     error: str | None
@@ -221,7 +221,8 @@ run(id) in a background thread:
                drop anything whose quote isn't in the page text
  6 verify      claim verdicts (§7.3), all in code
  7 follow-up   if a material claim is still insufficient_evidence and budget is left:
-               ONE more plan → research → classify round, then stop
+               ONE more plan → research → classify round (≤3 searches, ≤3 pages), then stop
+ 7b domain     a submitted domain that isn't the official one: one search limited to the official site (§7.2)
  8 score       signals, score, level, confidence, identity (§7), all in code
  9 summary     Nemotron writes findings[{text, evidence_ids}] + next_steps from stored rows
                and computed signals only; drop findings citing unknown ids
@@ -252,7 +253,8 @@ run(id) in a background thread:
 
 - An official domain, phone or email is accepted only when a **tier D** page states it, with a quote containing it. An official domain must itself be a tier D site.
   *Changed 2026-10-08 after live runs: Nemotron gave `bnm.gov.my` as FalconRise's website (from BNM's own page) and Bank Negara's hotline as its phone (from an SSM page). Regulator, news and social pages list their own contacts.*
-- *Open for H3: data-broker pages (seen: leadiq.com) can offer template emails like `john.doe@maybank.com` as official. Contact checks (§7.4) should use only contacts stated on the official domain's own pages (tier B).*
+- Contact checks (§7.4) use only phones and emails stated on the official domain's own pages (tier B). *Data-broker pages (seen: leadiq.com) offer template emails like `john.doe@maybank.com`.*
+- **Second domains.** Big companies have several (Maybank: `maybank.com`, `maybank2u.com.my`). A submitted domain that isn't the official one gets one search limited to the official site. Only results whose snippet contains the domain are read. An official page that mentions it, with no warning words around the mention, supports it (tier B), so it counts as verified. Code decides this, not the model: live, Nemotron skipped "the Maybank Group's website www.maybank2u.com.my". If the model judged the domain on that page, its reading stands.
 - `# ponytail:` this is a heuristic. A proper fix would use a registry lookup (e.g. SSM).
 - **Domains match** when the submitted host equals the official host, or is a subdomain of it.
 
@@ -477,7 +479,7 @@ Every milestone ends at its gate. P1 starts only after the full P0 demo works.
      - *`pytest -m live -k scam_live`: A–E plus the scenario D screenshot (`tests/scenarios/d_sparse.png`), 6 passed.*
      - *Real page driven in Chrome: text + screenshot → "Found 4 names and contacts, 7 claims, 2 pressure tactics".*
      - *`pytest`: 186 passed.*
-   - ***Latency:** about 37s per Nemotron Super call and 36s for Gemma, so intake + extraction alone take about 75s. That's the §6 budget for the whole run. Settle before H2: raise the budget, or move extraction/classification to Nemotron Nano (§3).*
+   - ***Latency:** about 37s per Nemotron Super call and 36s for Gemma, so intake + extraction alone take about 75s. That's the §6 budget for the whole run.* *Settled 2026-10-08 in §0.6.*
 3. **H2 Investigate:**
    - Tavily `include_domains`, `extract`, cache.
    - Plan + fixed searches.
@@ -511,6 +513,26 @@ Every milestone ends at its gate. P1 starts only after the full P0 demo works.
    - Follow-up round.
    - Summary with evidence-id check.
    **Gate:** rule tests pass; every signal has evidence or an input quote; C invents no warning; D is `unverified`.
+   *Done 2026-10-08:*
+   - *`claim_verdicts()` (§7.3), `derive_signals()` (§7.4), `assess()` (§7.5): pure functions in `investigation.py`; every derived signal cites an evidence row.*
+     - *A domain is official when it's an accepted official domain (§7.2), or a tier-B page supports that domain entity.*
+     - *`official_identity_confirmed` needs A/B "supports" evidence about the org itself.*
+     - *Official-contact rows don't count as "disagreeing" with a warning when computing confidence.*
+     - *"Suspicious" needs the matching behaviour: investment ↔ `guaranteed_returns`, payment ↔ `payment_pressure`.*
+   - *Pipeline after research: verify → one follow-up round for identity/regulatory claims with no evidence (pages already read are skipped) → domain check (§7.2) → score → summary.*
+   - *Summary (`SUMMARY_PROMPT`, `summarize()`): the model gets the scored record with short ids (`s1`… signals, `v1`… evidence). Dropped: a finding with no valid cite, an accusation (`BANNED`), or ids in its text. Nothing usable → the signals' own reasons, and next steps by level.*
+   - *Fixes from live runs:*
+     - *Nemotron sometimes writes `"behaviors"`: every pressure tactic was silently lost (A, D). Both spellings are read now.*
+     - *Nemotron skipped `guaranteed_returns` when the same words were already an investment claim (E). The prompt now says to list both.*
+     - *Classify prompt: being on an alert/clone list is always "warns" (A once came back "supports").*
+     - *Classify prompt: the real company's own site counts even when the message's name differs ("Sdn. Bhd.", branch). B's official domain was found 1 time in 4 before this, 4 in 6 after.*
+     - *Regulators named in the message never get official contacts (rocketreach gave Bank Negara's hotline).*
+   - *Gate passed:*
+     - *`pytest`: 250 passed (rule tests in `tests/test_risk.py`).*
+     - *`pytest -m live -k scam_live`: 6 passed twice in a row, with H3 bands: A HIGH/CRITICAL; B `mismatch`; C no warning signal and not HIGH/CRITICAL; D `unverified`; every signal and finding cites something.*
+     - *Live results: A HIGH 70; B CRITICAL 95, mismatch; C LOW −45, verified (`maybank2u.com.my` confirmed on maybank.com); D behaviour signals, unverified; E HIGH 70, BNM potential-clone warning.*
+   - *Known limit: B's official domain still depends on the classifier (about 2 runs in 3). Without it, B scores HIGH 70 with identity `unverified` instead of `mismatch`.*
+   - *Debug tip: run `inv.run_investigation()` directly on a scratch SQLite file with `TAVILY_CACHE_DIR` in the scratchpad, then print `d.signals`, `d.claims`, `d.evidence` and `x.findings`. No server needed.*
 5. **H4 Visualize & Demo:**
    - `investigate.html` (5 screens, graph).
    - `investigate` MCP tool + SOUL.md + setup script.
@@ -540,9 +562,12 @@ Every milestone ends at its gate. P1 starts only after the full P0 demo works.
   *Done 2026-10-08 (H2).*
 - [x] Tavily performs live search and extract; evidence is persisted with its source
   *Done 2026-10-08 (H2): live A-E.*
-- [ ] Claims get verdicts; signals, score, level and confidence come from code only
-- [ ] Every signal links to evidence or an input quote; every finding cites evidence ids
-- [ ] Unknown cases return `INSUFFICIENT_EVIDENCE`, never LOW
+- [x] Claims get verdicts; signals, score, level and confidence come from code only
+  *Done 2026-10-08 (H3).*
+- [x] Every signal links to evidence or an input quote; every finding cites evidence ids
+  *Done 2026-10-08 (H3): findings cite evidence or signal ids; checked offline and in the live set.*
+- [x] Unknown cases return `INSUFFICIENT_EVIDENCE`, never LOW
+  *Done 2026-10-08 (H3): `tests/test_risk.py`.*
 - [ ] Live steps, result, graph and claim explorer render; sources open
 - [ ] Tavily or Nebius failures degrade as in §6 (cache, insufficient evidence, clear error)
 - [ ] `investigate` works from chat and Telegram through Hermes

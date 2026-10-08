@@ -41,6 +41,10 @@ def run(engine: Engine, text: str | None = None, screenshot: bytes | None = None
             "orgs": " | ".join(e.canonical for e in d.entities if e.type == "org"),
             "claims": {c.category.value for c in d.claims},
             "signals": {s.kind for s in d.signals},
+            "level": d.investigation.risk_level, "identity": d.investigation.identity,
+            # H3 gate: every signal cites evidence or an input quote; every finding cites something
+            "cited": all(s.evidence_id or s.input_quote for s in d.signals)
+                     and all(f["evidence_ids"] or f["signal_ids"] for f in d.investigation.findings),
             "evidence": [(e.tier.value, e.direction.value, e.host, e.quote) for e in d.evidence],
             "steps": [s["text"] for s in d.investigation.steps],
         }
@@ -56,9 +60,10 @@ def test_a_known_warning(engine: Engine) -> None:
     assert "falconrise capital" in got["orgs"]
     assert ("phone", "601100001234") in got["entities"]
     assert "regulatory" in got["claims"]
-    assert got["signals"] == {"payment_pressure", "guaranteed_returns"}
+    assert {"payment_pressure", "guaranteed_returns", "regulatory_warning"} <= got["signals"]
     # H2 gate: a regulator source is attached automatically.
     assert any(tier == "A" and direction == "warns" for tier, direction, _, _ in got["evidence"]), got["steps"]
+    assert got["level"] in ("HIGH", "CRITICAL") and got["cited"]
 
 
 def test_b_clone_company(engine: Engine) -> None:
@@ -67,6 +72,7 @@ def test_b_clone_company(engine: Engine) -> None:
     assert ("domain", "troweprice-my-invest.com") in got["entities"]
     assert {"identity", "regulatory"} <= got["claims"]
     assert "payment_pressure" in got["signals"]
+    assert got["identity"] == "mismatch" and got["cited"]
 
 
 def test_c_legitimate(engine: Engine) -> None:
@@ -74,12 +80,16 @@ def test_c_legitimate(engine: Engine) -> None:
     assert "maybank" in got["orgs"]
     assert ("domain", "maybank2u.com.my") in got["entities"]
     assert "guaranteed_returns" not in got["signals"]
+    # H3 gate: no invented warning
+    assert not got["signals"] & {"regulatory_warning", "confirmed_impersonation", "false_regulatory_claim"}
+    assert got["level"] not in ("HIGH", "CRITICAL") and got["cited"]
 
 
 def test_d_sparse(engine: Engine) -> None:
     got = run(engine, sample("d_sparse.txt"))
     assert got["orgs"] == ""  # no identifiable entity
     assert "payment_pressure" in got["signals"]
+    assert got["identity"] == "unverified" and got["cited"]
 
 
 def test_e_conflicting(engine: Engine) -> None:
@@ -87,6 +97,7 @@ def test_e_conflicting(engine: Engine) -> None:
     assert "doo prime" in got["orgs"]
     assert ("domain", "dooprime-malaysia-invest.com") in got["entities"]
     assert "guaranteed_returns" in got["signals"]
+    assert got["cited"]
 
 
 def test_screenshot_is_read(engine: Engine) -> None:

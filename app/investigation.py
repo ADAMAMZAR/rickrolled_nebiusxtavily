@@ -7,6 +7,7 @@ Investigations commit after every step so the page can show progress. A failed r
 import logging
 import re
 import time
+from collections import Counter
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, wait
 from dataclasses import dataclass
@@ -20,12 +21,13 @@ from sqlmodel import Session, col, select
 from app.config import settings
 from app.connectors.tavily import TavilyClient, TavilyError, WebResult
 from app.db import (
-    Claim, ClaimCategory, Direction, Entity, EntityType, Evidence, Investigation, InvestigationStatus, RiskSignal,
-    Tier, utcnow,
+    Claim, ClaimCategory, Confidence, Direction, Entity, EntityType, Evidence, Identity, Investigation,
+    InvestigationStatus, RiskLevel, RiskSignal, Tier, Verdict, utcnow,
 )
 from app.engine import InvalidRequest, NotFound
 from app.extraction import (
-    Completer, ExtractionError, PageFindings, classify_page, extract_scam, plan_searches, read_screenshot,
+    Completer, ExtractionError, PageFindings, Summary, classify_page, extract_scam, plan_searches, read_screenshot,
+    summarize,
 )
 from app.llm import LLMError
 
@@ -40,6 +42,8 @@ MAX_SEARCHES = 8
 MAX_PAGES = 5
 MAX_FIXED_ORGS = 2  # organisations that get the fixed regulator searches
 RESEARCH_SECONDS = 60
+FOLLOW_UP_SEARCHES = 3  # the second round (spec §6 step 7)
+FOLLOW_UP_PAGES = 3
 MAX_CHECKED = 6000  # characters of each page that go to the model
 # Organisations that are regulators themselves: no alert-list search for them.
 # ponytail: a name list; extend it if other regulators show up as "orgs".
@@ -164,7 +168,16 @@ def run_investigation(
             llm = get_llm()
             text = _intake(session, investigation, llm, get_web)
             _extract(session, investigation, llm, text)
-            _research(session, investigation, llm, get_web)
+            read = _research(session, investigation, llm, get_web)
+            pending = _verify(session, investigation)
+            if pending and read:  # one follow-up round for identity/regulatory claims with no evidence
+                _research(session, investigation, llm, get_web, focus=pending, skip=frozenset(read))
+                _verify(session, investigation)
+            checks = _domain_checks(session, investigation)
+            if checks:  # a big company has several domains: ask its official site about the submitted one
+                _research(session, investigation, llm, get_web, only=checks, skip=frozenset(read))
+            _score(session, investigation)
+            _summarize(session, investigation, llm)
             investigation.status = InvestigationStatus.done
             _step(session, investigation, "Done")
         except (ExtractionError, LLMError, InvalidRequest) as e:
@@ -268,30 +281,44 @@ class Search:
     include_domains: list[str]
 
 
-def _research(session: Session, investigation: Investigation, llm: Completer, get_web: Callable[[], TavilyClient]) -> None:
+def _research(
+    session: Session, investigation: Investigation, llm: Completer, get_web: Callable[[], TavilyClient],
+    focus: list[Claim] | None = None, skip: frozenset[str] = frozenset(), only: list["Search"] | None = None,
+) -> set[str]:
     """Plan searches, run them, read the best pages and check each against the claims (spec §6 steps 3-5).
-    Searches, page reads and page checks share one RESEARCH_SECONDS deadline."""
+    Searches, page reads and page checks share one RESEARCH_SECONDS deadline. Returns the URLs read.
+    `focus`: the follow-up round (step 7) for these claims: planned searches only, fewer pages, pages in `skip`
+    are not read again. `only`: run just these searches, one page each, no planning."""
     detail = get_investigation(session, investigation.id)
     if not (detail.entities or detail.claims):
         _step(session, investigation, "Nothing to look up on the web")
-        return
+        return set()
     try:
         web = get_web()
     except TavilyError as e:
         _step(session, investigation, f"Skipped web research: {e}")
-        return
+        return set()
     ids = {f"e{i}": e for i, e in enumerate(detail.entities, 1)} | {f"c{i}": c for i, c in enumerate(detail.claims, 1)}
     subjects = [{"id": k, "type": v.type.value, "value": v.value} for k, v in ids.items() if isinstance(v, Entity)]
     claims = [{"id": k, "text": v.text} for k, v in ids.items() if isinstance(v, Claim)]
 
-    searches = _fixed_searches(detail.entities)
-    _step(session, investigation, "Planning the research with Nemotron")
-    try:
-        planned = plan_searches(llm, subjects, claims, MAX_SEARCHES - len(searches))
-    except (ExtractionError, LLMError) as e:
-        log.warning("plan_failed id=%s error=%s", investigation.id, type(e).__name__)
-        planned = []
-        _step(session, investigation, "Couldn't plan extra searches; using the regulator searches only")
+    searches = only or ([] if focus else _fixed_searches(detail.entities))
+    limit, max_pages = (FOLLOW_UP_SEARCHES, FOLLOW_UP_PAGES) if focus else (MAX_SEARCHES - len(searches), MAX_PAGES)
+    focus_ids = {c.id for c in focus or []}
+    planned = []
+    if only:
+        max_pages = len(only)
+    else:
+        _step(session, investigation, f"Looking further for {_count(len(focus), 'claim', 'claims')} without evidence"
+                                      if focus else "Planning the research with Nemotron")
+        try:
+            planned = plan_searches(llm, subjects, [c for c in claims if not focus or ids[c["id"]].id in focus_ids], limit)
+        except (ExtractionError, LLMError) as e:
+            log.warning("plan_failed id=%s error=%s", investigation.id, type(e).__name__)
+            _step(session, investigation, "Couldn't plan more searches" if focus
+                                          else "Couldn't plan extra searches; using the regulator searches only")
+    if not (searches or planned):
+        return set()
     searches += [Search(f"Searching the web: {p.query}", p.query, p.include_domains) for p in planned]
     deadline = time.monotonic() + RESEARCH_SECONDS
 
@@ -299,11 +326,14 @@ def _research(session: Session, investigation: Investigation, llm: Completer, ge
         add_step(investigation, search.label)
     session.commit()
     results = _run_searches(web, searches, deadline)
+    if only:  # a domain check only reads official pages that mention the domain
+        results = [[r for r in rs if appears(s.query, r.content)] if rs else rs for s, rs in zip(searches, results)]
     failed = sum(1 for r in results if r is None)
     own = {e.canonical for e in detail.entities if e.type == EntityType.domain}  # the message's own sites prove nothing
 
     def best_first(found: list[WebResult]) -> list[WebResult]:
-        usable = [r for r in found if host_of(r.url) and not any(same_site(host_of(r.url), d) for d in own)]
+        usable = [r for r in found if host_of(r.url) and r.url not in skip
+                  and not any(same_site(host_of(r.url), d) for d in own)]
         return sorted(usable, key=lambda r: (tier_of(host_of(r.url)), -r.score))
 
     ranked = {r.url: r for r in best_first([r for rs in results for r in rs or []])}
@@ -312,40 +342,265 @@ def _research(session: Session, investigation: Investigation, llm: Completer, ge
     picked: dict[str, WebResult] = {}
     for found in results:
         top = next((r for r in best_first(found or []) if r.url not in picked), None)
-        if top and len(picked) < MAX_PAGES:
+        if top and len(picked) < max_pages:
             picked[top.url] = top
     for url, found in ranked.items():
-        if len(picked) < MAX_PAGES:
+        if len(picked) < max_pages:
             picked.setdefault(url, found)
     pages = list(picked.values())
     _step(session, investigation, f"{_count(len(ranked), 'source', 'sources')} found"
                                   + (f" ({_count(failed, 'search', 'searches')} failed)" if failed else "")
                                   + (f", reading the top {len(pages)}" if pages else ""))
     if not pages:
-        return
+        return set()
     try:
         read = web.extract([p.url for p in pages], cached=True)
     except TavilyError as e:
         _step(session, investigation, f"Couldn't read the pages: {e}")
-        return
+        return set()
     texts = {p.url: p.raw_content for p in read if p.raw_content.strip()}
     pages = [p for p in pages if p.url in texts]
     if not pages:
         _step(session, investigation, "None of the pages had readable text")
-        return
+        return set()
 
     _step(session, investigation, f"Checking {_count(len(pages), 'page', 'pages')} against the claims with Nemotron")
     checked, late = _classify(llm, pages, texts, subjects, claims, deadline)
     evidence = []
     for page, findings in checked:
         evidence += _evidence(investigation.id, page, texts[page.url], findings, ids)
-    _set_official_tier(evidence)
+    if only:
+        evidence += _mentions(investigation.id, pages, texts, [e for e in detail.entities if e.type == EntityType.domain
+                                                              and e.canonical in {s.query for s in only}], evidence)
+    _set_official_tier(detail.evidence + evidence)  # an earlier round may have found the official domain
     session.add_all(evidence)
     regulators = sum(1 for e in evidence if e.tier == Tier.a)
     _step(session, investigation, f"{_count(len(evidence), 'piece of evidence', 'pieces of evidence')} from "
                                   f"{_count(len({e.url for e in evidence}), 'page', 'pages')} "
                                   f"({regulators} from regulators)"
                                   + (f"; ran out of time for {_count(late, 'page', 'pages')}" if late else ""))
+    return set(texts)
+
+
+# --- verdicts, signals and score (spec §7): plain code, the model never sets them ---
+
+STRONG = (Tier.a, Tier.b)
+AGAINST = (Direction.contradicts, Direction.warns)
+MATERIAL = (ClaimCategory.identity, ClaimCategory.regulatory)  # claims worth a follow-up round
+# Behaviour that makes a claim of this category suspicious (§7.3).
+SUSPICIOUS_WITH = {ClaimCategory.investment: "guaranteed_returns", ClaimCategory.payment: "payment_pressure"}
+LEVELS = [(75, RiskLevel.critical), (50, RiskLevel.high), (25, RiskLevel.elevated), (1, RiskLevel.guarded)]
+
+
+def claim_verdicts(claims: list[Claim], evidence: list[Evidence], behaviours: set[str]) -> dict[UUID, tuple[Verdict, str]]:
+    """§7.3: A/B against → contradicted; A/B for → supported; a matching pressure tactic → suspicious;
+    only weaker sources → unverified; nothing → insufficient_evidence."""
+    out = {}
+    for claim in claims:
+        rows = [e for e in evidence if e.claim_id == claim.id and e.direction != Direction.neutral]
+        against = [e for e in rows if e.tier in STRONG and e.direction in AGAINST]
+        support = [e for e in rows if e.tier in STRONG and e.direction == Direction.supports]
+        if against:
+            out[claim.id] = (Verdict.contradicted, f"Contradicted by {against[0].host} (tier {against[0].tier.value})")
+        elif support:
+            out[claim.id] = (Verdict.supported, f"Confirmed by {support[0].host} (tier {support[0].tier.value})")
+        elif SUSPICIOUS_WITH.get(claim.category) in behaviours:
+            out[claim.id] = (Verdict.suspicious, "The message uses a pressure tactic for this")
+        elif rows:
+            out[claim.id] = (Verdict.unverified, f"Only weaker sources: {', '.join(sorted({e.host for e in rows}))}")
+        else:
+            out[claim.id] = (Verdict.insufficient, "No evidence found")
+    return out
+
+
+def derive_signals(investigation_id: UUID, entities: list[Entity], claims: list[Claim], evidence: list[Evidence]) -> list[RiskSignal]:
+    """§7.4, except the behaviour signals, which extraction already made. Each one cites its evidence.
+    Claims must already carry their verdicts."""
+    signals: list[RiskSignal] = []
+
+    def add(kind: str, ev: Evidence, reason: str) -> None:
+        signals.append(RiskSignal(investigation_id=investigation_id, kind=kind, weight=WEIGHTS[kind], evidence_id=ev.id, reason=reason))
+
+    orgs = [e for e in entities if e.type == EntityType.org and not is_regulator(e)]
+    domains = [e for e in entities if e.type == EntityType.domain]
+    contacts = [e for e in entities if e.type in (EntityType.phone, EntityType.email)]
+    name = orgs[0].value if orgs else "the sender"
+
+    warning = next((e for e in evidence if e.tier == Tier.a and e.direction == Direction.warns
+                    and names_any(e.quote, entities)), None)
+    if warning:
+        add("regulatory_warning", warning, f"A regulator's warning on {warning.host} names it")
+
+    for claim in (c for c in claims if c.category == ClaimCategory.regulatory):
+        rows = [e for e in evidence if e.claim_id == claim.id and e.tier == Tier.a]
+        against = next((e for e in rows if e.direction in AGAINST), None)
+        support = next((e for e in rows if e.direction == Direction.supports), None)
+        if against and "false_regulatory_claim" not in {s.kind for s in signals}:
+            add("false_regulatory_claim", against, f"{against.host} contradicts: \"{claim.text}\"")
+        elif support and not against and "verified_regulatory_status" not in {s.kind for s in signals}:
+            add("verified_regulatory_status", support, f"{support.host} confirms: \"{claim.text}\"")
+
+    # The organisation's own contacts. A domain may come from any accepted page (§7.2); phones and emails only
+    # from pages on the official site (tier B): data-broker pages offer made-up ones.
+    official_domains = [e for e in evidence if e.official_type == EntityType.domain]
+    official_contacts = [e for e in evidence if e.official_type in (EntityType.phone, EntityType.email) and e.tier == Tier.b]
+    confirmed_by = {e.entity_id: e for e in evidence if e.tier == Tier.b and e.direction == Direction.supports}
+
+    def domain_ok(d: Entity) -> Evidence | None:
+        return next((e for e in official_domains if same_site(d.canonical, e.official_value or "")), None) \
+            or confirmed_by.get(d.id)
+
+    def contact_ok(c: Entity) -> Evidence | None:
+        same = (lambda v: appears(c.value, v, phone=True)) if c.type == EntityType.phone else (lambda v: v == c.canonical)
+        return next((e for e in official_contacts if e.official_type == c.type and same(e.official_value or "")), None) \
+            or confirmed_by.get(c.id)
+
+    domain_checks = [(d, domain_ok(d)) for d in domains] if official_domains else []
+    known = {e.official_type for e in official_contacts}
+    contact_checks = [(c, contact_ok(c)) for c in contacts if c.type in known or c.id in confirmed_by]
+    wrong_domains = [d for d, ok in domain_checks if ok is None]
+    wrong_contacts = [c for c, ok in contact_checks if ok is None]
+    if wrong_domains:
+        official = official_domains[0]
+        add("official_domain_mismatch", official,
+            f"{wrong_domains[0].canonical} isn't {name}'s official website ({official.official_value})")
+        named = next((e for e in evidence if e.tier in STRONG and e.direction == Direction.warns
+                      and names_any(e.quote, wrong_domains + contacts)), None)
+        if named:
+            add("confirmed_impersonation", named, f"{named.host} warns about {wrong_domains[0].canonical}")
+    elif domain_checks:
+        add("verified_domain", domain_checks[0][1], f"{domain_checks[0][0].canonical} is {name}'s official website")  # type: ignore[arg-type]
+    if wrong_contacts:
+        official = next(e for e in official_contacts if e.official_type == wrong_contacts[0].type)
+        add("contact_mismatch", official, f"{wrong_contacts[0].value} isn't among {name}'s official contacts on {official.host}")
+
+    org_ids = {o.id for o in orgs}
+    org_confirmed = any(e.entity_id in org_ids and e.tier in STRONG and e.direction == Direction.supports for e in evidence)
+    matched = [ok for _, ok in domain_checks + contact_checks if ok]
+    if org_confirmed and matched and not (wrong_domains or wrong_contacts):
+        add("official_identity_confirmed", matched[0], f"{name} is confirmed and every contact in the message is theirs")
+    return signals
+
+
+def assess(signals: list[RiskSignal], evidence: list[Evidence]) -> tuple[int, RiskLevel, Confidence, Identity]:
+    """§7.5: score → level, capped without strong evidence; confidence from source tiers; identity from signals."""
+    score = sum(s.weight for s in signals)
+    level = next((lvl for floor, lvl in LEVELS if score >= floor), RiskLevel.low)
+    tiers = {e.id: e.tier for e in evidence}
+    if level in (RiskLevel.high, RiskLevel.critical) and not any(
+        s.weight > 0 and tiers.get(s.evidence_id) in STRONG for s in signals  # type: ignore[arg-type]
+    ):
+        level = RiskLevel.elevated
+    rows = [e for e in evidence if e.direction != Direction.neutral]
+    good_hosts = {e.host for e in rows if e.tier in (Tier.b, Tier.c)}
+    confidence = Confidence.high if any(e.tier == Tier.a for e in rows) or len(good_hosts) >= 2 \
+        else Confidence.medium if good_hosts else Confidence.low
+    # Official-contact rows say what the real organisation's contacts are, not that the sender is legitimate,
+    # so they don't count as disagreeing with a warning about the name.
+    judged = [e for e in rows if e.tier in STRONG and not e.official_type]
+    targets = {e.claim_id or e.entity_id for e in judged}
+    if confidence != Confidence.low and any(
+        {e.direction == Direction.supports for e in judged if (e.claim_id or e.entity_id) == t} == {True, False}
+        for t in targets
+    ):
+        confidence = Confidence.medium if confidence == Confidence.high else Confidence.low  # strong sources disagree
+    if level == RiskLevel.low and confidence == Confidence.low:
+        level = RiskLevel.insufficient  # absence of evidence is not safety (NFR-03)
+    kinds = {s.kind for s in signals}
+    identity = Identity.mismatch if kinds & {"official_domain_mismatch", "contact_mismatch"} \
+        else Identity.verified if "official_identity_confirmed" in kinds else Identity.unverified
+    return score, level, confidence, identity
+
+
+def _verify(session: Session, investigation: Investigation) -> list[Claim]:
+    """Set each claim's verdict. Returns the identity/regulatory claims that still have no evidence."""
+    detail = get_investigation(session, investigation.id)
+    behaviours = {s.kind for s in detail.signals if s.input_quote}
+    for claim in detail.claims:
+        claim.verdict, claim.reason = claim_verdicts(detail.claims, detail.evidence, behaviours)[claim.id]
+        session.add(claim)
+    counts = Counter(c.verdict for c in detail.claims)
+    labels = {Verdict.contradicted: "contradicted", Verdict.supported: "confirmed", Verdict.suspicious: "suspicious",
+              Verdict.unverified: "unconfirmed", Verdict.insufficient: "without evidence"}
+    if detail.claims:
+        _step(session, investigation, "Claims: " + ", ".join(f"{counts[v]} {label}" for v, label in labels.items() if counts[v]))
+    return [c for c in detail.claims if c.verdict == Verdict.insufficient and c.category in MATERIAL]
+
+
+def _score(session: Session, investigation: Investigation) -> None:
+    detail = get_investigation(session, investigation.id)
+    signals = derive_signals(investigation.id, detail.entities, detail.claims, detail.evidence)
+    session.add_all(signals)
+    score, level, confidence, identity = assess(detail.signals + signals, detail.evidence)
+    investigation.score, investigation.risk_level = score, level
+    investigation.confidence, investigation.identity = confidence, identity
+    _step(session, investigation, "Not enough evidence to judge" if level == RiskLevel.insufficient
+          else f"Risk {level.value} (score {score}), confidence {confidence.value}")
+
+
+BANNED = re.compile(r"\b(scammers?|fraudsters?|criminals?)\b|\bis a scam\b", re.IGNORECASE)
+INTERNAL_ID = re.compile(r"\b[sv]\d+\b")  # the summary's short ids belong in cites, not the reader's text
+NEXT_STEPS = {
+    RiskLevel.insufficient: ["There wasn't enough evidence to judge. Don't pay until you've checked the sender "
+                             "through the organisation's official website or phone."],
+    RiskLevel.low: ["Nothing found against it. Still pay only through the organisation's official website or app."],
+    RiskLevel.guarded: ["Check the sender through the organisation's official website or phone before you pay."],
+}
+CAUTION = ["Don't pay or share personal details yet.",
+           "Contact the organisation through its official website or phone, not the contacts in the message.",
+           "If you've already sent money, call your bank now and report it to the regulator."]
+
+
+def _summarize(session: Session, investigation: Investigation, llm: Completer) -> None:
+    """Nemotron writes findings and next steps from the stored record. A finding must cite real signal or
+    evidence ids and can't accuse anyone; otherwise it's dropped. If nothing usable comes back, the
+    findings are the signals themselves."""
+    detail = get_investigation(session, investigation.id)
+    sids = {f"s{i}": s for i, s in enumerate(sorted(detail.signals, key=lambda s: -abs(s.weight)), 1)}
+    rows = [e for e in detail.evidence if e.direction != Direction.neutral][:20]
+    vids = {f"v{i}": e for i, e in enumerate(rows, 1)}
+    names = {e.id: e.value for e in detail.entities} | {c.id: c.text for c in detail.claims}
+    quotes = {e.id: e.quote for e in detail.evidence}
+    facts = {
+        "risk_level": investigation.risk_level, "confidence": investigation.confidence, "identity": investigation.identity,
+        "signals": [{"id": k, "reason": s.reason, "weight": s.weight,
+                     "quote": s.input_quote or quotes.get(s.evidence_id)} for k, s in sids.items()],  # type: ignore[arg-type]
+        "claims": [{"text": c.text, "verdict": c.verdict, "reason": c.reason} for c in detail.claims],
+        "evidence": [{"id": k, "source": e.host, "tier": e.tier, "direction": e.direction,
+                      "about": names.get(e.claim_id or e.entity_id), "quote": e.quote,  # type: ignore[arg-type]
+                      "official": f"{e.official_type}: {e.official_value}" if e.official_type else None}
+                     for k, e in vids.items()],
+    }
+    _step(session, investigation, "Writing the summary with Nemotron")
+    try:
+        summary = summarize(llm, facts)
+    except (ExtractionError, LLMError) as e:
+        log.warning("summary_failed id=%s error=%s", investigation.id, type(e).__name__)
+        summary = Summary()
+    findings = []
+    for f in summary.findings:
+        evidence_ids = [str(vids[c].id) for c in f.cites if c in vids]
+        signal_ids = [str(sids[c].id) for c in f.cites if c in sids]
+        if (evidence_ids or signal_ids) and not BANNED.search(f.text) and not INTERNAL_ID.search(f.text):
+            findings.append({"text": f.text, "evidence_ids": evidence_ids, "signal_ids": signal_ids})
+        else:
+            log.info("finding_dropped cited=%s", bool(evidence_ids or signal_ids))
+    if not findings:  # the rules' own words
+        findings = [{"text": s.reason, "evidence_ids": [str(s.evidence_id)] if s.evidence_id else [],
+                     "signal_ids": [str(s.id)]} for s in sids.values()]
+    investigation.findings = findings[:5]
+    investigation.next_steps = summary.next_steps or NEXT_STEPS.get(investigation.risk_level, CAUTION)  # type: ignore[arg-type]
+
+
+def _domain_checks(session: Session, investigation: Investigation) -> list[Search]:
+    """One search on the official site for each submitted domain that isn't it (at most 2). The page it finds is
+    checked like any other: the official site saying the domain is theirs makes it verified (tier B supports)."""
+    detail = get_investigation(session, investigation.id)
+    official = next((e.official_value for e in detail.evidence if e.official_type == EntityType.domain), None)
+    if not official:
+        return []
+    other = [e for e in detail.entities if e.type == EntityType.domain and not same_site(e.canonical, official)]
+    return [Search(f"Asking {official} about {d.canonical}", d.canonical, [official]) for d in other[:2]]
 
 
 def _fixed_searches(entities: list[Entity]) -> list[Search]:
@@ -431,7 +686,7 @@ def _evidence(
         # Official contacts come only from ordinary sites (tier D, where the org's own site is) and are never a
         # regulator, news or social domain: those pages list their own contacts (e.g. Bank Negara's hotline on SSM).
         ok = (
-            isinstance(org, Entity) and org.type == EntityType.org and tier == Tier.d and value
+            isinstance(org, Entity) and org.type == EntityType.org and not is_regulator(org) and tier == Tier.d and value
             and appears(item.quote, text) and appears(value, item.quote, phone=kind == EntityType.phone)
             and (kind != EntityType.domain or tier_of(value) == Tier.d)
         )
@@ -442,6 +697,31 @@ def _evidence(
             **base, entity_id=org.id, direction=Direction.supports, quote=item.quote,  # type: ignore[union-attr]
             official_type=kind, official_value=value,
         ))
+    return rows
+
+
+WARNING_WORDS = re.compile(r"fake|phish|scam|fraud|impersonat|not affiliated|beware|unauthori[sz]ed|clone|alert",
+                           re.IGNORECASE)
+
+
+def _mentions(investigation_id: UUID, pages: list[WebResult], texts: dict[str, str], domains: list[Entity],
+              found: list[Evidence]) -> list[Evidence]:
+    """Domain check: a page that mentions a submitted domain with no warning nearby supports it. Only counts once
+    the page is on the official site (tier B), which these searches are limited to. If the model already judged
+    the domain on that page, its reading stands."""
+    rows = []
+    for page in pages:
+        text = texts[page.url]
+        for d in domains:
+            at = text.casefold().find(d.canonical)
+            if at == -1 or any(e.entity_id == d.id and e.url == page.url for e in found):
+                continue
+            quote = " ".join(text[max(0, at - 150):at + len(d.canonical) + 150].split())
+            if WARNING_WORDS.search(quote):
+                continue
+            host = host_of(page.url)
+            rows.append(Evidence(investigation_id=investigation_id, entity_id=d.id, url=page.url, title=page.title,
+                                 host=host, tier=tier_of(host), direction=Direction.supports, quote=quote))
     return rows
 
 

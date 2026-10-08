@@ -12,7 +12,7 @@ from app import investigation as inv
 from app.config import settings
 from app.connectors.tavily import ExtractedPage, TavilyError, WebResult, WebSearch
 from app.db import Entity, EntityType
-from app.extraction import SCAM_INVALID
+from app.extraction import SCAM_INVALID, ScamExtraction
 from app.investigation import appears, canonical
 from app.llm import LLMError
 from app.main import create_app
@@ -51,7 +51,8 @@ class ScamLLM:
     def __init__(self, *replies: dict[str, Any] | str | Exception, screenshot_text: str = "") -> None:
         self.replies = list(replies)
         self.screenshot_text = screenshot_text
-        self.plan: dict[str, Any] | Exception = {"searches": []}
+        self.plan: Any = {"searches": []}
+        self.summary: Any = {"findings": [], "next_steps": []}  # a reply, an Exception, or a function of the facts
         self.pages: dict[str, dict[str, Any] | Exception] = {}  # url -> page check reply
         self.slow: dict[str, float] = {}  # url -> seconds the page check takes
         self.calls: list[tuple[str | None, list[dict[str, Any]]]] = []
@@ -62,9 +63,11 @@ class ScamLLM:
             return self.screenshot_text
         system = messages[0]["content"]
         if system.startswith("You plan ScamGraph"):
-            reply: Any = self.plan
+            reply: Any = self.plan.pop(0) if isinstance(self.plan, list) else self.plan  # a list: one per round
+        elif system.startswith("You write ScamGraph"):
+            reply = self.summary(json.loads(messages[1]["content"])) if callable(self.summary) else self.summary
         elif system.startswith("You check one web page"):
-            url = next(u for u in self.pages | self.slow if u in messages[1]["content"])
+            url = next((u for u in self.pages | self.slow if u in messages[1]["content"]), "")
             time.sleep(self.slow.get(url, 0))
             reply = self.pages.get(url, {"evidence": [], "official": []})
             if callable(reply):
@@ -80,7 +83,8 @@ class ScamLLM:
         def kind(model: str | None, system: Any) -> str:
             if model:
                 return "vision"
-            return "plan" if system.startswith("You plan") else "check" if system.startswith("You check") else "extract"
+            starts = {"You plan": "plan", "You check": "check", "You write": "summary"}
+            return next((k for p, k in starts.items() if system.startswith(p)), "extract")
         return [kind(m, msgs[0]["content"]) for m, msgs in self.calls]
 
 
@@ -223,7 +227,11 @@ def test_text_is_extracted_and_checked(client: TestClient, llm: ScamLLM, web: Fa
         "Checking SC's Investor Alert List for T. Rowe Price Group Sdn. Bhd.",
         "Checking Bank Negara's alert list for T. Rowe Price Group Sdn. Bhd.",
         "Finding T. Rowe Price Group Sdn. Bhd.'s official website",
-        "0 sources found", "Done",
+        "0 sources found",
+        "Claims: 2 without evidence",
+        "Risk GUARDED (score 15), confidence LOW",
+        "Writing the summary with Nemotron",
+        "Done",
     ]
     assert web.extracted == []  # no link, no Tavily
     model, messages = llm.calls[0]
@@ -385,6 +393,27 @@ def researched(web: FakeWeb, llm: ScamLLM) -> FakeWeb:
     return web
 
 
+@pytest.mark.parametrize(("page", "verified"), [
+    ("Our Malaysian investors log in at troweprice-my-invest.com.", True),
+    ("Beware: troweprice-my-invest.com is a fake site, not affiliated with us.", False),
+])
+def test_official_site_can_confirm_a_second_domain(
+    client: TestClient, researched: FakeWeb, page: str, verified: bool
+) -> None:
+    """Big companies have several domains: the official site mentioning the submitted one, with no warning
+    around it, verifies it. The model doesn't have to notice."""
+    portal = "https://www.troweprice.com/portals"
+    researched.texts[portal] = page
+    researched.results["troweprice-my-invest.com @troweprice.com"] = [
+        WebResult(title="Careers", url="https://www.troweprice.com/careers", score=0.95),  # doesn't mention it: skipped
+        WebResult(title="Portals", url=portal, content="troweprice-my-invest.com", score=0.9),
+    ]
+    got = investigate(client, text=MESSAGE)
+    kinds = {s["kind"] for s in got["signals"]}
+    assert ("verified_domain" in kinds) is verified and ("official_domain_mismatch" in kinds) is not verified
+    assert researched.extracted[-1] == [portal]
+
+
 def test_research_finds_checks_and_tiers_evidence(client: TestClient, researched: FakeWeb, llm: ScamLLM) -> None:
     got = investigate(client, text=MESSAGE)
     assert got["status"] == "done"
@@ -392,6 +421,8 @@ def test_research_finds_checks_and_tiers_evidence(client: TestClient, researched
     assert researched.searched == [
         (ORG, ["sc.com.my"]), (ORG, ["bnm.gov.my"]), (f"{ORG} official website", None),
         ("T Rowe Price Malaysia licence", ["sc.com.my"]),
+        ("T Rowe Price Malaysia licence", ["sc.com.my"]),  # follow-up: the regulatory claim had no evidence
+        ("troweprice-my-invest.com", ["troweprice.com"]),  # the submitted domain, asked on the official site
     ]
     # Ranked by tier then score; the message's own site and the duplicate are left out.
     assert researched.extracted == [[ALERT, OFFICIAL, FB]]
@@ -409,7 +440,78 @@ def test_research_finds_checks_and_tiers_evidence(client: TestClient, researched
     assert "3 sources found, reading the top 3" in steps
     assert "Checking 3 pages against the claims with Nemotron" in steps
     assert "3 pieces of evidence from 2 pages (1 from regulators)" in steps
-    assert llm.kinds() == ["extract", "plan", "check", "check", "check"]
+    assert llm.kinds() == ["extract", "plan", "check", "check", "check", "plan", "summary"]
+    assert "Looking further for 1 claim without evidence" in steps
+
+
+def test_clone_is_scored_from_its_evidence(client: TestClient, researched: FakeWeb, llm: ScamLLM) -> None:
+    """The fixture is scenario B: BNM warns about the name, the official site is troweprice.com with another phone."""
+    got = investigate(client, text=MESSAGE)
+    signals = {s["kind"]: s for s in got["signals"]}
+    assert set(signals) == {"regulatory_warning", "official_domain_mismatch", "contact_mismatch", "payment_pressure"}
+    assert (got["score"], got["risk_level"], got["confidence"], got["identity"]) == (95, "CRITICAL", "HIGH", "mismatch")
+    evidence = {e["id"]: e for e in got["evidence"]}
+    assert evidence[signals["regulatory_warning"]["evidence_id"]]["host"] == "bnm.gov.my"
+    assert evidence[signals["official_domain_mismatch"]["evidence_id"]]["official_value"] == "troweprice.com"
+    assert signals["payment_pressure"]["input_quote"] == "transfer before Friday"
+    claims = {c["category"]: c["verdict"] for c in got["claims"]}
+    assert claims == {"investment": "insufficient_evidence", "regulatory": "insufficient_evidence"}
+    steps = [s["text"] for s in got["steps"]]
+    assert "Risk CRITICAL (score 95), confidence HIGH" in steps and steps[-2:] == ["Writing the summary with Nemotron", "Done"]
+
+
+def test_summary_findings_must_cite_and_not_accuse(client: TestClient, researched: FakeWeb, llm: ScamLLM) -> None:
+    def write(facts: dict[str, Any]) -> dict[str, Any]:
+        warning = next(s["id"] for s in facts["signals"] if "regulator" in s["reason"])
+        assert facts["risk_level"] == "CRITICAL" and all(e["id"].startswith("v") for e in facts["evidence"])
+        return {"findings": [
+            {"text": "Bank Negara's alert list names T Rowe Price Group Sdn.Bhd as a potential clone.", "cites": [warning, "v1"]},
+            {"text": "They are scammers.", "cites": [warning]},  # accusation: dropped
+            {"text": "Signal s1 shows a warning.", "cites": [warning]},  # internal id in the text: dropped
+            {"text": "The fund is fake.", "cites": ["v99"]},  # unknown id: dropped
+            {"text": "Nothing cited.", "cites": []},  # dropped
+        ], "next_steps": ["Don't pay.", "", "Call T. Rowe Price on the number on troweprice.com."]}
+
+    llm.summary = write
+    got = investigate(client, text=MESSAGE)
+    assert [f["text"] for f in got["findings"]] == ["Bank Negara's alert list names T Rowe Price Group Sdn.Bhd as a potential clone."]
+    finding = got["findings"][0]
+    warning = next(s for s in got["signals"] if s["kind"] == "regulatory_warning")
+    assert finding["signal_ids"] == [warning["id"]] and len(finding["evidence_ids"]) == 1
+    assert got["next_steps"] == ["Don't pay.", "Call T. Rowe Price on the number on troweprice.com."]
+
+
+def test_failed_summary_falls_back_to_the_rules(client: TestClient, researched: FakeWeb, llm: ScamLLM) -> None:
+    llm.summary = LLMError("Nebius timed out.")
+    got = investigate(client, text=MESSAGE)
+    assert got["status"] == "done" and got["risk_level"] == "CRITICAL"
+    assert got["findings"][0]["text"] == "A regulator's warning on bnm.gov.my names it"  # strongest signal first
+    assert len(got["findings"]) == 4 and all(f["signal_ids"] for f in got["findings"])
+    assert got["next_steps"] == inv.CAUTION
+
+
+def test_follow_up_runs_once_and_skips_pages_already_read(client: TestClient, researched: FakeWeb, llm: ScamLLM) -> None:
+    llm.plan = [{"searches": []}, {"searches": [{"query": "official website again"}]}]
+    researched.results["official website again"] = [
+        WebResult(title="About", url=OFFICIAL, score=0.9),  # read in round 1: skipped
+        WebResult(title="News", url="https://www.thestar.com.my/trp", score=0.5),
+    ]
+    researched.texts["https://www.thestar.com.my/trp"] = "T Rowe Price Group Sdn.Bhd is not approved by the SC."
+    investigate(client, text=MESSAGE)
+    assert researched.extracted[1] == ["https://www.thestar.com.my/trp"]
+    assert len(researched.extracted) == 2 and llm.kinds().count("plan") == 2
+
+
+def test_no_follow_up_when_material_claims_have_evidence(client: TestClient, researched: FakeWeb, llm: ScamLLM) -> None:
+    alert = llm.pages[ALERT]
+    llm.pages[ALERT] = lambda c: alert(c) | {"evidence": [
+        {"about": id_of(c, "The fund is approved by the Securities Commission."), "direction": "contradicts",
+         "quote": "T Rowe Price Group Sdn.Bhd (potential clone entity)"},
+    ]}
+    got = investigate(client, text=MESSAGE)
+    assert llm.kinds().count("plan") == 1
+    assert {c["category"]: c["verdict"] for c in got["claims"]}["regulatory"] == "contradicted"
+    assert "false_regulatory_claim" in {s["kind"] for s in got["signals"]}
 
 
 def test_regulator_pages_cant_crowd_out_the_official_site(client: TestClient, researched: FakeWeb) -> None:
@@ -425,13 +527,14 @@ def test_regulator_pages_cant_crowd_out_the_official_site(client: TestClient, re
 def test_plan_is_capped_to_the_search_budget(client: TestClient, researched: FakeWeb, llm: ScamLLM) -> None:
     llm.plan = {"searches": [{"query": f"query number {i}"} for i in range(10)]}
     investigate(client, text=MESSAGE)
-    assert len(researched.searched) == inv.MAX_SEARCHES == 8
+    # round 1 + follow-up + the domain check on the official site
+    assert len(researched.searched) == inv.MAX_SEARCHES + inv.FOLLOW_UP_SEARCHES + 1 == 12
 
 
 def test_plan_failure_keeps_the_fixed_searches(client: TestClient, researched: FakeWeb, llm: ScamLLM) -> None:
     llm.plan = LLMError("Nebius timed out.")
     got = investigate(client, text=MESSAGE)
-    assert got["status"] == "done" and len(researched.searched) == 3
+    assert got["status"] == "done" and len(researched.searched) == 4  # 3 fixed + the domain check
     assert "Couldn't plan extra searches; using the regulator searches only" in [s["text"] for s in got["steps"]]
     assert {e["tier"] for e in got["evidence"]} == {"A", "B"}
 
@@ -463,7 +566,8 @@ def test_no_web_key_skips_research(db_url: str, uploads: Path) -> None:
         made = http.post("/api/investigations", data={"text": MESSAGE}).json()["id"]
         got = http.get(f"/api/investigations/{made}").json()
     assert got["status"] == "done" and got["evidence"] == []
-    assert got["steps"][-2]["text"].startswith("Skipped web research: Web lookup isn't set up.")
+    assert any(s["text"].startswith("Skipped web research: Web lookup isn't set up.") for s in got["steps"])
+    assert got["risk_level"] == "GUARDED" and got["confidence"] == "LOW"  # the pressure tactic alone
 
 
 def test_nothing_to_look_up(client: TestClient, researched: FakeWeb, llm: ScamLLM) -> None:
@@ -531,3 +635,9 @@ def test_same_site_needs_a_real_subdomain() -> None:
     assert inv.same_site("invest.troweprice.com", "troweprice.com")
     assert not inv.same_site("troweprice-my.com", "troweprice.com")
     assert not inv.same_site("mytroweprice.com", "troweprice.com")
+
+
+def test_us_spelling_of_behaviours_is_read() -> None:
+    """Nemotron sometimes writes "behaviors"; ignoring it silently lost every pressure tactic."""
+    got = ScamExtraction.model_validate({"behaviors": [{"kind": "payment_pressure", "quote": "pay today"}]})
+    assert [b.kind for b in got.behaviours] == ["payment_pressure"]
