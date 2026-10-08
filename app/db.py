@@ -255,6 +255,9 @@ class Evidence(SQLModel, table=True):
     tier: Tier
     direction: Direction
     quote: str
+    # Set = this page states the org's (entity_id) official domain, phone or email (spec §7.2).
+    official_type: EntityType | None = None
+    official_value: str | None = None  # canonical form; appears in the quote
     retrieved_at: datetime = Field(default_factory=utcnow)
 
 

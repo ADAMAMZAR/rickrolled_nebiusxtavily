@@ -8,3 +8,4 @@ __pycache__/
 *.egg-info/
 .vscode/
 data/uploads/
+data/tavily_cache/

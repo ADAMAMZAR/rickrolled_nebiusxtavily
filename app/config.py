@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     telegram_bot_token: SecretStr = SecretStr("")
     telegram_allowed_users: str = ""  # comma-separated numeric Telegram user ids
     tavily_api_key: SecretStr = SecretStr("")  # optional: web watch + lookup
+    tavily_cache_dir: str = "./data/tavily_cache"  # investigations: last good reply per request, used if Tavily fails
     # Google (optional): read mail from linked people, Gmail drafts, Calendar events. README: Google setup.
     google_client_secret_file: str = "./data/client_secret.json"
     google_token_file: str = "./data/google_token.json"  # written when you connect; never commit it

@@ -19,6 +19,7 @@
    - **Open: confirm hosting before H4.**
 3. **Hackathon framing.** *Decided 2026-10-07:* follow AGENTS.md (Nebius x NVIDIA, Personal AI track). The source plan's track and prize names were a mistake; ignore them.
 4. **Product shape.** *Decided 2026-10-07:* ScamGraph plus Continuum's loops. §9 stays.
+6. **Time budget.** Measured in H1: one Nemotron Super call takes 11-37s, Gemma about 36s. Nano (27s, needed a retry) and 3.5 Lightning (64s) weren't faster. *Decided 2026-10-08:* keep Super; the time limit covers research only (§6); the `investigate` tool waits about 100s, then answers with the dashboard link (§9).
 5. **Screenshots.** No Nemotron model on Token Factory reads images (H0 check). *Decided 2026-10-07:* screenshots only go to `google/gemma-3-27b-it` on Token Factory (`NEBIUS_VISION_MODEL`), which turns the image into text. Every other call stays on Nemotron.
 
 ---
@@ -178,6 +179,8 @@ Evidence:                        # NEW (holds the plan's Source)
     tier: "A" | "B" | "C" | "D" | "E"
     direction: "supports" | "contradicts" | "warns" | "neutral"
     quote: str                   # must appear in the extracted page text
+    official_type: "domain" | "phone" | "email" | None   # set = this page states the org's official contact (§7.2)
+    official_value: str | None   # canonical form; must appear in the quote
     retrieved_at: datetime
 
 RiskSignal:                      # NEW
@@ -210,7 +213,8 @@ run(id) in a background thread:
                    "<org>"  include_domains=[bnm.gov.my]  (BNM Financial Consumer Alert List)
                    "<org> official website"
  4 research    Tavily searches in parallel (ThreadPoolExecutor)
-               rank URLs by tier then Tavily score, Extract the top ≤5
+               each search's best page first (in search order), then the rest by tier and Tavily score;
+               the message's own domains are skipped; Extract the top ≤5
  5 classify    one Nemotron call per page, in parallel:
                  per claim/entity → {direction, quote}
                  official_domain / official_contacts → each with a quote
@@ -224,7 +228,7 @@ run(id) in a background thread:
 10 done        status=done
 ```
 
-- **Budget per run:** at most 8 searches, 5 extracts, 2 rounds and a 75s time limit. The limit stays under `HERMES_TIMEOUT` so the MCP tool can wait for the result. Hitting it ends research and moves to scoring.
+- **Budget per run (§0.6):** at most 8 searches, 5 extracts and 2 rounds. Research (searches, page reads, classification) has a 60s limit per round; intake, extraction, planning and the summary are outside it. A whole run takes about 1.5-2.5 minutes. Hitting the limit ends research and moves to scoring; late classifications are ignored.
 - **Tavily cost:** each search uses `search_depth: basic` (1 credit). Extract uses basic depth.
 - **Tavily fails:** use the replay cache (§8). If there's nothing cached, continue with no evidence, which gives `INSUFFICIENT_EVIDENCE`. Each step line says what failed.
 - **Nemotron fails:** `status=failed` with a clear error. Never a partial score.
@@ -240,13 +244,15 @@ run(id) in a background thread:
 |---|---|---|
 | A | `gov.my`, `sc.com.my`, `bnm.gov.my`, `ssm.com.my`, `rmp.gov.my`, `.gov` | Highest authority |
 | B | the organisation's official domain (§7.2) | Strong direct evidence |
-| C | small news allowlist (e.g. `thestar.com.my`, `malaymail.com`, `nst.com.my`, `reuters.com`, `bbc.com`) | Corroboration |
+| C | small news allowlist (e.g. `thestar.com.my`, `malaymail.com`, `nst.com.my`, `freemalaysiatoday.com`, `theedgemalaysia.com`, `bernama.com`, `reuters.com`, `bbc.com`) | Corroboration |
 | D | everything else | Context only |
-| E | `facebook.com`, `instagram.com`, `tiktok.com`, `x.com`, `reddit.com`, `youtube.com`, `quora.com`, `forum.lowyat.net` | Can't raise confidence on its own |
+| E | `facebook.com`, `instagram.com`, `tiktok.com`, `x.com`, `twitter.com`, `reddit.com`, `youtube.com`, `quora.com`, `lowyat.net`, `t.me`, `linkedin.com` | Can't raise confidence on its own |
 
 ### 7.2 Official domain
 
-- An official domain is accepted only when a page that isn't tier E states it, with a quote containing that domain.
+- An official domain, phone or email is accepted only when a **tier D** page states it, with a quote containing it. An official domain must itself be a tier D site.
+  *Changed 2026-10-08 after live runs: Nemotron gave `bnm.gov.my` as FalconRise's website (from BNM's own page) and Bank Negara's hotline as its phone (from an SSM page). Regulator, news and social pages list their own contacts.*
+- *Open for H3: data-broker pages (seen: leadiq.com) can offer template emails like `john.doe@maybank.com` as official. Contact checks (§7.4) should use only contacts stated on the official domain's own pages (tier B).*
 - `# ponytail:` this is a heuristic. A proper fix would use a registry lookup (e.g. SSM).
 - **Domains match** when the submitted host equals the official host, or is a subdomain of it.
 
@@ -325,7 +331,7 @@ run(id) in a background thread:
 ## 9. Continuum Tie-ins
 
 - **`investigate(text)` MCP tool:**
-  - Runs the pipeline and waits up to the time budget.
+  - Runs the pipeline and waits about 100s (under `HERMES_TIMEOUT`). Still running → it answers with the dashboard link and says the result is coming.
   - Returns the risk level, confidence, findings with links, and a dashboard link.
   - Add it to `tools.include` and re-run `setup_hermes.py`.
 - **SOUL.md rules:**
@@ -480,6 +486,26 @@ Every milestone ends at its gate. P1 starts only after the full P0 demo works.
    - Classification with page-quote check.
    - Steps log.
    **Gate:** scenario A attaches a tier-A source automatically.
+   *Done 2026-10-08:*
+   - *`plan_searches` / `classify_page` prompts and schemas in `extraction.py`; a malformed item is dropped, not the reply.*
+   - *Fixed searches: SC list, BNM list and official website for up to 2 organisations; regulators named in the message are skipped. Nemotron fills the rest up to 8.*
+   - *Searches and page checks run in threads with one 60s deadline (§0.6). A late page check is ignored and the step says so. A failed plan falls back to the fixed searches. No Tavily key = research skipped with a step line.*
+   - *Tavily replay cache (`TAVILY_CACHE_DIR`, gitignored), used by investigations only. Phase 3's web watch still reports errors.*
+   - *`Evidence.official_type/official_value` (§5): a page stating the org's official contacts. Pages on an accepted official domain become tier B.*
+   - *Guards added after live runs:*
+     - *Names and quotes are compared on letters and digits only, so "Sdn. Bhd." matches "Sdn.Bhd" and table rows match.*
+     - *Each page is cut to the passages around the message's names (`relevant_text`), so a row deep in BNM's 100k-character list reaches the model.*
+     - *Phones compare their last 9 digits (+60 vs 0).*
+     - *A claim's evidence must name something from the message (`names_any`; a regulator named in the message doesn't count). Seen live: a US Federal Register notice "supported" an SC approval claim.*
+     - *Official contacts only from tier D pages (§7.2).*
+     - *Each search's best page is read first: before this, 5 government pages filled every slot and no company site was read.*
+   - *Gate passed:*
+     - *Scenario A attaches BNM's FCA list row "FalconRise Capital" (tier A, warns).*
+     - *Live: B and E also get BNM's potential-clone rows. C gets `maybank.com` as official, with its hotline and email from maybank.com (tier B).*
+     - *Runs take 20-25s each.*
+     - *`pytest -m live -k scam_live`: 6 passed.*
+     - *Real page in Chrome: steps appear while the run is in progress.*
+     - *`pytest`: 212 passed.*
 4. **H3 Verify & Score:**
    - §7 rules.
    - Follow-up round.
@@ -510,8 +536,10 @@ Every milestone ends at its gate. P1 starts only after the full P0 demo works.
   *Done 2026-10-07 (H0): all three are validated and stored. Reading the screenshot and URL is H1.*
 - [x] Entities, claims and behaviours are extracted, schema-validated
   *Done 2026-10-07 (H1): live A-E + screenshot; invented entities and quotes dropped.*
-- [ ] An investigation plan is generated (Nemotron + fixed regulator searches)
-- [ ] Tavily performs live search and extract; evidence is persisted with its source
+- [x] An investigation plan is generated (Nemotron + fixed regulator searches)
+  *Done 2026-10-08 (H2).*
+- [x] Tavily performs live search and extract; evidence is persisted with its source
+  *Done 2026-10-08 (H2): live A-E.*
 - [ ] Claims get verdicts; signals, score, level and confidence come from code only
 - [ ] Every signal links to evidence or an input quote; every finding cites evidence ids
 - [ ] Unknown cases return `INSUFFICIENT_EVIDENCE`, never LOW

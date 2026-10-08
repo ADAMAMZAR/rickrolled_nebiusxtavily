@@ -1,14 +1,17 @@
 import json
+import time
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
 
+from app import investigation as inv
 from app.config import settings
-from app.connectors.tavily import ExtractedPage, TavilyError
-from app.db import EntityType
+from app.connectors.tavily import ExtractedPage, TavilyError, WebResult, WebSearch
+from app.db import Entity, EntityType
 from app.extraction import SCAM_INVALID
 from app.investigation import appears, canonical
 from app.llm import LLMError
@@ -42,33 +45,67 @@ EMPTY = {"entities": [], "claims": [], "behaviours": []}
 
 
 class ScamLLM:
-    """Nemotron's JSON for extraction; plain text for the vision model."""
+    """Plain text for the vision model. Nemotron: queued extraction replies, one plan, and page checks by URL
+    (pages are checked in parallel, so those can't be a queue)."""
 
     def __init__(self, *replies: dict[str, Any] | str | Exception, screenshot_text: str = "") -> None:
         self.replies = list(replies)
         self.screenshot_text = screenshot_text
+        self.plan: dict[str, Any] | Exception = {"searches": []}
+        self.pages: dict[str, dict[str, Any] | Exception] = {}  # url -> page check reply
+        self.slow: dict[str, float] = {}  # url -> seconds the page check takes
         self.calls: list[tuple[str | None, list[dict[str, Any]]]] = []
 
     def complete(self, messages: list[dict[str, Any]], json_mode: bool = False, model: str | None = None) -> str:
         self.calls.append((model, messages))
         if model == settings.nebius_vision_model:
             return self.screenshot_text
-        reply = self.replies.pop(0) if self.replies else EMPTY
+        system = messages[0]["content"]
+        if system.startswith("You plan ScamGraph"):
+            reply: Any = self.plan
+        elif system.startswith("You check one web page"):
+            url = next(u for u in self.pages | self.slow if u in messages[1]["content"])
+            time.sleep(self.slow.get(url, 0))
+            reply = self.pages.get(url, {"evidence": [], "official": []})
+            if callable(reply):
+                reply = reply(messages[1]["content"])
+        else:
+            reply = self.replies.pop(0) if self.replies else EMPTY
         if isinstance(reply, Exception):
             raise reply
         return reply if isinstance(reply, str) else json.dumps(reply)
 
+    def kinds(self) -> list[str]:
+        """Which prompt each call was, in order."""
+        def kind(model: str | None, system: Any) -> str:
+            if model:
+                return "vision"
+            return "plan" if system.startswith("You plan") else "check" if system.startswith("You check") else "extract"
+        return [kind(m, msgs[0]["content"]) for m, msgs in self.calls]
+
 
 class FakeWeb:
-    def __init__(self, pages: list[ExtractedPage] | None = None, error: str | None = None) -> None:
-        self.pages, self.error = pages or [], error
+    def __init__(self, texts: dict[str, str] | None = None, error: str | None = None) -> None:
+        self.texts = texts or {}  # url -> page text for extract
+        self.results: dict[str, list[WebResult]] = {}  # query -> search results
+        self.error = error  # every call fails
+        self.failing: set[str] = set()  # queries that fail
+        self.searched: list[tuple[str, list[str] | None]] = []
         self.extracted: list[list[str]] = []
 
-    def extract(self, urls: list[str]) -> list[ExtractedPage]:
+    def search(self, query: str, *, max_results: int = 3, include_domains: list[str] | None = None,
+               cached: bool = False) -> WebSearch:
+        self.searched.append((query, include_domains))
+        if self.error or query in self.failing:
+            raise TavilyError(self.error or "Tavily returned HTTP 500.")
+        key = f"{query} @{include_domains[0]}" if include_domains else query
+        return WebSearch(results=self.results.get(key, []))
+
+    def extract(self, urls: list[str], cached: bool = False) -> list[ExtractedPage]:
         self.extracted.append(urls)
         if self.error:
             raise TavilyError(self.error)
-        return self.pages
+        return [ExtractedPage(url=u, raw_content=self.texts[u]) for u in urls if u in self.texts]
 
 
 @pytest.fixture
@@ -85,7 +122,7 @@ def llm() -> ScamLLM:
 
 @pytest.fixture
 def web() -> FakeWeb:
-    return FakeWeb([ExtractedPage(url="https://troweprice-my-invest.com", raw_content="Welcome to T Rowe Price Asia. Deposit now.")])
+    return FakeWeb({"https://www.troweprice-my-invest.com/join?ref=1": "Welcome to T Rowe Price Asia. Deposit now."})
 
 
 @pytest.fixture
@@ -181,7 +218,12 @@ def test_text_is_extracted_and_checked(client: TestClient, llm: ScamLLM, web: Fa
     ]
     assert [s["text"] for s in got["steps"]] == [
         "Received", "Reading the message with Nemotron",
-        "Found 4 names and contacts, 2 claims, 1 pressure tactic", "Done",
+        "Found 4 names and contacts, 2 claims, 1 pressure tactic",
+        "Planning the research with Nemotron",
+        "Checking SC's Investor Alert List for T. Rowe Price Group Sdn. Bhd.",
+        "Checking Bank Negara's alert list for T. Rowe Price Group Sdn. Bhd.",
+        "Finding T. Rowe Price Group Sdn. Bhd.'s official website",
+        "0 sources found", "Done",
     ]
     assert web.extracted == []  # no link, no Tavily
     model, messages = llm.calls[0]
@@ -222,7 +264,7 @@ def test_screenshot_goes_to_the_vision_model(client: TestClient, llm: ScamLLM) -
     got = investigate(client, files={"screenshot": ("shot.png", PNG, "image/png")})
     assert got["status"] == "done"
     assert got["input_text"] == f"[Text in the screenshot]\n{MESSAGE}"
-    (vision, messages), (nemotron, _) = llm.calls
+    (vision, messages), (nemotron, _) = llm.calls[:2]
     assert vision == settings.nebius_vision_model and nemotron is None
     image = messages[0]["content"][1]["image_url"]["url"]
     assert image.startswith("data:image/png;base64,")
@@ -261,6 +303,7 @@ def test_missing_key_fails_clearly(db_url: str, uploads: Path) -> None:
         ("+60 12-000 5678", "call +6012 0005678", True, True),
         ("+60 12-999 5678", "call +6012 0005678", True, False),
         ("12345", "id 12345", True, False),  # too short to count as a phone
+        ("T Rowe Price Group Sdn. Bhd", "| T Rowe Price Group Sdn.Bhd (potential clone entity) |", False, True),
     ],
 )
 def test_appears(needle: str, text: str, phone: bool, found: bool) -> None:
@@ -279,3 +322,212 @@ def test_appears(needle: str, text: str, phone: bool, found: bool) -> None:
 )
 def test_canonical(kind: EntityType, value: str, expected: str) -> None:
     assert canonical(kind, value) == expected
+
+
+# --- H2: research ---
+
+ORG = "T. Rowe Price Group Sdn. Bhd."
+ALERT = "https://www.bnm.gov.my/financial-consumer-alert-list"
+OFFICIAL = "https://www.troweprice.com/about"
+FB = "https://www.facebook.com/trp-my"
+OWN = "https://troweprice-my-invest.com/"  # the message's own site
+TEXTS = {
+    ALERT: "Financial Consumer Alert List\n| T Rowe Price Group Sdn.Bhd (potential clone entity) |  | 3 Aug 2026 |",
+    OFFICIAL: "T. Rowe Price Group, Inc. Visit us at troweprice.com. Call +1 410-345-2000.",
+    FB: "Official T Rowe Price Malaysia page. Website troweprice-asia.com",
+    OWN: "Welcome investor. We are licensed.",
+}
+
+
+def id_of(content: str, value: str) -> str:
+    """The id the prompt gave a name or claim (ids depend on row order, so tests look them up)."""
+    names = json.loads(content.split("Names and contacts: ", 1)[1].split("\n\nClaims: ", 1)[0])
+    claims = json.loads(content.split("\n\nClaims: ", 1)[1].split("\n\nPage: ", 1)[0])
+    return next(i["id"] for i in names + claims if value in (i.get("value"), i.get("text")))
+
+
+@pytest.fixture
+def researched(web: FakeWeb, llm: ScamLLM) -> FakeWeb:
+    web.texts |= TEXTS
+    web.results = {
+        f"{ORG} @bnm.gov.my": [WebResult(title="FCA list", url=ALERT, score=0.9)],
+        f"{ORG} official website": [
+            WebResult(title="Join", url=OWN, score=0.99),
+            WebResult(title="About", url=OFFICIAL, score=0.8),
+            WebResult(title="TRP MY", url=FB, score=0.95),
+            WebResult(title="FCA list", url=ALERT, score=0.5),  # duplicate
+        ],
+    }
+    llm.plan = {"searches": [{"query": "T Rowe Price Malaysia licence", "include_domains": ["sc.com.my"]}]}
+    llm.pages = {
+        ALERT: lambda c: {"evidence": [
+            {"about": id_of(c, ORG), "direction": "warns", "quote": "T Rowe Price Group Sdn.Bhd (potential clone entity)"},
+            {"about": id_of(c, "The fund is approved by the Securities Commission."), "direction": "contradicts",
+             "quote": "Not approved by anyone."},  # not on the page: dropped
+            {"about": "e99", "direction": "warns", "quote": "Financial Consumer Alert List"},  # unknown id: dropped
+            {"about": id_of(c, "The fund is approved by the Securities Commission."), "direction": "contradicts",
+             "quote": "Financial Consumer Alert List"},  # on the page, but names nothing from the message: dropped
+        ], "official": [
+            {"org": id_of(c, ORG), "type": "domain", "value": "bnm.gov.my",
+             "quote": "Financial Consumer Alert List"},  # value not in quote: dropped
+        ]},
+        OFFICIAL: lambda c: {"evidence": [], "official": [
+            {"org": id_of(c, ORG), "type": "domain", "value": "troweprice.com", "quote": "Visit us at troweprice.com."},
+            {"org": id_of(c, ORG), "type": "phone", "value": "+1 410-345-2000", "quote": "Call +1 410-345-2000."},
+            {"org": id_of(c, ORG), "type": "domain", "value": "trp.com", "quote": "Visit us at troweprice.com."},  # not in quote
+            {"org": id_of(c, "troweprice-my-invest.com"), "type": "domain", "value": "troweprice.com",
+             "quote": "Visit us at troweprice.com."},  # not an organisation
+        ]},
+        FB: lambda c: {"evidence": [], "official": [  # tier E can't state official contacts
+            {"org": id_of(c, ORG), "type": "domain", "value": "troweprice-asia.com", "quote": "Website troweprice-asia.com"},
+        ]},
+    }
+    return web
+
+
+def test_research_finds_checks_and_tiers_evidence(client: TestClient, researched: FakeWeb, llm: ScamLLM) -> None:
+    got = investigate(client, text=MESSAGE)
+    assert got["status"] == "done"
+    # Fixed searches for the company (not for the Securities Commission, a regulator), then the model's.
+    assert researched.searched == [
+        (ORG, ["sc.com.my"]), (ORG, ["bnm.gov.my"]), (f"{ORG} official website", None),
+        ("T Rowe Price Malaysia licence", ["sc.com.my"]),
+    ]
+    # Ranked by tier then score; the message's own site and the duplicate are left out.
+    assert researched.extracted == [[ALERT, OFFICIAL, FB]]
+    rows = {(e["host"], e["tier"], e["direction"], e["official_type"], e["official_value"]) for e in got["evidence"]}
+    assert rows == {
+        ("bnm.gov.my", "A", "warns", None, None),
+        ("troweprice.com", "B", "supports", "domain", "troweprice.com"),  # official domain makes the site tier B
+        ("troweprice.com", "B", "supports", "phone", "14103452000"),
+    }
+    warning = next(e for e in got["evidence"] if e["tier"] == "A")
+    assert warning["entity_id"] == next(e["id"] for e in got["entities"] if e["value"] == ORG)
+    assert warning["quote"] == "T Rowe Price Group Sdn.Bhd (potential clone entity)"
+    steps = [s["text"] for s in got["steps"]]
+    assert "Searching the web: T Rowe Price Malaysia licence" in steps
+    assert "3 sources found, reading the top 3" in steps
+    assert "Checking 3 pages against the claims with Nemotron" in steps
+    assert "3 pieces of evidence from 2 pages (1 from regulators)" in steps
+    assert llm.kinds() == ["extract", "plan", "check", "check", "check"]
+
+
+def test_regulator_pages_cant_crowd_out_the_official_site(client: TestClient, researched: FakeWeb) -> None:
+    """Seen live: 5 government pages filled every slot, so no company website was ever read."""
+    many = [WebResult(title=f"Gov {i}", url=f"https://www.bnm.gov.my/page-{i}", score=0.9) for i in range(6)]
+    researched.results[f"{ORG} @bnm.gov.my"] = many
+    researched.results[f"{ORG} official website"] = [WebResult(title="About", url=OFFICIAL, score=0.1)]
+    investigate(client, text=MESSAGE)
+    picked = researched.extracted[0]
+    assert len(picked) == inv.MAX_PAGES and picked[:2] == [many[0].url, OFFICIAL]
+
+
+def test_plan_is_capped_to_the_search_budget(client: TestClient, researched: FakeWeb, llm: ScamLLM) -> None:
+    llm.plan = {"searches": [{"query": f"query number {i}"} for i in range(10)]}
+    investigate(client, text=MESSAGE)
+    assert len(researched.searched) == inv.MAX_SEARCHES == 8
+
+
+def test_plan_failure_keeps_the_fixed_searches(client: TestClient, researched: FakeWeb, llm: ScamLLM) -> None:
+    llm.plan = LLMError("Nebius timed out.")
+    got = investigate(client, text=MESSAGE)
+    assert got["status"] == "done" and len(researched.searched) == 3
+    assert "Couldn't plan extra searches; using the regulator searches only" in [s["text"] for s in got["steps"]]
+    assert {e["tier"] for e in got["evidence"]} == {"A", "B"}
+
+
+def test_failed_search_is_reported(client: TestClient, researched: FakeWeb) -> None:
+    researched.failing = {f"{ORG} official website"}
+    got = investigate(client, text=MESSAGE)
+    assert "1 source found (1 search failed), reading the top 1" in [s["text"] for s in got["steps"]]
+    assert {e["tier"] for e in got["evidence"]} == {"A"}
+
+
+def test_slow_page_check_runs_out_of_time(
+    client: TestClient, researched: FakeWeb, llm: ScamLLM, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(inv, "RESEARCH_SECONDS", 1)
+    llm.slow = {OFFICIAL: 3}
+    got = investigate(client, text=MESSAGE)
+    assert got["status"] == "done"
+    steps = [s["text"] for s in got["steps"]]
+    assert "1 piece of evidence from 1 page (1 from regulators); ran out of time for 1 page" in steps
+
+
+def test_no_web_key_skips_research(db_url: str, uploads: Path) -> None:
+    def no_web() -> FakeWeb:
+        raise TavilyError("Web lookup isn't set up. Add TAVILY_API_KEY to .env (free key at tavily.com).")
+
+    app = create_app(db_url, get_llm=lambda: ScamLLM(EXTRACTION), get_web=no_web)  # type: ignore[arg-type, return-value]
+    with TestClient(app) as http:
+        made = http.post("/api/investigations", data={"text": MESSAGE}).json()["id"]
+        got = http.get(f"/api/investigations/{made}").json()
+    assert got["status"] == "done" and got["evidence"] == []
+    assert got["steps"][-2]["text"].startswith("Skipped web research: Web lookup isn't set up.")
+
+
+def test_nothing_to_look_up(client: TestClient, researched: FakeWeb, llm: ScamLLM) -> None:
+    llm.replies = [EMPTY]
+    got = investigate(client, text="hello")
+    assert researched.searched == [] and "Nothing to look up on the web" in [s["text"] for s in got["steps"]]
+
+
+def test_official_contacts_only_from_ordinary_sites(client: TestClient, researched: FakeWeb, llm: ScamLLM) -> None:
+    """Seen live: Nemotron gave bnm.gov.my as an org's website and Bank Negara's hotline as its phone."""
+    researched.texts[ALERT] += " To view the updated list, please visit: bnm.gov.my/fca or call 1-300-88-5465."
+    llm.pages[ALERT] = lambda c: {"evidence": [], "official": [
+        {"org": id_of(c, ORG), "type": "domain", "value": "bnm.gov.my", "quote": "please visit: bnm.gov.my/fca"},
+        {"org": id_of(c, ORG), "type": "phone", "value": "1-300-88-5465", "quote": "or call 1-300-88-5465."},
+    ]}
+    researched.texts[OFFICIAL] += " Partner sites: sc.com.my."
+    llm.pages[OFFICIAL] = lambda c: {"evidence": [], "official": [
+        {"org": id_of(c, ORG), "type": "domain", "value": "troweprice.com", "quote": "Visit us at troweprice.com."},
+        {"org": id_of(c, ORG), "type": "domain", "value": "sc.com.my", "quote": "Partner sites: sc.com.my."},
+    ]}
+    got = investigate(client, text=MESSAGE)
+    assert [(e["official_type"], e["official_value"]) for e in got["evidence"] if e["official_type"]] == [
+        ("domain", "troweprice.com"),
+    ]
+
+
+def test_names_any() -> None:
+    def entity(kind: EntityType, value: str) -> Entity:
+        return Entity(investigation_id=uuid4(), type=kind, value=value, canonical=canonical(kind, value))
+
+    found = [entity(EntityType.org, ORG), entity(EntityType.org, "Securities Commission"),
+             entity(EntityType.domain, "troweprice-my-invest.com"), entity(EntityType.phone, "+60 12-000 5678")]
+    assert inv.names_any("37. T Rowe Price Group Sdn.Bhd (potential clone entity)", found)
+    assert inv.names_any("Beware of TROWEPRICE-MY-INVEST.COM", found)
+    assert inv.names_any("Reported number: 012-000 5678", found)
+    assert not inv.names_any("Order Granting Approval of a Proposed Rule Change", found)
+    assert not inv.names_any("The Securities Commission Malaysia has updated the list", found)  # the regulator itself
+
+
+def test_relevant_text_matches_other_spellings() -> None:
+    page = "Header. " + "x" * 9000 + " | T Rowe Price Group Sdn.Bhd (potential clone entity) | " + "y" * 9000
+    assert "T Rowe Price Group Sdn.Bhd (potential clone entity)" in inv.relevant_text(page, [ORG])
+
+
+def test_relevant_text_keeps_passages_far_down_the_page() -> None:
+    page = "Alert list header. " + "x" * 20000 + " | FalconRise Capital | Facebook | 3 Aug 2026 | " + "y" * 20000
+    kept = inv.relevant_text(page, ["FalconRise Capital", "ab"])
+    assert kept.startswith("Alert list header.") and "| FalconRise Capital | Facebook | 3 Aug 2026 |" in kept
+    assert len(kept) <= inv.MAX_CHECKED
+
+
+@pytest.mark.parametrize(
+    ("url", "tier"),
+    [
+        ("https://www.sc.com.my/investor-alert-list", "A"), ("https://www.bnm.gov.my/x", "A"),
+        ("https://www.fbi.gov/x", "A"), ("https://notgov.com", "D"), ("https://www.thestar.com.my/n", "C"),
+        ("https://m.facebook.com/p", "E"), ("https://forum.lowyat.net/t", "E"), ("https://www.linkedin.com/company/x", "E"), ("https://example.com", "D"),
+    ],
+)
+def test_tier_of(url: str, tier: str) -> None:
+    assert inv.tier_of(inv.host_of(url)) == tier
+
+
+def test_same_site_needs_a_real_subdomain() -> None:
+    assert inv.same_site("invest.troweprice.com", "troweprice.com")
+    assert not inv.same_site("troweprice-my.com", "troweprice.com")
+    assert not inv.same_site("mytroweprice.com", "troweprice.com")

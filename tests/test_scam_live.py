@@ -1,7 +1,7 @@
 """Phase 4 curated evaluation set (spec §13) against real Nemotron (and Gemma for the screenshot).
 Rerun after any change to the pipeline, ranking or rules. Run: pytest -m live -k scam_live
 
-H1: extraction only. Text inputs make no Tavily calls."""
+Each scenario runs real Tavily research: up to 8 searches + 1 extract (about 10 credits)."""
 
 from pathlib import Path
 from typing import Any
@@ -41,6 +41,8 @@ def run(engine: Engine, text: str | None = None, screenshot: bytes | None = None
             "orgs": " | ".join(e.canonical for e in d.entities if e.type == "org"),
             "claims": {c.category.value for c in d.claims},
             "signals": {s.kind for s in d.signals},
+            "evidence": [(e.tier.value, e.direction.value, e.host, e.quote) for e in d.evidence],
+            "steps": [s["text"] for s in d.investigation.steps],
         }
 
 
@@ -55,6 +57,8 @@ def test_a_known_warning(engine: Engine) -> None:
     assert ("phone", "601100001234") in got["entities"]
     assert "regulatory" in got["claims"]
     assert got["signals"] == {"payment_pressure", "guaranteed_returns"}
+    # H2 gate: a regulator source is attached automatically.
+    assert any(tier == "A" and direction == "warns" for tier, direction, _, _ in got["evidence"]), got["steps"]
 
 
 def test_b_clone_company(engine: Engine) -> None:
