@@ -1,4 +1,6 @@
+import base64
 import logging
+import secrets
 from collections.abc import AsyncIterator, Callable, Iterator
 from contextlib import asynccontextmanager
 from datetime import date
@@ -99,6 +101,7 @@ def investigation_out(detail: inv.InvestigationDetail) -> dict[str, Any]:
         "claims": rows(detail.claims),
         "evidence": rows(detail.evidence),
         "signals": rows(detail.signals),
+        "graph": inv.graph(detail),
     }
 
 
@@ -131,6 +134,28 @@ def create_app(
         app.state.db.dispose()
 
     app = FastAPI(title="Continuum", lifespan=lifespan)
+
+    @app.middleware("http")
+    async def password(request: Request, call_next: Callable[[Request], Any]) -> Any:
+        """With APP_PASSWORD set (a public server), everything needs HTTP Basic auth, any username.
+        /mcp has no password for Hermes, so it only answers this machine."""
+        expected = settings.app_password.get_secret_value()
+        if not expected:
+            return await call_next(request)
+        if request.url.path.startswith("/mcp"):
+            if request.client and request.client.host in ("127.0.0.1", "::1"):
+                return await call_next(request)
+            return error(403, "forbidden", "MCP only answers this machine.")
+        scheme, _, encoded = request.headers.get("authorization", "").partition(" ")
+        try:
+            given = base64.b64decode(encoded).decode().partition(":")[2] if scheme.lower() == "basic" else ""
+        except (ValueError, UnicodeDecodeError):
+            given = ""
+        if secrets.compare_digest(given.encode(), expected.encode()):
+            return await call_next(request)
+        response = error(401, "unauthorized", "Password needed.")
+        response.headers["WWW-Authenticate"] = 'Basic realm="Continuum"'
+        return response
     app.mount("/mcp", mcp_app)
 
     @app.exception_handler(eng.NotFound)

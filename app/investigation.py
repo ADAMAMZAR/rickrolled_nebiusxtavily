@@ -12,6 +12,7 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlparse
 from uuid import UUID
 
@@ -510,6 +511,51 @@ def assess(signals: list[RiskSignal], evidence: list[Evidence]) -> tuple[int, Ri
     identity = Identity.mismatch if kinds & {"official_domain_mismatch", "contact_mismatch"} \
         else Identity.verified if "official_identity_confirmed" in kinds else Identity.unverified
     return score, level, confidence, identity
+
+
+EDGE_OF = {Direction.supports: "supports", Direction.contradicts: "contradicts", Direction.warns: "warned_by"}
+
+
+def graph(detail: InvestigationDetail) -> dict[str, list[dict[str, Any]]]:
+    """§7.6, built on read: the message, its names and claims, official domains and sources as nodes.
+    Neutral evidence is left out. Edges from evidence carry its id, so the page can open its card."""
+    nodes: list[dict[str, Any]] = [{"id": "message", "type": "message", "label": "Message"}]
+    edges: list[dict[str, Any]] = []
+    official = {e.official_value: e for e in detail.evidence if e.official_type == EntityType.domain and e.official_value}
+    vouched = {e.entity_id for e in detail.evidence if e.tier == Tier.b and e.direction == Direction.supports}
+
+    def edge(source: str, target: str, kind: str, evidence_id: UUID | None = None) -> None:
+        edges.append({"id": f"{source}>{target}:{kind}", "source": source, "target": target, "kind": kind,
+                      "evidence_id": str(evidence_id) if evidence_id else None})
+
+    for e in detail.entities:
+        flag = None
+        if e.type == EntityType.domain and official:
+            ok = e.id in vouched or any(same_site(e.canonical, d) for d in official)
+            flag = "verified" if ok else "mismatch"
+        nodes.append({"id": str(e.id), "type": e.type.value, "label": e.value, "flag": flag})
+        kind = ("names" if is_regulator(e) else "claims_to_be") if e.type in (EntityType.org, EntityType.person) \
+            else "uses_domain" if e.type in (EntityType.domain, EntityType.url) else "uses_contact"
+        edge("message", str(e.id), kind)
+    for c in detail.claims:
+        nodes.append({"id": str(c.id), "type": "claim", "label": c.text, "flag": c.verdict.value})
+        edge("message", str(c.id), "claims")
+    submitted = {e.canonical: str(e.id) for e in detail.entities if e.type == EntityType.domain}
+    for value, ev in official.items():
+        node = submitted.get(value)
+        if node is None:
+            node = f"official:{value}"
+            nodes.append({"id": node, "type": "official", "label": value, "flag": "verified"})
+        edge(str(ev.entity_id), node, "official_domain", ev.id)
+    sources: set[str] = set()
+    for ev in detail.evidence:
+        if ev.direction == Direction.neutral or ev.official_type:
+            continue
+        if ev.url not in sources:
+            sources.add(ev.url)
+            nodes.append({"id": f"src:{ev.url}", "type": "source", "label": ev.host, "flag": ev.tier.value, "url": ev.url})
+        edge(str(ev.claim_id or ev.entity_id), f"src:{ev.url}", EDGE_OF[ev.direction], ev.id)
+    return {"nodes": nodes, "edges": edges}
 
 
 def _verify(session: Session, investigation: Investigation) -> list[Claim]:

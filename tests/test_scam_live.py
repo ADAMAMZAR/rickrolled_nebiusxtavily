@@ -5,6 +5,7 @@ Each scenario runs real Tavily research: up to 8 searches + 1 extract (about 10 
 
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 import pytest
 from sqlalchemy import Engine
@@ -13,6 +14,7 @@ from sqlmodel import Session
 from app import investigation as inv
 from app.config import settings
 from app.connectors.tavily import TavilyClient
+from app.hermes import HermesClient
 from app.llm import LLMClient
 
 pytestmark = [
@@ -47,6 +49,7 @@ def run(engine: Engine, text: str | None = None, screenshot: bytes | None = None
                      and all(f["evidence_ids"] or f["signal_ids"] for f in d.investigation.findings),
             "evidence": [(e.tier.value, e.direction.value, e.host, e.quote) for e in d.evidence],
             "steps": [s["text"] for s in d.investigation.steps],
+            "graph": {e["kind"] for e in inv.graph(d)["edges"]},
         }
 
 
@@ -73,6 +76,9 @@ def test_b_clone_company(engine: Engine) -> None:
     assert {"identity", "regulatory"} <= got["claims"]
     assert "payment_pressure" in got["signals"]
     assert got["identity"] == "mismatch" and got["cited"]
+    # H4: the impersonation path in the graph
+    assert {"claims_to_be", "official_domain", "uses_domain"} <= got["graph"]
+    assert got["graph"] & {"warned_by", "contradicts"}
 
 
 def test_c_legitimate(engine: Engine) -> None:
@@ -105,3 +111,14 @@ def test_screenshot_is_read(engine: Engine) -> None:
     got = run(engine, screenshot=(SCENARIOS / "d_sparse.png").read_bytes())
     assert "rm100 registration fee" in " ".join(got["text"].split()).casefold()
     assert "payment_pressure" in got["signals"]
+
+
+@pytest.mark.skipif(not settings.hermes_api_key.get_secret_value(), reason="HERMES_API_KEY not set")
+def test_hermes_investigates_from_chat() -> None:
+    """§1 demo through Hermes (the same profile serves Telegram). Writes an investigation, so start Continuum
+    with DATABASE_URL on a scratch file. Needs: uvicorn app.main:app, and hermes -p continuum gateway run."""
+    message = "Is this legit?\n\n" + sample("a_known_warning.txt")
+    reply = HermesClient(settings).ask(message, conversation=f"scam-{uuid4()}")
+    assert "mcp__continuum__investigate" in reply.tools_called, reply
+    assert "investigate.html#" in reply.text and ("HIGH" in reply.text or "CRITICAL" in reply.text), reply.text
+    assert "scammer" not in reply.text.casefold()

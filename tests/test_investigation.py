@@ -641,3 +641,67 @@ def test_us_spelling_of_behaviours_is_read() -> None:
     """Nemotron sometimes writes "behaviors"; ignoring it silently lost every pressure tactic."""
     got = ScamExtraction.model_validate({"behaviors": [{"kind": "payment_pressure", "quote": "pay today"}]})
     assert [b.kind for b in got.behaviours] == ["payment_pressure"]
+
+
+# --- H4: graph, investigate tool, password ---
+
+
+def test_graph_shows_the_clone_path(client: TestClient, researched: FakeWeb) -> None:
+    got = investigate(client, text=MESSAGE)
+    nodes = {n["id"]: n for n in got["graph"]["nodes"]}
+    edges = {(nodes[e["source"]]["label"], e["kind"], nodes[e["target"]]["label"]) for e in got["graph"]["edges"]}
+    assert ("Message", "claims_to_be", ORG) in edges
+    assert ("Message", "names", "Securities Commission") in edges  # a regulator the message names, not its identity
+    assert (ORG, "official_domain", "troweprice.com") in edges
+    assert (ORG, "warned_by", "bnm.gov.my") in edges
+    assert next(n for n in nodes.values() if n["label"] == "troweprice-my-invest.com")["flag"] == "mismatch"
+    evidence = {e["id"] for e in got["evidence"]}
+    assert all(e["evidence_id"] in evidence for e in got["graph"]["edges"] if e["evidence_id"])
+    assert all(e["source"] in nodes and e["target"] in nodes for e in got["graph"]["edges"])
+
+
+def test_investigate_tool_answers_with_findings_and_links(
+    db_url: str, uploads: Path, llm: ScamLLM, researched: FakeWeb
+) -> None:
+    from tests.test_mcp_tools import MCP
+
+    app = create_app(db_url, get_llm=lambda: llm, get_web=lambda: researched)  # type: ignore[arg-type, return-value]
+    with TestClient(app, base_url="http://127.0.0.1:8000") as http:
+        mcp = MCP(http)
+        mcp.rpc("initialize", {"protocolVersion": "2025-06-18", "capabilities": {},
+                               "clientInfo": {"name": "test", "version": "0"}})
+        got = mcp.call("investigate", text=MESSAGE)
+    assert (got["risk_level"], got["confidence"], got["identity"]) == ("CRITICAL", "HIGH", "mismatch")
+    assert got["dashboard"].startswith("http://127.0.0.1:8000/investigate.html#")
+    sources = {u for f in got["findings"] for u in f["sources"]}
+    assert ALERT in sources and "the message" in sources  # the pressure tactic cites the message itself
+    assert got["next_steps"]
+
+
+def test_investigate_tool_still_running_gives_the_link(
+    db_url: str, uploads: Path, llm: ScamLLM, researched: FakeWeb, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app import mcp_tools
+    from tests.test_mcp_tools import MCP
+
+    monkeypatch.setattr(mcp_tools, "INVESTIGATE_WAIT", 0)
+    app = create_app(db_url, get_llm=lambda: llm, get_web=lambda: researched)  # type: ignore[arg-type, return-value]
+    with TestClient(app, base_url="http://127.0.0.1:8000") as http:
+        mcp = MCP(http)
+        mcp.rpc("initialize", {"protocolVersion": "2025-06-18", "capabilities": {},
+                               "clientInfo": {"name": "test", "version": "0"}})
+        got = mcp.call("investigate", text=MESSAGE)
+        assert got["status"] == "still checking" and "investigate.html#" in got["dashboard"]
+        assert mcp.call("investigate", text=" ")["error"].endswith("Paste a message, a link or a screenshot.")
+        time.sleep(0.5)  # let the background run finish before the test database goes away
+
+
+def test_app_password(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    from pydantic import SecretStr
+
+    monkeypatch.setattr(settings, "app_password", SecretStr("s3cret"))
+    assert client.get("/api/investigations").status_code == 401
+    assert client.get("/investigate.html").headers["www-authenticate"].startswith("Basic")
+    assert client.get("/api/investigations", auth=("anyone", "wrong")).status_code == 401
+    assert client.get("/api/investigations", auth=("anyone", "s3cret")).status_code == 200
+    assert client.post("/mcp/", json={}).status_code == 403  # TestClient isn't this machine's loopback

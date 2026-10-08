@@ -15,7 +15,7 @@ class Settings(BaseSettings):
 
     hermes_api_url: str = "http://127.0.0.1:8642/v1"
     hermes_api_key: SecretStr = SecretStr("")  # written by scripts/setup_hermes.py
-    hermes_timeout: float = 120
+    hermes_timeout: float = 180  # the investigate tool alone may wait ~100s
     # Telegram via Hermes. Read only by scripts/setup_hermes.py, which copies them into the Hermes profile.
     telegram_bot_token: SecretStr = SecretStr("")
     telegram_allowed_users: str = ""  # comma-separated numeric Telegram user ids
@@ -26,6 +26,8 @@ class Settings(BaseSettings):
     google_token_file: str = "./data/google_token.json"  # written when you connect; never commit it
     sync_lookback_days: int = 7  # how far back the first email sync reads
     uploads_dir: str = "./data/uploads"  # investigation screenshots; never served publicly
+    public_url: str = "http://127.0.0.1:8000"  # where people open the dashboard; links in chat use it
+    app_password: SecretStr = SecretStr("")  # set on a public server: pages and /api need it (any username)
     timezone: str = "Asia/Kuala_Lumpur"
     stale_days: int = 4  # days without an update before an undated loop needs attention
     database_url: str = "sqlite:///./data/continuum.db"
