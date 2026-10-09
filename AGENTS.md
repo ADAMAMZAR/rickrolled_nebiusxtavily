@@ -5,8 +5,8 @@ Hackathon: Nebius x NVIDIA, Personal AI track. **Hermes Agent + NVIDIA Nemotron 
 
 **Specs (source of truth):** read the current phase before any work. If reality differs (APIs, SDKs), update the spec as well.
 - [continuum_phase_1.md](continuum_phase_1.md): Core: chat → open loops → dashboard. *(done 2026-10-01)*
-- [continuum_phase_2.md](continuum_phase_2.md): Proactive: attention rules, snooze, Hermes cron briefing, Telegram *(2 Done Checklist boxes still open)*
-- [continuum_phase_3.md](continuum_phase_3.md): Connected: web watch + lookup (Tavily), Gmail/Calendar, auto-resolve from email, approval-gated actions *(code done; 6 live-check boxes open, run separately under its tracking issue)*
+- [continuum_phase_2.md](continuum_phase_2.md): Proactive: attention rules, snooze, Hermes cron briefing, Telegram *(done 2026-10-09)*
+- [continuum_phase_3.md](continuum_phase_3.md): Connected: web watch + lookup (Tavily), Gmail/Calendar, auto-resolve from email, approval-gated actions *(done 2026-10-09)*
 - [continuum_phase_4.md](continuum_phase_4.md): ScamGraph: investigate a suspicious message/URL/screenshot with Tavily evidence, fixed-rule risk score, evidence graph **← current phase** *(code done 2026-10-08; Telegram check, deploy and demo boxes run separately under issue #4)*
 
 Start a phase only after every box in the previous phase's Done Checklist is checked. When a phase is finished, move the "current phase" marker.

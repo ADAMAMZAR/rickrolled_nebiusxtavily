@@ -130,6 +130,9 @@ def test_goals_inspect_and_resolve(mcp: MCP, llm: FakeLLM) -> None:
     assert mcp.call("resolve_loop", loop_id=loop_id) == {"resolved": "Wait for Sarah's response"}
     remaining = mcp.call("list_open_loops")["groups"][0]["loops"]
     assert [l["title"] for l in remaining] == ["Finish portfolio"]
+    everything = mcp.call("list_open_loops", include_resolved=True)["groups"][0]["loops"]  # e.g. a thank-you draft
+    assert [(l["title"], l.get("status")) for l in everything] == [
+        ("Wait for Sarah's response", "resolved"), ("Finish portfolio", None)]
 
 
 @pytest.mark.usefixtures("on_friday")
@@ -248,3 +251,23 @@ def test_set_person_email_from_chat(mcp: MCP, llm: FakeLLM) -> None:
     loop_id = mcp.call("list_open_loops")["groups"][0]["loops"][0]["id"]
     assert mcp.call("inspect_loop", loop_id=loop_id)["contact_email"] == "sarah@nvidia.com"
     assert "isn't an email address" in mcp.call("set_person_email", name="Sarah", email="sarah")["error"]
+
+
+def test_investigate_reply_is_built_in_code() -> None:
+    """Hermes relays this word for word, so the links and the no-verdict wording can't be lost (Telegram check)."""
+    from app.mcp_tools import _reply
+
+    reply = _reply({
+        "risk_level": "HIGH", "confidence": "HIGH",
+        "findings": [{"text": "BNM's alert list names FalconRise Capital.", "sources": ["https://www.bnm.gov.my/x"]},
+                     {"text": "It pushes you to pay today.", "sources": ["the message"]}],
+        "next_steps": ["Don't transfer money."],
+        "dashboard": "http://127.0.0.1:8000/investigate.html#1",
+    })
+    assert reply.startswith("Risk level: HIGH, confidence HIGH")
+    assert "- BNM's alert list names FalconRise Capital. Source: https://www.bnm.gov.my/x" in reply
+    assert "- It pushes you to pay today. Source: the message" in reply
+    assert "- Don't transfer money." in reply and reply.endswith("Details: http://127.0.0.1:8000/investigate.html#1")
+    assert "scam" not in reply.lower()
+    assert _reply({"risk_level": "INSUFFICIENT_EVIDENCE", "confidence": "LOW", "dashboard": "d"}).startswith(
+        "Risk level: not enough evidence, confidence LOW")

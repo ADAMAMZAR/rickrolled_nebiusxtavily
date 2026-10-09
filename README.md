@@ -22,6 +22,13 @@ Built for the Nebius x NVIDIA Global AI Hackathon, **Personal AI** track.
 - **Telegram.** The same assistant on your phone: capture loops on the go, ask what's urgent. [Setup](#telegram-optional).
 - **Daily briefing.** Every morning, a short Telegram message with what needs you. Reply to it to snooze, resolve or draft. [Setup](#daily-briefing-optional-needs-telegram).
 
+### When loops close on their own
+
+- **Email.** Give Continuum someone's address (*"Sarah's email is sarah@nvidia.com"*) and it reads new mail from them, and only them, every 10 minutes. A reply that answers your loop closes it, a new deadline becomes a task, and a meeting time becomes a calendar proposal. [Setup](#google-setup-optional).
+- **Web.** Say *"keep an eye on the hackathon results"* and Continuum searches for it once a day with Tavily. Ask *"when does the Google STEP application close?"* and it looks it up, with the link. What the web says is only ever a proposal.
+- **Your yes first.** Calendar events, Gmail drafts (*"draft a thank-you reply to Sarah"*) and web findings wait under **Pending actions**, or on Telegram, until you approve. Nothing is ever sent.
+- **Undo.** Each loop's History shows what changed it (you, chat, email or the web), with Undo on automatic changes.
+
 ### ScamGraph: check who you're dealing with
 
 Before you pay or share details, paste the suspicious message, a link or a screenshot on **Investigate** (`/investigate.html`), or ask in chat or on Telegram: *"Is this legit?"* plus the message.
@@ -54,6 +61,10 @@ flowchart LR
     I -->|extract, plan, check, summary| N
     I -->|search + extract| T[Tavily]
     I --> DB
+    SYNC[sync.py<br/>Hermes cron, every 10 min] --> E
+    SYNC -->|mail from linked people| GM[Gmail]
+    SYNC -->|watched loops| T
+    E -->|after your yes| GA[Gmail drafts / Calendar]
 ```
 
 - **Continuum** (one Python process): FastAPI serves the dashboard, a REST API, and an MCP server at `/mcp/`. The continuity engine (`app/engine.py`) owns extraction, goal linking, dedup, the attention rules and storage.
@@ -157,7 +168,7 @@ The job runs `scripts/sync.py` without the LLM agent. Telegram only gets a messa
 Lets Continuum read email from people you're waiting on and, with your yes, save Gmail drafts and calendar events. It never sends email.
 
 1. In [Google Cloud Console](https://console.cloud.google.com/), create a project and enable the **Gmail API** and the **Google Calendar API**.
-2. Under **Google Auth Platform**, set the audience to **External** and add your Google account as a **test user**.
+2. Under **Google Auth Platform → Audience**, set the user type to **External**, leave the status at **Testing**, and under **Test users** add the Google account you'll sign in with. Without it, Google stops sign-in with *"Access blocked … Error 403: access_denied"* (the app is in testing and you're not a tester).
 3. Under **Clients**, create a client of type **Desktop app**. Download its JSON and save it as `data/client_secret.json`.
 4. In the dashboard, open **Settings** and click **Connect Google**. Your browser opens Google's sign-in.
 5. Give someone's address, in chat (*"Sarah's email is sarah@nvidia.com"*) or in a loop's **Contact email**. From then on, `python scripts/sync.py` (or the cron job above) reads their new email and updates their loops. The first run reads the last 7 days (`SYNC_LOOKBACK_DAYS`).

@@ -9,3 +9,4 @@ __pycache__/
 .vscode/
 data/uploads/
 data/tavily_cache/
+.gstack/

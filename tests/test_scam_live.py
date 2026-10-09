@@ -3,6 +3,7 @@ Rerun after any change to the pipeline, ranking or rules. Run: pytest -m live -k
 
 Each scenario runs real Tavily research: up to 8 searches + 1 extract (about 10 credits)."""
 
+import re
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -121,4 +122,6 @@ def test_hermes_investigates_from_chat() -> None:
     reply = HermesClient(settings).ask(message, conversation=f"scam-{uuid4()}")
     assert "mcp__continuum__investigate" in reply.tools_called, reply
     assert "investigate.html#" in reply.text and ("HIGH" in reply.text or "CRITICAL" in reply.text), reply.text
-    assert "scammer" not in reply.text.casefold()
+    assert "Source: http" in reply.text, reply.text  # findings keep their links (Telegram check 2026-10-09)
+    verdict = re.search(r"\ba scam\b|scammer|fraudster|criminal", reply.text, re.IGNORECASE)
+    assert not verdict, reply.text  # no verdict of the model's own (it once added "very likely a scam")

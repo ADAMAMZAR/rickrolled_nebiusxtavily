@@ -182,7 +182,7 @@ Flow: **propose → user yes → execute → log**.
 
 ## 9. Google Setup
 
-- OAuth "Desktop app" client. The user creates it in Google Cloud Console; the README has step-by-step instructions with screenshots.
+- OAuth "Desktop app" client. The user creates it in Google Cloud Console; the README has step-by-step instructions (text, no screenshots: Google's console changes often).
 - Scopes: `gmail.readonly`, `gmail.compose` (drafts), `calendar.events`. Nothing else.
 - Token saved to `data/google_token.json` (gitignored).
 - UI: **Connect Google** (opens the local OAuth flow) and **Disconnect**, which deletes the token and revokes it.
@@ -249,42 +249,43 @@ Web before Google: Tavily needs one API key and no OAuth, so it's lower risk, an
 3. PendingAction + approve/reject + MCP tools + approval UI (shared by web and Google).
    *Done 2026-10-03. `list_pending_actions` added (§8). Approve claims the proposal with one conditional UPDATE, so a double click or dashboard + Telegram at once runs it once. A failed approve is marked `failed` and changes nothing. The same change proposed twice for a loop is stored once; resolved loops get no proposals; `source_url` must be http(s). Checked live 2026-10-03 (dashboard + Hermes chat, not Telegram): Approve in the strip → "resolved by the web" with Undo; "anything waiting for my OK?" → `list_pending_actions`, "yes, do it" → `approve_action`, "no" → `reject_action`.*
 4. **Tavily gate:** one real search through `app/connectors/tavily.py` from a scratch script.
-   *Code done 2026-10-03 (API checked against docs.tavily.com, matches §7). Gate: `pytest -m live -k tavily` (1 credit). **Not passed yet: needs `TAVILY_API_KEY` in `.env`.***
+   *Code done 2026-10-03 (API checked against docs.tavily.com, matches §7). Gate: `pytest -m live -k tavily` (1 credit). Passed 2026-10-09.*
 5. `web_lookup` + `propose_loop_update`, then web watch in `sync.py` (mocked tests, then real).
-   *Done 2026-10-03 except a real Tavily search (no key yet). MCP: `web_lookup`, `propose_loop_update`, `watch_loop`. REST: watch routes + `GET /api/web/status`. UI: Watch the web form in the loop detail, "watching the web" in the list. `scripts/sync.py` searches each watched open loop at most once a day (marked checked before the search, so a failure waits until tomorrow) and prints new proposals and failed searches, or nothing. Each new result is extracted alone with `WEB_NOTE`, so a finding keeps its page; only that loop's resolve or new due count. A page counts as seen once it made a proposal for that loop (nothing else is stored), so pages with no finding are re-read while they stay in the week's results. Only open loops are searched: resolving stops the watch, reopening resumes it. Checked live 2026-10-03: real Nemotron on canned pages (`tests/test_web_live.py`: winners → resolve, new date → due, unrelated → nothing); real Hermes: "keep an eye on the hackathon results" → `watch_loop`, a question → `web_lookup`. `sync.py` logs to stderr: check in step 6 whether Hermes delivers stderr too.*
+   *Done 2026-10-03; real Tavily search checked 2026-10-09. MCP: `web_lookup`, `propose_loop_update`, `watch_loop`. REST: watch routes + `GET /api/web/status`. UI: Watch the web form in the loop detail, "watching the web" in the list. `scripts/sync.py` searches each watched open loop at most once a day (marked checked before the search, so a failure waits until tomorrow) and prints new proposals and failed searches, or nothing. Each new result is extracted alone with `WEB_NOTE`, so a finding keeps its page; only that loop's resolve or new due count. A page counts as seen once it made a proposal for that loop (nothing else is stored), so pages with no finding are re-read while they stay in the week's results. Only open loops are searched: resolving stops the watch, reopening resumes it. Checked live 2026-10-03: real Nemotron on canned pages (`tests/test_web_live.py`: winners → resolve, new date → due, unrelated → nothing); real Hermes: "keep an eye on the hackathon results" → `watch_loop`, a question → `web_lookup`. `sync.py` logs to stderr: check in step 6 whether Hermes delivers stderr too.*
 6. Hermes cron (`no_agent`) runs `sync.py` → Telegram summary.
    *Done 2026-10-06. `setup_hermes.py` writes `continuum_sync.py` into the profile's `scripts/`; it runs `scripts/sync.py` with Continuum's Python, keeps Hermes' Python paths out, and passes UTF-8 through. README has the one `cron create` command. Checked through the real Hermes scheduler with a temporary local-delivery job: a run with nothing to report is silent; a stub's proposal line with non-ASCII text came through intact. Telegram delivery is the same path as the briefing (checked in Phase 2).*
 7. Person linking in extraction + `set_person_email` + UI field.
    *Done 2026-10-06. See §5. REST: `GET /api/people`, `PATCH /api/people/{id}`. UI: Contact email in the loop detail. Checked live: Nemotron reuses a known name ("Sarah" → "Sarah Chen", `tests/test_acceptance_live.py`); real Hermes: "Sarah's email is …" → `set_person_email`.*
 8. **Google gate:** OAuth connect, list the last 5 emails from one address, create one draft, create one event, all from a scratch script.
-   *Code done 2026-10-06: `app/connectors/google.py` (mocked tests) + `scripts/google_gate.py`. **Gate not passed yet: needs your OAuth client (README: Google setup) and your consent in the browser.** In testing mode Google ends the connection after 7 days.*
+   *Code done 2026-10-06: `app/connectors/google.py` (mocked tests) + `scripts/google_gate.py`. Gate passed 2026-10-09 (read 2 emails, saved a draft, created an event). In testing mode Google ends the connection after 7 days, and only accounts under Audience → Test users can sign in (otherwise "Error 403: access_denied"; README step 2 says so).*
 9. `ingest_email` in `sync.py` with mocked tests, then real Gmail.
-   *Code done 2026-10-06 (mocked tests). `engine.sync_email` reads only people with an email and an open loop, fetches all their mail first (a Google error writes nothing), then processes oldest first. `process_message(person=, source=)` shows the model only that person's loops (`EMAIL_NOTE`) and drops any other id. Changes log `by="email"` with the Gmail thread URL as detail and undo. An email that changes nothing isn't stored; `last_sync` doesn't advance if an email couldn't be read, so it's retried. The same error is printed once, not every 10 minutes. The connector now reads the plain-text body (quotes and signature stripped, 4k cap). Also done: `/api/google/status|connect|disconnect|forget`, Settings panel, "✉ Email from … · Open in Gmail", "closed by email", Forget email data (blanks text, keeps Gmail ids so mail isn't re-read). **Real Gmail not checked yet: needs the OAuth client.***
+   *Code done 2026-10-06 (mocked tests). `engine.sync_email` reads only people with an email and an open loop, fetches all their mail first (a Google error writes nothing), then processes oldest first. `process_message(person=, source=)` shows the model only that person's loops (`EMAIL_NOTE`) and drops any other id. Changes log `by="email"` with the Gmail thread URL as detail and undo. An email that changes nothing isn't stored; `last_sync` doesn't advance if an email couldn't be read, so it's retried. The same error is printed once, not every 10 minutes. The connector now reads the plain-text body (quotes and signature stripped, 4k cap). Also done: `/api/google/status|connect|disconnect|forget`, Settings panel, "✉ Email from … · Open in Gmail", "closed by email", Forget email data (blanks text, keeps Gmail ids so mail isn't re-read). Real Gmail checked 2026-10-09 (step 11).*
 10. Google proposals (calendar event, Gmail draft).
    *Code done 2026-10-06 (mocked tests). MCP `propose_calendar_event`, `propose_gmail_draft` (in `tools.include`, SOUL.md rules). Approve now commits the claim before calling Google, so a slow call can't run twice. Drafts to the loop's person reply in their latest email thread. Proposals work on resolved loops (thank-you drafts). Email events (§1 step 3) done 2026-10-06: for emails only, `EMAIL_NOTE` asks for `events` with a stated date and time; malformed or past ones are dropped. Each becomes a `calendar_event` proposal on the loop the email created or touched, printed by `sync.py` as a yes/no line. Checked live 2026-10-06 (`tests/test_email_live.py`, §13's 3 sample emails): the interview reply closes the loop and proposes Oct 8 10:00; "still reviewing, send your transcript by Oct 5" adds a task and keeps the loop open; an FYI email changes nothing. This needed two prompt rules: a date with no year is its next occurrence, and an email resolves a waiting loop only when it gives the answer (still ~1 in 8 runs closes it on the "still reviewing" email; Undo covers it).*
 11. Run the §1 demo end to end. Add a Phase 3 section + Google and Tavily setup to the README.
+   *Done 2026-10-09 on a scratch DB, with a real Gmail account, Calendar, Tavily, Hermes and Telegram (steps 3-6 with "Najmin" instead of Sarah, steps 7-8 with the 2026 Nobel Prize in Literature). The email closed the loop, added "Attend NVIDIA interview" and proposed the Oct 13 10:00 event; one Telegram "yes" created the event and the thank-you draft in the email's thread (Google shows it as `DRAFT` only). Two Hermes fixes came out of it: `list_open_loops(include_resolved)`, so a thank-you draft can find a closed loop and its contact email (Hermes asked for the address before); and `watch_loop` only when the user asks (Hermes had started watching the web for a person's reply after "X's email is …"). The README has text steps, no screenshots. README: "When loops close on their own" section, Google and Tavily setup.*
 
 ---
 
 ## 15. Done Checklist
 
-- [ ] §1 demo works with a real email and a real calendar
-  *Code for every step is in (steps 1-10, including the email's calendar proposal). Needs the OAuth client + Tavily key.*
-- [ ] Only emails from linked people are read (checked in logs)
-  *Code + tests done (`test_only_people_with_an_email_and_an_open_loop_are_read`). Logs check needs real Gmail.*
+- [x] §1 demo works with a real email and a real calendar
+  *Checked live 2026-10-09, see step 11.*
+- [x] Only emails from linked people are read (checked in logs)
+  *Checked 2026-10-09: each sync made one Gmail list query, `from:<linked address> after:<last sync>`, and fetched only the messages it returned.*
 - [x] No email is ever sent; drafts only
   *Checked 2026-10-06: the connector only calls `drafts` (no send endpoint anywhere in `app/` or `scripts/`); `test_draft_is_saved_not_sent`.*
 - [x] Every automatic change shows in the activity timeline and can be undone
-  *Chat, email and web changes all log with undo (tests in `test_activity.py`, `test_email.py`, `test_actions.py`). Checked live for chat and web 2026-10-03; email live check comes with the §1 demo.*
-- [ ] Approve/reject works from Telegram and the dashboard, with no duplicates
-  *Dashboard + Hermes chat checked live (step 3); Google kinds tested offline. Telegram not checked yet.*
-- [ ] Web watch finds a real public update and proposes it; nothing changes without a yes
-  *Code + canned-page live test done (step 5). Needs `TAVILY_API_KEY` for a real search.*
-- [ ] Only watched loops and explicit lookups reach Tavily (checked in logs)
-  *Code + tests done. Logs check needs the Tavily key.*
-- [ ] Disconnect + Forget email data work
-  *Code + offline tests done (revoke, token delete, forget keeps loops). Real revoke needs a connected account.*
+  *Chat, email and web changes all log with undo (tests in `test_activity.py`, `test_email.py`, `test_actions.py`). Checked live for chat and web 2026-10-03, email 2026-10-09 ("resolved by email · source" with Undo).*
+- [x] Approve/reject works from Telegram and the dashboard, with no duplicates
+  *Dashboard + Hermes chat checked live (step 3); Google kinds tested offline. Telegram checked live 2026-10-09: approve resolved the loop, and approving it again is refused ("already done"); reject left the loop open.*
+- [x] Web watch finds a real public update and proposes it; nothing changes without a yes
+  *Checked live 2026-10-09: watched "2026 Nobel Prize in Literature winner" → `sync.py` proposed resolving it from a real result; the loop stayed open until approved, then showed "resolved by web" with the URL and Undo.*
+- [x] Only watched loops and explicit lookups reach Tavily (checked in logs)
+  *Checked 2026-10-09: one `api.tavily.com` request per watched loop per day (a second sync skipped the already-checked loop) and one per `web_lookup`; capture, draft and watch messages made none.*
+- [x] Disconnect + Forget email data work
+  *Checked live 2026-10-09 from Settings: Forget blanked the 1 stored email, kept its loops ("Source deleted."); Disconnect called Google's revoke (200) and deleted the token.*
 - [x] `pytest` passes offline
-  *152 passed, 2026-10-06.*
+  *155 passed, 2026-10-09. `pytest -m live`: 16 passed, 2026-10-09.*
 - [x] No tokens or client secrets in git
   *Checked 2026-10-06: no `.env`, `*.db`, token or client secret files tracked; no key patterns in tracked files.*

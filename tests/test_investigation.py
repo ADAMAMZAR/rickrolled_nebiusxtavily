@@ -200,6 +200,8 @@ def test_unknown_investigation_404(client: TestClient) -> None:
 def test_page_served(client: TestClient) -> None:
     assert "ScamGraph" in client.get("/investigate.html").text
     assert 'href="/investigate.html"' in client.get("/").text
+    # Browsers re-check pages, so an update shows without a hard refresh (2026-10-10: a stale tab hid one).
+    assert client.get("/investigate.html").headers["cache-control"] == "no-cache"
 
 
 # --- H1: extraction ---
@@ -671,11 +673,11 @@ def test_investigate_tool_answers_with_findings_and_links(
         mcp.rpc("initialize", {"protocolVersion": "2025-06-18", "capabilities": {},
                                "clientInfo": {"name": "test", "version": "0"}})
         got = mcp.call("investigate", text=MESSAGE)
-    assert (got["risk_level"], got["confidence"], got["identity"]) == ("CRITICAL", "HIGH", "mismatch")
-    assert got["dashboard"].startswith("http://127.0.0.1:8000/investigate.html#")
-    sources = {u for f in got["findings"] for u in f["sources"]}
-    assert ALERT in sources and "the message" in sources  # the pressure tactic cites the message itself
-    assert got["next_steps"]
+    reply = got["reply"]
+    assert reply.startswith("Risk level: CRITICAL, confidence HIGH")
+    assert "Details: http://127.0.0.1:8000/investigate.html#" in reply
+    assert f"Source: {ALERT}" in reply and "Source: the message" in reply  # the pressure tactic cites the message
+    assert "Next steps:" in reply
 
 
 def test_investigate_tool_still_running_gives_the_link(
@@ -691,7 +693,7 @@ def test_investigate_tool_still_running_gives_the_link(
         mcp.rpc("initialize", {"protocolVersion": "2025-06-18", "capabilities": {},
                                "clientInfo": {"name": "test", "version": "0"}})
         got = mcp.call("investigate", text=MESSAGE)
-        assert got["status"] == "still checking" and "investigate.html#" in got["dashboard"]
+        assert got["reply"].startswith("Still checking.") and "investigate.html#" in got["reply"]
         assert mcp.call("investigate", text=" ")["error"].endswith("Paste a message, a link or a screenshot.")
         time.sleep(0.5)  # let the background run finish before the test database goes away
 
