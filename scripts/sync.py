@@ -7,12 +7,10 @@ open loops. Without Google connected or TAVILY_API_KEY, that part is skipped.
   python scripts/sync.py
 """
 
-import logging
-
 from sqlmodel import Session
 
 from app import engine as eng
-from app.config import settings
+from app.config import settings, setup_logging
 from app.connectors import google
 from app.connectors.google import GoogleClient, GoogleError
 from app.connectors.tavily import TavilyClient
@@ -21,7 +19,7 @@ from app.llm import LLMClient
 
 
 def main() -> None:
-    logging.basicConfig(level=settings.log_level)
+    setup_logging(settings.log_level)
     if not (google.connected(settings) or eng.web_enabled()):
         return
     db = create_db_engine(settings.database_url)

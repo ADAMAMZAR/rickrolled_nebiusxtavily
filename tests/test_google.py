@@ -1,6 +1,7 @@
 """Google connector with a fake HTTP transport: no real account is touched."""
 
 import base64
+import logging
 import json
 from collections.abc import Callable
 from datetime import datetime
@@ -168,3 +169,15 @@ def test_a_damaged_token_is_clear(tmp_path: Path) -> None:
     settings = Settings(_env_file=None, google_token_file=str(token))
     with pytest.raises(GoogleError, match="is damaged. Delete it, then connect again"):
         GoogleClient.from_settings(settings)
+
+
+def test_logs_never_hold_the_gmail_query(caplog: pytest.LogCaptureFixture) -> None:
+    """httpx logs every request URL; a Gmail search's ?q= holds the sender's address (privacy, spec §12)."""
+    from app.config import setup_logging
+
+    setup_logging("INFO")
+    url = httpx.URL("https://gmail.googleapis.com/gmail/v1/users/me/messages", params={"q": "from:sarah@nvidia.com"})
+    with caplog.at_level("INFO"):
+        logging.getLogger("httpx").info('HTTP Request: %s %s "%s %d %s"', "GET", url, "HTTP/1.1", 200, "OK")
+    assert "gmail.googleapis.com/gmail/v1/users/me/messages" in caplog.text
+    assert "sarah" not in caplog.text and "q=" not in caplog.text

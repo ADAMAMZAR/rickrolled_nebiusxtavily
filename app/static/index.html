@@ -329,7 +329,8 @@ async function loadAttention() {
 
 function snoozeMenu(id, small = false) {
   const snooze = (d) => act(`/api/loops/${id}/snooze`, "POST", { until: isoDay(d) });
-  const picks = [["Tomorrow", fromToday(1)], ["In 3 days", fromToday(3)], ["Next Monday", nextMonday()]];
+  const picks = [["Tomorrow", fromToday(1)], ["In 3 days", fromToday(3)], ["Next Monday", nextMonday()]]
+    .filter(([, d], i, all) => all.findIndex(([, e]) => isoDay(e) === isoDay(d)) === i);  // Fri: 3 days = Monday
   return h("details", { class: "menu" },
     h("summary", { class: small ? "btn small" : "btn" }, "Snooze"),
     h("div", { class: "menu-pop" },

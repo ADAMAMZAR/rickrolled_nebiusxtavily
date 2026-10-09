@@ -1,3 +1,5 @@
+import logging
+
 from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -35,3 +37,15 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+
+def setup_logging(level: str) -> None:
+    logging.basicConfig(level=level)
+    logging.getLogger("httpx").addFilter(_drop_query)
+
+
+def _drop_query(record: logging.LogRecord) -> bool:
+    """httpx logs each request URL. A query string can hold personal data (Gmail's from:<address>): cut it."""
+    if isinstance(record.args, tuple) and len(record.args) > 1:
+        record.args = (record.args[0], str(record.args[1]).split("?", 1)[0], *record.args[2:])
+    return True

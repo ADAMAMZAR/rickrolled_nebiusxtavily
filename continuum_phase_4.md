@@ -387,7 +387,7 @@ Wording follows §2: no "scam" verdict label, just the level and its signals.
 
 ## 12. Privacy and Security
 
-- **Logs** contain ids, counts and step names, never message text, quotes or queries.
+- **Logs** contain ids, counts and step names, never message text, quotes or queries. httpx logs each request URL, so `setup_logging` cuts query strings (a Gmail search holds the sender's address).
 - **Uploads** go to `data/uploads/` (gitignored, not served by `StaticFiles`). Deleting an investigation deletes its file.
 - **What goes where:**
   - **Tavily** gets search queries (entity names, domains, phones) and the submitted URL.
@@ -544,6 +544,7 @@ Every milestone ends at its gate. P1 starts only after the full P0 demo works.
    - Demo video, pitch, Devpost.
    **Gate:** the §1 demo runs end to end from the page **and** from Telegram, with no hand-edited data.
    *In progress 2026-10-08. Deploy is held: someone else owns the VM (§0.2).*
+   *Page half checked 2026-10-10 with scenario A, nothing hand-edited: live steps, HIGH / confidence HIGH / score 70, 3 cited findings, graph with `bnm.gov.my` "warned by", claim explorer. Gap: "fully licensed by Bank Negara Malaysia" shows "No evidence" although BNM's alert list names the sender; §1 expects such a claim to be contradicted. Telegram half: see §15.*
    - *`graph()` (§7.6) in `investigation.py`, returned as `graph` by `GET /api/investigations/{id}`. Extra edges beyond §7.6: `claims` (message→claim), and `names` (message→a regulator the message names, so it isn't drawn as the sender's identity). A submitted domain equal to the official one shares its node. Domain nodes are flagged `verified`/`mismatch`.*
    - *`investigate.html`: form, live steps with counts, result (badge, confidence, identity, score, A/B source count, cited findings with source links or the message quote, next steps, the checked text), Cytoscape graph (cdnjs 3.34.3 with SRI, concentric layout: message → names and claims → sources), claim explorer with evidence cards. Clicking an edge or source opens its evidence card; a claim or name opens its section. All untrusted text goes in via `textContent`; only http(s) links are clickable.*
    - *`investigate` MCP tool: runs the pipeline in a thread, waits `INVESTIGATE_WAIT` = 100s (Hermes' MCP tool timeout is 300s), then returns level, confidence, identity, findings with source URLs ("the message" for behaviour signals), next steps and the dashboard link; still running → just the link; failed → `ToolError`. In `tools.include`; SOUL.md rules added.*
@@ -581,14 +582,14 @@ Every milestone ends at its gate. P1 starts only after the full P0 demo works.
   *Done 2026-10-08 (H4): checked in Chrome on a live run.*
 - [x] Tavily or Nebius failures degrade as in §6 (cache, insufficient evidence, clear error)
   *Done 2026-10-08: covered by the H2/H3 tests (`test_cache_replays_the_last_good_reply`, `test_no_web_key_skips_research`, `test_failed_search_is_reported`, `test_nebius_error_fails_clearly`); the page shows the failed step and error.*
-- [ ] `investigate` works from chat and Telegram through Hermes
-  *Chat done 2026-10-08 (`test_hermes_investigates_from_chat`, live). Telegram uses the same profile and tools; a real Telegram message is still to send.*
+- [x] `investigate` works from chat and Telegram through Hermes
+  *Chat done 2026-10-08 (`test_hermes_investigates_from_chat`, live). Telegram run 2026-10-09 (scenario A): HIGH in 51s, but Hermes rewrote the result, dropped the source links and added "very likely a scam". Fixed: `investigate` now returns `reply`, built in code (level, confidence, findings with sources, next steps, link), and Hermes sends it word for word; the live test checks for `Source: http` and no verdict words (passed). Confirmed on Telegram 2026-10-10: `investigate` ran (37s) and the reply came through word for word, BNM link included. A re-sent message was once answered from chat memory; SOUL.md now says to check every time.*
 - [x] Scenarios A–E land in their expected bands (`pytest -m live`)
   *Done 2026-10-08: `pytest -m live -k scam_live` 7 passed (A–E, screenshot, Hermes), incl. B's impersonation path in the graph.*
 - [ ] Real Nemotron (Nebius) and Tavily calls shown in the demo
 - [ ] Deployed URL works behind `APP_PASSWORD`, fresh DB, no personal data
 - [x] `pytest` passes offline
-  *254 passed, 2026-10-08.*
+  *256 passed, 2026-10-10.*
 - [x] README + architecture diagram done; no keys, `.db`, uploads or tokens in git
   *Done 2026-10-08 (H4): checked `git ls-files` and the diff.*
 - [ ] Demo video recorded, pitch rehearsed, Devpost submitted

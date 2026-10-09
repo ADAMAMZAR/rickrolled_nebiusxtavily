@@ -19,7 +19,7 @@ from starlette.exceptions import HTTPException
 
 from app import engine as eng
 from app import investigation as inv
-from app.config import settings
+from app.config import settings, setup_logging
 from app.connectors import google
 from app.connectors.google import GoogleClient, GoogleError
 from app.connectors.tavily import TavilyClient
@@ -109,6 +109,16 @@ def action_out(session: Session, a: PendingAction) -> dict[str, Any]:
     return {**a.model_dump(mode="json"), "summary": eng.describe_action(session, a)}
 
 
+class Pages(StaticFiles):
+    """The dashboard files. Browsers re-check them on each load (an unchanged file is a cheap 304),
+    so an update shows up without a hard refresh."""
+
+    def file_response(self, *args: Any, **kwargs: Any) -> Response:
+        response = super().file_response(*args, **kwargs)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
 def create_app(
     database_url: str | None = None,
     get_llm: Callable[[], Completer] | None = None,
@@ -117,7 +127,7 @@ def create_app(
     get_google: Callable[[], GoogleClient] | None = None,
 ) -> FastAPI:
     """get_llm / get_hermes / get_web / get_google are factories, so a missing key only errors when it's needed."""
-    logging.basicConfig(level=settings.log_level)
+    setup_logging(settings.log_level)
     get_hermes = get_hermes or default_hermes
     get_google = get_google or (lambda: GoogleClient.from_settings(settings))
     get_llm = get_llm or (lambda: LLMClient(settings))
@@ -340,7 +350,7 @@ def create_app(
     def forget_email(session: Session = Depends(get_session)) -> dict[str, int]:
         return {"forgotten": eng.forget_email_data(session)}
 
-    app.mount("/", StaticFiles(directory=STATIC, html=True), name="ui")
+    app.mount("/", Pages(directory=STATIC, html=True), name="ui")
     return app
 
 
