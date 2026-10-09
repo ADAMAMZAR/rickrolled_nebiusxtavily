@@ -61,3 +61,50 @@ def test_live_tavily_search() -> None:
     """The Tavily gate: one real search (1 credit)."""
     found = TavilyClient(settings).search("NVIDIA Nemotron", max_results=1)
     assert found.results and found.results[0].url.startswith("http")
+
+
+def test_extract_and_include_domains() -> None:
+    seen: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(json.loads(request.content))
+        if request.url.path == "/extract":
+            return httpx.Response(200, json={"results": [{"url": "https://a.com", "raw_content": "Hello"}],
+                                             "failed_results": [{"url": "https://b.com", "error": "timeout"}]})
+        return httpx.Response(200, json=REPLY)
+
+    tavily = client(handler)
+    tavily.search("FalconRise Capital", include_domains=["bnm.gov.my"])
+    pages = tavily.extract(["https://a.com", "https://b.com"])
+    assert seen[0]["include_domains"] == ["bnm.gov.my"]
+    assert seen[1] == {"urls": ["https://a.com", "https://b.com"], "extract_depth": "basic", "format": "text"}
+    assert [(p.url, p.raw_content) for p in pages] == [("https://a.com", "Hello")]  # failed URLs left out
+
+
+def test_cache_replays_the_last_good_reply(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    up = [True]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=REPLY) if up[0] else httpx.Response(500)
+
+    tavily = TavilyClient(
+        Settings(_env_file=None, tavily_api_key=SecretStr("tvly-test"), tavily_cache_dir=str(tmp_path)),
+        httpx.MockTransport(handler),
+    )
+    assert tavily.search("q", cached=True).answer == "Oct 15."
+    up[0] = False
+    assert tavily.search("q", cached=True).answer == "Oct 15."  # from the cache
+    with pytest.raises(TavilyError, match="HTTP 500"):
+        tavily.search("q")  # not cached: the error stands
+    with pytest.raises(TavilyError, match="HTTP 500"):
+        tavily.search("other", cached=True)  # nothing kept for this request
+    assert len(list(tmp_path.iterdir())) == 1
+
+
+def test_uncached_calls_write_nothing(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    tavily = TavilyClient(
+        Settings(_env_file=None, tavily_api_key=SecretStr("tvly-test"), tavily_cache_dir=str(tmp_path / "c")),
+        httpx.MockTransport(lambda r: httpx.Response(200, json=REPLY)),
+    )
+    tavily.search("q")
+    assert not (tmp_path / "c").exists()

@@ -1,4 +1,6 @@
+import base64
 import logging
+import secrets
 from collections.abc import AsyncIterator, Callable, Iterator
 from contextlib import asynccontextmanager
 from datetime import date
@@ -7,7 +9,7 @@ from pathlib import Path
 from typing import Annotated, Any, Literal, Protocol
 from uuid import UUID
 
-from fastapi import Depends, FastAPI, Request, Response
+from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, Request, Response, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -16,6 +18,7 @@ from sqlmodel import Session, text
 from starlette.exceptions import HTTPException
 
 from app import engine as eng
+from app import investigation as inv
 from app.config import settings
 from app.connectors import google
 from app.connectors.google import GoogleClient, GoogleError
@@ -87,6 +90,21 @@ def activity_out(a: Activity) -> dict[str, Any]:
     return {**a.model_dump(mode="json", exclude={"undo"}), "can_undo": a.undo is not None}
 
 
+def investigation_out(detail: inv.InvestigationDetail) -> dict[str, Any]:
+    def rows(items: list[Any]) -> list[dict[str, Any]]:
+        return [r.model_dump(mode="json", exclude={"investigation_id"}) for r in items]
+
+    return {
+        **detail.investigation.model_dump(mode="json", exclude={"screenshot_path"}),
+        "has_screenshot": detail.investigation.screenshot_path is not None,
+        "entities": rows(detail.entities),
+        "claims": rows(detail.claims),
+        "evidence": rows(detail.evidence),
+        "signals": rows(detail.signals),
+        "graph": inv.graph(detail),
+    }
+
+
 def action_out(session: Session, a: PendingAction) -> dict[str, Any]:
     return {**a.model_dump(mode="json"), "summary": eng.describe_action(session, a)}
 
@@ -102,7 +120,9 @@ def create_app(
     logging.basicConfig(level=settings.log_level)
     get_hermes = get_hermes or default_hermes
     get_google = get_google or (lambda: GoogleClient.from_settings(settings))
-    mcp = build_mcp(lambda: app.state.db, get_llm or (lambda: LLMClient(settings)), get_web or default_web, get_google)
+    get_llm = get_llm or (lambda: LLMClient(settings))
+    get_web = get_web or default_web
+    mcp = build_mcp(lambda: app.state.db, get_llm, get_web, get_google)
     # Served at /mcp/. Also creates the session manager that lifespan runs.
     mcp_app = mcp.streamable_http_app(streamable_http_path="/", stateless_http=True, json_response=True)
 
@@ -114,6 +134,28 @@ def create_app(
         app.state.db.dispose()
 
     app = FastAPI(title="Continuum", lifespan=lifespan)
+
+    @app.middleware("http")
+    async def password(request: Request, call_next: Callable[[Request], Any]) -> Any:
+        """With APP_PASSWORD set (a public server), everything needs HTTP Basic auth, any username.
+        /mcp has no password for Hermes, so it only answers this machine."""
+        expected = settings.app_password.get_secret_value()
+        if not expected:
+            return await call_next(request)
+        if request.url.path.startswith("/mcp"):
+            if request.client and request.client.host in ("127.0.0.1", "::1"):
+                return await call_next(request)
+            return error(403, "forbidden", "MCP only answers this machine.")
+        scheme, _, encoded = request.headers.get("authorization", "").partition(" ")
+        try:
+            given = base64.b64decode(encoded).decode().partition(":")[2] if scheme.lower() == "basic" else ""
+        except (ValueError, UnicodeDecodeError):
+            given = ""
+        if secrets.compare_digest(given.encode(), expected.encode()):
+            return await call_next(request)
+        response = error(401, "unauthorized", "Password needed.")
+        response.headers["WWW-Authenticate"] = 'Basic realm="Continuum"'
+        return response
     app.mount("/mcp", mcp_app)
 
     @app.exception_handler(eng.NotFound)
@@ -247,6 +289,31 @@ def create_app(
     @app.post("/api/actions/{action_id}/reject")
     def reject(action_id: UUID, session: Session = Depends(get_session)) -> dict[str, Any]:
         return action_out(session, eng.reject_action(session, action_id))
+
+    @app.post("/api/investigations", status_code=201)
+    def create_investigation(
+        background: BackgroundTasks,
+        text: Annotated[str | None, Form()] = None,
+        url: Annotated[str | None, Form()] = None,
+        screenshot: Annotated[UploadFile | None, File()] = None,
+        session: Session = Depends(get_session),
+    ) -> dict[str, Any]:
+        # Read one byte past the limit, so an oversized file is rejected without reading all of it.
+        data = screenshot.file.read(inv.MAX_SCREENSHOT + 1) if screenshot and screenshot.filename else None
+        created = inv.create_investigation(session, text, url, data)
+        background.add_task(inv.run_investigation, app.state.db, created.id, get_llm, get_web)
+        return {"id": str(created.id)}
+
+    @app.get("/api/investigations")
+    def investigations(session: Session = Depends(get_session)) -> list[dict[str, Any]]:
+        return [
+            i.model_dump(mode="json", include={"id", "status", "risk_level", "input_text", "input_url", "created_at"})
+            for i in inv.list_investigations(session)
+        ]
+
+    @app.get("/api/investigations/{investigation_id}")
+    def investigation(investigation_id: UUID, session: Session = Depends(get_session)) -> dict[str, Any]:
+        return investigation_out(inv.get_investigation(session, investigation_id))
 
     @app.get("/api/google/status")
     def google_status(session: Session = Depends(get_session)) -> dict[str, Any]:

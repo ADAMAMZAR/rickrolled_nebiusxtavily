@@ -133,6 +133,146 @@ class Setting(SQLModel, table=True):
     value: str
 
 
+# --- ScamGraph investigations (Phase 4 §5) ---
+
+
+class InvestigationStatus(StrEnum):
+    running = "running"
+    done = "done"
+    failed = "failed"
+
+
+class RiskLevel(StrEnum):
+    low = "LOW"
+    guarded = "GUARDED"
+    elevated = "ELEVATED"
+    high = "HIGH"
+    critical = "CRITICAL"
+    insufficient = "INSUFFICIENT_EVIDENCE"
+
+
+class Confidence(StrEnum):
+    low = "LOW"
+    medium = "MEDIUM"
+    high = "HIGH"
+
+
+class Identity(StrEnum):
+    verified = "verified"
+    mismatch = "mismatch"
+    unverified = "unverified"
+
+
+class EntityType(StrEnum):
+    org = "org"
+    person = "person"
+    domain = "domain"
+    url = "url"
+    phone = "phone"
+    email = "email"
+
+
+class ClaimCategory(StrEnum):
+    identity = "identity"
+    regulatory = "regulatory"
+    investment = "investment"
+    payment = "payment"
+    contact = "contact"
+
+
+class Verdict(StrEnum):
+    supported = "supported"
+    contradicted = "contradicted"
+    suspicious = "suspicious"
+    unverified = "unverified"
+    insufficient = "insufficient_evidence"
+
+
+class Tier(StrEnum):
+    a = "A"  # regulators, government
+    b = "B"  # the organisation's official domain
+    c = "C"  # established news
+    d = "D"  # everything else
+    e = "E"  # social media, forums
+
+
+class Direction(StrEnum):
+    supports = "supports"
+    contradicts = "contradicts"
+    warns = "warns"
+    neutral = "neutral"
+
+
+class Investigation(SQLModel, table=True):
+    """One suspicious message, URL or screenshot, and what was found about it.
+    Committed after every step so the page can show progress."""
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    status: InvestigationStatus = InvestigationStatus.running
+    input_text: str = ""  # pasted text, or text read from the screenshot / URL
+    input_url: str | None = None
+    screenshot_path: str | None = None  # under UPLOADS_DIR, never served publicly
+    risk_level: RiskLevel | None = None
+    score: int | None = None
+    confidence: Confidence | None = None
+    identity: Identity | None = None
+    findings: list[dict[str, Any]] = Field(default_factory=list, sa_column=Column(JSON, nullable=False))
+    next_steps: list[str] = Field(default_factory=list, sa_column=Column(JSON, nullable=False))
+    steps: list[dict[str, Any]] = Field(default_factory=list, sa_column=Column(JSON, nullable=False))
+    error: str | None = None
+    loop_id: UUID | None = Field(default=None, foreign_key="openloop.id")
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+class Entity(SQLModel, table=True):
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    investigation_id: UUID = Field(foreign_key="investigation.id", index=True)
+    type: EntityType
+    value: str  # as written
+    canonical: str  # host without www., digits-only phone, lowercased email
+
+
+class Claim(SQLModel, table=True):
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    investigation_id: UUID = Field(foreign_key="investigation.id", index=True)
+    text: str
+    category: ClaimCategory
+    verdict: Verdict = Verdict.insufficient
+    reason: str = ""
+
+
+class Evidence(SQLModel, table=True):
+    """One web page applied to one claim or entity. The quote must appear in the page text."""
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    investigation_id: UUID = Field(foreign_key="investigation.id", index=True)
+    claim_id: UUID | None = Field(default=None, foreign_key="claim.id")
+    entity_id: UUID | None = Field(default=None, foreign_key="entity.id")
+    url: str
+    title: str = ""
+    host: str
+    tier: Tier
+    direction: Direction
+    quote: str
+    # Set = this page states the org's (entity_id) official domain, phone or email (spec §7.2).
+    official_type: EntityType | None = None
+    official_value: str | None = None  # canonical form; appears in the quote
+    retrieved_at: datetime = Field(default_factory=utcnow)
+
+
+class RiskSignal(SQLModel, table=True):
+    """Backed by an evidence row, or by a quote from the input (behaviour signals)."""
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    investigation_id: UUID = Field(foreign_key="investigation.id", index=True)
+    kind: str
+    weight: int
+    evidence_id: UUID | None = Field(default=None, foreign_key="evidence.id")
+    input_quote: str | None = None
+    reason: str = ""
+
+
 def create_db_engine(url: str) -> Engine:
     """Create the engine and any missing tables. There are no migrations, so an older file fails here."""
     if url.startswith("sqlite:///"):
