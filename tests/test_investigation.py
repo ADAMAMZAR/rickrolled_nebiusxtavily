@@ -7,11 +7,13 @@ from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlmodel import Session
 
+from app import engine as eng
 from app import investigation as inv
 from app.config import settings
 from app.connectors.tavily import ExtractedPage, TavilyError, WebResult, WebSearch
-from app.db import Entity, EntityType
+from app.db import Entity, EntityType, LoopKind
 from app.extraction import SCAM_INVALID, ScamExtraction
 from app.investigation import appears, canonical
 from app.llm import LLMError
@@ -662,6 +664,44 @@ def test_graph_shows_the_clone_path(client: TestClient, researched: FakeWeb) -> 
     assert all(e["source"] in nodes and e["target"] in nodes for e in got["graph"]["edges"])
 
 
+def test_risky_check_becomes_a_loop_in_needs_attention(client: TestClient, researched: FakeWeb, llm: ScamLLM) -> None:
+    got = investigate(client, text=MESSAGE)
+    assert got["risk_level"] == "CRITICAL" and got["loop_title"] == f"Verify {ORG} before paying"
+    loop = client.get(f"/api/loops/{got['loop_id']}").json()
+    assert (loop["kind"], loop["next_action"]) == ("task", got["next_steps"][0])
+    assert loop["source"] | {"id": None, "created_at": None} == {
+        "id": None, "kind": "investigation", "text": MESSAGE, "external_id": None,
+        "url": f"/investigate.html#{got['id']}", "sender": None, "created_at": None,
+    }
+    attention = client.get("/api/attention").json()
+    assert [(a["loop"]["id"], a["reason"]) for a in attention] == [(got["loop_id"], "critical risk, hold off paying")]
+    assert [a["by"] for a in client.get(f"/api/activity?loop_id={got['loop_id']}").json()] == ["check"]
+
+    llm.replies.append(EXTRACTION)
+    again = investigate(client, text=MESSAGE)  # the same message checked twice: still one loop
+    assert again["loop_id"] == got["loop_id"] and len(client.get("/api/loops").json()) == 1
+
+
+def test_low_risk_check_adds_no_loop(client: TestClient) -> None:
+    got = investigate(client, text=MESSAGE)  # no web evidence: GUARDED
+    assert (got["risk_level"], got["loop_id"], got["loop_title"]) == ("GUARDED", None, None)
+    assert client.get("/api/loops").json() == []
+
+
+def test_check_started_from_a_loop_stays_with_it(client: TestClient, researched: FakeWeb) -> None:
+    with Session(client.app.state.db) as s:  # type: ignore[attr-defined]
+        source = eng.add_source(s, "I need to pay the T. Rowe Price deposit by Friday.")
+        loop = eng.add_loop(s, source_id=source.id, title="Pay the deposit", summary="Deposit.", kind=LoopKind.task)
+        s.commit()
+        loop_id = str(loop.id)
+    got = investigate(client, text=MESSAGE, loop_id=loop_id)
+    assert (got["loop_id"], got["loop_title"]) == (loop_id, "Pay the deposit")
+    assert [l["id"] for l in client.get("/api/loops").json()] == [loop_id]  # no "Verify …" loop on top
+    assert client.get("/api/attention").json()[0]["reason"] == "critical risk, hold off paying"
+    missing = client.post("/api/investigations", data={"text": MESSAGE, "loop_id": str(uuid4())})
+    assert missing.status_code == 404 and client.get("/api/investigations").json()[0]["id"] == got["id"]
+
+
 def test_investigate_tool_answers_with_findings_and_links(
     db_url: str, uploads: Path, llm: ScamLLM, researched: FakeWeb
 ) -> None:
@@ -678,6 +718,7 @@ def test_investigate_tool_answers_with_findings_and_links(
     assert "Details: http://127.0.0.1:8000/investigate.html#" in reply
     assert f"Source: {ALERT}" in reply and "Source: the message" in reply  # the pressure tactic cites the message
     assert "Next steps:" in reply
+    assert f"On your list: Verify {ORG} before paying. It stays under Needs attention" in reply
 
 
 def test_investigate_tool_still_running_gives_the_link(
@@ -695,6 +736,7 @@ def test_investigate_tool_still_running_gives_the_link(
         got = mcp.call("investigate", text=MESSAGE)
         assert got["reply"].startswith("Still checking.") and "investigate.html#" in got["reply"]
         assert mcp.call("investigate", text=" ")["error"].endswith("Paste a message, a link or a screenshot.")
+        assert "No loop with id nope" in mcp.call("investigate", text=MESSAGE, loop_id="nope")["error"]
         time.sleep(0.5)  # let the background run finish before the test database goes away
 
 

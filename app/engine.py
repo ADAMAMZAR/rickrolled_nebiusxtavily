@@ -20,8 +20,8 @@ from sqlmodel import Session, col, delete, func, or_, select, update
 
 from app.config import settings
 from app.db import (
-    ActionKind, ActionStatus, Activity, ActivityAction, ActivityBy, Goal, GoalStatus, LoopKind, LoopStatus, OpenLoop,
-    PendingAction, Person, Setting, Source, utcnow,
+    ActionKind, ActionStatus, Activity, ActivityAction, ActivityBy, Goal, GoalStatus, Investigation, LoopKind, LoopStatus,
+    OpenLoop, PendingAction, Person, RiskLevel, Setting, Source, utcnow,
 )
 from app.connectors import google
 from app.connectors.google import Email, GoogleClient, GoogleError
@@ -307,30 +307,72 @@ def list_loops(
 def needs_attention(session: Session, today: date, stale_days: int | None = None) -> list[Attention]:
     """Open, unsnoozed loops that need the user now. Plain rules, no LLM. `today` is the user's local date.
 
-    Order: overdue (most overdue first), due today/tomorrow, then undated loops with no update
-    for at least `stale_days` days (longest first).
+    Order: loops whose latest message check found risk (oldest first), overdue (most overdue first),
+    due today/tomorrow, then undated loops with no update for at least `stale_days` days (longest first).
     """
     stale_days = settings.stale_days if stale_days is None else stale_days
     tz = ZoneInfo(settings.timezone)
+    loops = list_loops(session, include_snoozed=False, today=today)
+    risk = check_levels(session, [loop.id for loop in loops])
     found: list[tuple[int, Any, Attention]] = []  # (rule, sort key, item)
-    for loop in list_loops(session, include_snoozed=False, today=today):
+    for loop in loops:
+        if risk.get(loop.id) in RISKY:
+            found.append((0, loop.created_at, Attention(loop, risk_reason(risk[loop.id]))))
+            continue
         if loop.due is not None:
             late = (today - loop.due).days
             if late > 0:
-                found.append((0, loop.due, Attention(loop, f"overdue by {_days(late)}")))
+                found.append((1, loop.due, Attention(loop, f"overdue by {_days(late)}")))
             elif late >= -1:
-                found.append((1, loop.due, Attention(loop, "due today" if late == 0 else "due tomorrow")))
+                found.append((2, loop.due, Attention(loop, "due today" if late == 0 else "due tomorrow")))
             continue
         idle = (today - loop.updated_at.astimezone(tz).date()).days
         if idle >= stale_days:
             reason = f"waiting {_days(idle)}, no reply" if loop.kind == LoopKind.waiting else f"no update in {_days(idle)}"
-            found.append((2, loop.updated_at, Attention(loop, reason)))
+            found.append((3, loop.updated_at, Attention(loop, reason)))
     found.sort(key=lambda f: (f[0], f[1]))  # stable: ties keep list_loops order
     return [item for _, _, item in found]
 
 
 def _days(n: int) -> str:
     return "1 day" if n == 1 else f"{n} days"
+
+
+# --- message checks (ScamGraph, app/investigation.py) on loops ---
+
+# Levels that keep a loop at the top of Needs attention. Not enough evidence counts: the sender isn't verified.
+RISKY = (RiskLevel.elevated, RiskLevel.high, RiskLevel.critical, RiskLevel.insufficient)
+
+
+def risk_reason(level: RiskLevel) -> str:
+    if level == RiskLevel.insufficient:
+        return "sender not verified, hold off paying"
+    return f"{level.value.lower()} risk, hold off paying"
+
+
+def check_levels(session: Session, loop_ids: list[UUID]) -> dict[UUID, RiskLevel]:
+    """Each loop's latest finished check. A newer check replaces an older one's level."""
+    query = (
+        select(Investigation.loop_id, Investigation.risk_level)
+        .where(col(Investigation.loop_id).in_(loop_ids), col(Investigation.risk_level).is_not(None))
+        .order_by(col(Investigation.created_at))
+    )
+    return {loop_id: level for loop_id, level in session.exec(query).all()}  # type: ignore[misc]
+
+
+def track_check(session: Session, title: str, summary: str, next_action: str | None, text: str, link: str) -> OpenLoop:
+    """The loop a risky check leaves, so it stays in Needs attention and the briefing until the user closes it
+    (no commit). An open loop with the same title is reused: checking a message twice doesn't add a second one."""
+    key = normalize(title)
+    for loop in list_loops(session):
+        if normalize(loop.title) == key:
+            return loop
+    source = add_source(session, text, kind="investigation")
+    source.url = link
+    loop = add_loop(session, source_id=source.id, title=title, summary=summary, kind=LoopKind.task, next_action=next_action)
+    _log(session, loop, ActivityAction.created, ActivityBy.check)
+    log.info("loop_created id=%s by=check", loop.id)
+    return loop
 
 
 def get_loop(session: Session, loop_id: UUID) -> LoopDetail:

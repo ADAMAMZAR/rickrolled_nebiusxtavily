@@ -1,10 +1,52 @@
 # Continuum
 
-**A personal AI that remembers what's still unfinished.**
+**A personal AI that remembers what's unfinished, and checks who's asking before you pay.**
 
 You mention things in passing: "Sarah said she'll get back to me Friday", "I need to finish my portfolio". Then they slip. Notes apps keep what you wrote. Chatbots forget it by the next session. Continuum pulls the **open loops** out of normal conversation (tasks, your promises, things you're waiting on, deadlines), links them to your goals, keeps them until they're done, and tells you before they slip.
 
-Built for the Nebius x NVIDIA Global AI Hackathon, **Personal AI** track.
+Some messages ask you to act and aren't from who they claim: a "bank" asking you to verify your account, a fund promising 12% a month. To Continuum, a request for your money or details is one more open loop. Before you close it, Continuum checks who's asking.
+
+Built for the Nebius x NVIDIA Global AI Hackathon, **Personal AI** track. It runs on **NVIDIA Nemotron** through **Nebius Token Factory**, with **Hermes Agent** as the assistant you talk to.
+
+## How it works
+
+Every loop goes through five steps:
+
+1. **Capture.** You tell it in the dashboard chat or on Telegram, email arrives from someone you're waiting on, or you forward a message or a screenshot.
+2. **Remember.** Goals, loops, people and the exact words each loop came from are saved in one SQLite file.
+3. **Check.** When a loop asks you to pay or share details, ScamGraph researches who's asking on the live web and fixed rules score the risk.
+4. **Remind.** **Needs attention** and the 8:00 Telegram briefing list what's overdue, due soon, stalled or risky.
+5. **Close.** You say it's done, an email reply closes it, or the web watch finds the answer. Drafts and calendar events wait for your yes.
+
+### A day with Continuum
+
+- **8:00, Telegram:** "2 things need you: Sarah's reply is due tomorrow; your portfolio has had no update in 5 days."
+- **9:12:** You tell Continuum you need to transfer RM5,000 to "T. Rowe Price" at troweprice-my-invest.com by Friday. It saves the loop and asks: "Want me to check who's asking first?"
+- **9:14:** **Critical risk.** T. Rowe Price's real site is troweprice.com, not the link in the message, and Bank Negara's alert list names T. Rowe Price clones. The loop moves to the top of Needs attention: hold off paying.
+- **15:40:** Sarah emails back. Her loop closes on its own, and the interview time waits as a calendar proposal until you say yes.
+- **Next morning:** the briefing still lists the deposit until you mark it done.
+
+*(The T. Rowe Price message is test sample B in [tests/scenarios/](tests/scenarios/).)*
+
+### Personal AI track
+
+| The track asks for | Continuum |
+|---|---|
+| Always on | Hermes runs the Telegram bot, the 8:00 briefing and the 10-minute email and web sync for as long as its gateway runs ([hermes/](hermes/), [scripts/sync.py](scripts/sync.py)) |
+| Private, your data under your control | One SQLite file on your machine; see [Your data](#your-data) |
+| Persistent memory | Goals, loops, people, the words each loop came from, history with undo, and every message check ([app/engine.py](app/engine.py), [app/db.py](app/db.py)). Hermes' own memory is off, so there's one source of truth. |
+| Reusable skills, tools you choose | 17 MCP tools any MCP client can call ([app/mcp_tools.py](app/mcp_tools.py)). Google, Tavily and Telegram are each opt-in. |
+| Tasks across your daily workflows | Follow-up drafts, Gmail drafts, calendar events, web watch, loops closed by email replies, message checks. Anything that changes the outside world waits for your yes. |
+| NVIDIA open model | Nemotron 3 Super on Nebius Token Factory for every reasoning step ([app/llm.py](app/llm.py)) |
+| Hermes Agent | Chat, Telegram and cron, with Continuum's tools only ([hermes/config.example.yaml](hermes/config.example.yaml)) |
+
+### Your data
+
+- Your loops, goals and people live in one SQLite file (`data/continuum.db`) on your machine.
+- Hermes' own memory is off, and it only has Continuum's tools: no terminal, files or browser.
+- Continuum never sends anything for you.
+- Our server never opens a suspicious link: Tavily reads it. Messages being checked are treated as untrusted text and never followed.
+- Logs hold ids and counts, never message text. What does leave your machine is listed under [Privacy](#privacy).
 
 ## What it does
 
@@ -29,9 +71,15 @@ Built for the Nebius x NVIDIA Global AI Hackathon, **Personal AI** track.
 - **Your yes first.** Calendar events, Gmail drafts (*"draft a thank-you reply to Sarah"*) and web findings wait under **Pending actions**, or on Telegram, until you approve. Nothing is ever sent.
 - **Undo.** Each loop's History shows what changed it (you, chat, email or the web), with Undo on automatic changes.
 
-### ScamGraph: check who you're dealing with
+### Check before you pay (ScamGraph)
 
-Before you pay or share details, paste the suspicious message, a link or a screenshot on **Investigate** (`/investigate.html`), or ask in chat or on Telegram: *"Is this legit?"* plus the message.
+When something asks for your money or details, Continuum checks who's asking:
+
+- Paste the message, a link or a screenshot on **Check a message** (`/investigate.html`).
+- Or ask in chat or on Telegram: *"Is this legit?"* plus the message. A forwarded message asking for money is checked right away.
+- When you save a loop about paying someone (*"I need to transfer RM5,000 to … by Friday"*), Continuum offers the check itself. A loop like that also gets a **Check who's asking** button.
+
+The check runs five steps:
 
 1. **Extract.** Nemotron pulls out who it claims to be (company, website, phone, email), what it claims ("licensed by SC", "12% monthly"), and pressure tactics, each with a quote from the message.
 2. **Research.** Tavily searches the Securities Commission and Bank Negara alert lists, the company's real website, and a few searches Nemotron plans. The top 5 pages are read through Tavily Extract. Our server never opens the suspicious link itself.
@@ -39,28 +87,37 @@ Before you pay or share details, paste the suspicious message, a link or a scree
 4. **Score.** Fixed rules in code, not the model, set the verdicts, risk signals, score, level (LOW to CRITICAL, or *not enough evidence*) and confidence. Every signal links to its source or to a quote from the message.
 5. **Show.** The page shows the steps live, then the risk level, cited findings, next steps, an evidence graph (click a node or line to open its evidence) and every claim with its sources.
 
+A risky result (elevated, high or critical, or not enough evidence to verify the sender) stays with you. The loop you checked, or a new one, *"Verify <who> before paying"*, goes to the top of **Needs attention** and into the morning briefing until you resolve it.
+
 *AI investigates. Evidence supports. Deterministic rules assess. Humans decide.* It reports risk signals, never "scam" or "scammer", and never contacts or reports anyone for you.
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-    UI[Dashboard] -->|chat| API[Continuum FastAPI]
-    UI -->|list / resolve / snooze| API
+    subgraph C[Continuum, one process]
+        API[FastAPI]
+        MCP[MCP /mcp]
+        E[Continuity Engine<br/>loops, attention]
+        I[ScamGraph<br/>message checks]
+        DB[(SQLite)]
+        API --> E
+        API --> I
+        MCP --> E
+        MCP --> I
+        I -->|risky check → loop| E
+        E --> DB
+        I --> DB
+    end
+    UI[Dashboard] -->|chat, loops, checks| API
     TG[Telegram] <--> H
     CRON[Hermes cron<br/>daily briefing] --> H
     API -->|proxy chat| H[Hermes Agent<br/>gateway :8642]
     H -->|reasoning| N[Nemotron via Nebius]
-    H -->|MCP tools| MCP[Continuum MCP /mcp]
-    MCP --> E[Continuity Engine]
-    API --> E
+    H -->|MCP tools| MCP
     E -->|extraction| N
-    E --> DB[(SQLite)]
-    UI -->|investigate| I[ScamGraph<br/>app/investigation.py]
-    MCP -->|investigate| I
     I -->|extract, plan, check, summary| N
     I -->|search + extract| T[Tavily]
-    I --> DB
     SYNC[sync.py<br/>Hermes cron, every 10 min] --> E
     SYNC -->|mail from linked people| GM[Gmail]
     SYNC -->|watched loops| T
@@ -68,7 +125,7 @@ flowchart LR
 ```
 
 - **Continuum** (one Python process): FastAPI serves the dashboard, a REST API, and an MCP server at `/mcp/`. The continuity engine (`app/engine.py`) owns extraction, goal linking, dedup, the attention rules and storage.
-- **Hermes Agent** (second process) is the chat brain, for the dashboard chat, Telegram and the daily briefing. It decides when to save (`remember`) and when to answer from memory (`list_open_loops`, `needs_attention`, `list_goals`, `inspect_loop`, `resolve_loop`, `snooze_loop`). Proposals wait for your yes (`list_pending_actions`, `approve_action`, `reject_action`). With a Tavily key it can look things up (`web_lookup`) and watch a loop on the web (`watch_loop`); what it finds only becomes a proposal (`propose_loop_update`). With Google connected it proposes calendar events and Gmail drafts (`propose_calendar_event`, `propose_gmail_draft`), created only after your yes. For a suspicious message it calls `investigate`, which runs ScamGraph and waits up to 100 s; if the check takes longer, it answers with the dashboard link. It runs in its own `continuum` profile, so your default Hermes setup is untouched. Its built-in terminal, file, web, browser and memory tools are off on every platform. It only has Continuum's tools.
+- **Hermes Agent** (second process) is the chat brain, for the dashboard chat, Telegram and the daily briefing. It decides when to save (`remember`) and when to answer from memory (`list_open_loops`, `needs_attention`, `list_goals`, `inspect_loop`, `resolve_loop`, `snooze_loop`). Proposals wait for your yes (`list_pending_actions`, `approve_action`, `reject_action`). With a Tavily key it can look things up (`web_lookup`) and watch a loop on the web (`watch_loop`); what it finds only becomes a proposal (`propose_loop_update`). With Google connected it proposes calendar events and Gmail drafts (`propose_calendar_event`, `propose_gmail_draft`), created only after your yes. For a suspicious message it calls `investigate`, which runs ScamGraph and waits up to 100 s; if the check takes longer, it answers with the dashboard link. When `remember` saves a loop about paying someone, Hermes offers the check and passes that loop's id, so the result stays with the loop. It runs in its own `continuum` profile, so your default Hermes setup is untouched. Its built-in terminal, file, web, browser and memory tools are off on every platform. It only has Continuum's tools.
 
 ### Why Hermes
 
@@ -84,6 +141,8 @@ Both the agent and the extraction run on **NVIDIA Nemotron** (`nvidia/nemotron-3
 The engine then drops any ids the model invented, dedups by normalized title, and writes everything in **one transaction**. A failure writes nothing.
 
 ScamGraph also uses Nemotron for every step except one: no Nemotron model on Token Factory reads images, so a screenshot goes to `google/gemma-3-27b-it` (`NEBIUS_VISION_MODEL`, same endpoint) just to turn it into text.
+
+**Where Token Factory helped:** Hermes and our own calls share one OpenAI-compatible endpoint (`NEBIUS_BASE_URL`), and switching models is one env var (`NEBIUS_MODEL`). That let us time three Nemotron models (Nano, 3.5 Lightning, Super) on the real pipeline before picking Super, with no code change.
 
 ### Tavily
 
@@ -192,7 +251,7 @@ The live suite runs the acceptance inputs against real Nemotron, e.g. "Alex said
 
 - Everything stays local in `data/continuum.db` (SQLite). What leaves your machine: text sent to Nebius for Nemotron to do its job; your Telegram messages if you turn Telegram on (they pass through Telegram's servers); with a Tavily key, only your watch searches and lookup questions go to Tavily, never your messages. Only the names of people you wait on go to the model, not their email addresses.
 - **Email** (if you connect Google): only mail *from* people you gave an address for, and only while they have an open loop. Continuum never lists or searches the rest of your inbox. Each email's subject and new text (quotes and signature removed, at most 4,000 characters) go to Nemotron. The text is stored only if it changed a loop. Attachments are never downloaded. **Forget email data** in Settings deletes all stored email text; loops made from it stay, marked "source deleted".
-- **ScamGraph**: the message, screenshot and page text go to Nebius. Names, websites, phone numbers and the submitted link go to Tavily as searches. Screenshots are saved in `data/uploads/` (gitignored, never served). Logs hold ids, counts and step names, never the message, quotes or searches.
+- **ScamGraph**: the message, screenshot and page text go to Nebius. Names, websites, phone numbers and the submitted link go to Tavily as searches. Screenshots are saved in `data/uploads/` (gitignored, never served). A risky check's message is also kept as its loop's source. Logs hold ids, counts and step names, never the message, quotes or searches.
 - Every loop links to the message it came from, and you can delete any loop.
 - Continuum never sends anything on your behalf. Drafts are text for you to copy, or Gmail drafts you send yourself.
 - Messages that change nothing (questions, small talk) aren't stored by Continuum. Hermes keeps its own chat history in its `continuum` profile folder.
@@ -210,6 +269,14 @@ The live suite runs the acceptance inputs against real Nemotron, e.g. "Alex said
 - Chat replies take a few seconds (one Nemotron tool call plus the reply, ~3–9 s in testing).
 - Telegram and the daily briefing only work while Hermes' gateway is running on your machine.
 - Scheduled jobs (the daily briefing, web watch) only run while the gateway is running. A briefing missed while it was off is sent once when the gateway starts again, so it can arrive late.
+- **Check who's asking** shows on loops whose words mention money, a link or an account (a keyword test). Any message can still be checked on **Check a message**.
+
+## Feedback on Nebius Token Factory and Nemotron
+
+- **Worked well:** one OpenAI-compatible endpoint for the agent and our own calls, and switching models by name.
+- **No vision in the Nemotron family on Token Factory.** Nano 30B, 3.5 Lightning, Super 120B and Ultra 550B all return 400 "This model does not support image input". We read screenshots with Gemma 3 on the same endpoint instead.
+- **Latency.** One Nemotron Super call took 11–37 s in our runs. Nano (27 s, needed a retry) and 3.5 Lightning (64 s) weren't faster for our prompts. A message check makes several calls, so it takes 1–2 minutes.
+- **JSON field names drift.** Nemotron sometimes wrote `"behaviors"` where the schema says `"behaviours"`. We accept both and retry once with the validation error.
 
 ## License
 

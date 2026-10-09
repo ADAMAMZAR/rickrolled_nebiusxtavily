@@ -8,6 +8,7 @@ Hackathon: Nebius x NVIDIA, Personal AI track. **Hermes Agent + NVIDIA Nemotron 
 - [continuum_phase_2.md](continuum_phase_2.md): Proactive: attention rules, snooze, Hermes cron briefing, Telegram *(done 2026-10-09)*
 - [continuum_phase_3.md](continuum_phase_3.md): Connected: web watch + lookup (Tavily), Gmail/Calendar, auto-resolve from email, approval-gated actions *(done 2026-10-09)*
 - [continuum_phase_4.md](continuum_phase_4.md): ScamGraph: investigate a suspicious message/URL/screenshot with Tavily evidence, fixed-rule risk score, evidence graph **← current phase** *(code done 2026-10-08; Telegram check, deploy and demo boxes run separately under issue #4)*
+  - Addendum [continuum_personal_ai_plan.md](continuum_personal_ai_plan.md): one Personal AI, not two apps. Risky checks become loops, loops can be checked. *(P0 + P1 built 2026-10-10)*
 
 Start a phase only after every box in the previous phase's Done Checklist is checked. When a phase is finished, move the "current phase" marker.
 

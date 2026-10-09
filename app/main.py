@@ -90,13 +90,16 @@ def activity_out(a: Activity) -> dict[str, Any]:
     return {**a.model_dump(mode="json", exclude={"undo"}), "can_undo": a.undo is not None}
 
 
-def investigation_out(detail: inv.InvestigationDetail) -> dict[str, Any]:
+def investigation_out(session: Session, detail: inv.InvestigationDetail) -> dict[str, Any]:
     def rows(items: list[Any]) -> list[dict[str, Any]]:
         return [r.model_dump(mode="json", exclude={"investigation_id"}) for r in items]
 
+    i = detail.investigation
+    loop = session.get(OpenLoop, i.loop_id) if i.loop_id else None
     return {
-        **detail.investigation.model_dump(mode="json", exclude={"screenshot_path"}),
-        "has_screenshot": detail.investigation.screenshot_path is not None,
+        **i.model_dump(mode="json", exclude={"screenshot_path"}),
+        "has_screenshot": i.screenshot_path is not None,
+        "loop_title": loop.title if loop else None,
         "entities": rows(detail.entities),
         "claims": rows(detail.claims),
         "evidence": rows(detail.evidence),
@@ -306,11 +309,12 @@ def create_app(
         text: Annotated[str | None, Form()] = None,
         url: Annotated[str | None, Form()] = None,
         screenshot: Annotated[UploadFile | None, File()] = None,
+        loop_id: Annotated[UUID | None, Form()] = None,
         session: Session = Depends(get_session),
     ) -> dict[str, Any]:
         # Read one byte past the limit, so an oversized file is rejected without reading all of it.
         data = screenshot.file.read(inv.MAX_SCREENSHOT + 1) if screenshot and screenshot.filename else None
-        created = inv.create_investigation(session, text, url, data)
+        created = inv.create_investigation(session, text, url, data, loop_id)
         background.add_task(inv.run_investigation, app.state.db, created.id, get_llm, get_web)
         return {"id": str(created.id)}
 
@@ -323,7 +327,7 @@ def create_app(
 
     @app.get("/api/investigations/{investigation_id}")
     def investigation(investigation_id: UUID, session: Session = Depends(get_session)) -> dict[str, Any]:
-        return investigation_out(inv.get_investigation(session, investigation_id))
+        return investigation_out(session, inv.get_investigation(session, investigation_id))
 
     @app.get("/api/google/status")
     def google_status(session: Session = Depends(get_session)) -> dict[str, Any]:

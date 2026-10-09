@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ScamGraph · Continuum</title>
+<title>Check a message · Continuum</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><circle cx='12' cy='12' r='8' fill='none' stroke='%231d6b5a' stroke-width='3' stroke-dasharray='40 10'/></svg>">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.34.3/cytoscape.min.js" integrity="sha512-SQebVa91Tn1DeP45Wo74monK/I9wiQg59uKc7P8vp3T7KQ9l5e8IMjZ1GJTgZehUVQt7eS61DTqldQUb1EHfnw==" crossorigin="anonymous" referrerpolicy="no-referrer" defer></script>
 <style>
@@ -28,7 +28,8 @@ body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 syste
 button, input, textarea { font: inherit; color: inherit; }
 main { max-width: 900px; margin: 0 auto; padding: 18px 16px 48px; }
 header.top { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
-header.top h1 { margin: 0; font-size: 1.15rem; }
+header.top h1 { margin: 0; font-size: 1.15rem; display: flex; align-items: center; gap: 8px; }
+header.top h1 svg { width: 20px; height: 20px; fill: none; stroke: var(--accent); stroke-width: 2.4; stroke-linecap: round; }
 header.top nav { margin-left: auto; display: flex; gap: 14px; }
 a { color: var(--accent); }
 header.top a { color: var(--muted); }
@@ -70,6 +71,7 @@ summary { cursor: pointer; color: var(--muted); font-size: 0.8125rem; }
 .cites a { margin-right: 8px; }
 #next { margin-top: 12px; padding: 10px 12px; border: 1px solid var(--line); background: var(--bg); border-radius: 8px; }
 #next h3 { margin-bottom: 4px; }
+#tracked { margin: 12px 0 0; font-size: 0.875rem; }
 .message-text { white-space: pre-wrap; overflow-wrap: anywhere; margin: 8px 0 0; font-size: 0.875rem; }
 
 /* graph */
@@ -100,8 +102,9 @@ summary { cursor: pointer; color: var(--muted); font-size: 0.8125rem; }
 <body>
 <main>
   <header class="top">
-    <h1>ScamGraph</h1><span class="muted">Check who you're dealing with before you pay.</span>
-    <nav><a id="new" href="#" hidden>New check</a><a href="/">Back to Continuum</a></nav>
+    <h1><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" stroke-dasharray="40 10"/></svg>Continuum</h1>
+    <span class="muted">Check who's asking before you pay · ScamGraph</span>
+    <nav><a id="new" href="#" hidden>New check</a><a href="/">Your loops</a></nav>
   </header>
 
   <section id="home" class="panel">
@@ -109,7 +112,7 @@ summary { cursor: pointer; color: var(--muted); font-size: 0.8125rem; }
       <label>Suspicious message<textarea name="text" maxlength="8000" placeholder="Paste the message you received…"></textarea></label>
       <label>Link (optional)<input type="url" name="url" maxlength="2000" placeholder="https://…"></label>
       <label>Screenshot (optional, PNG, JPEG or WebP, up to 5 MB)<input type="file" name="screenshot" accept="image/png,image/jpeg,image/webp"></label>
-      <button id="go" type="submit">Investigate</button>
+      <button id="go" type="submit">Check</button>
       <p class="muted">The message, screenshot and page text go to NVIDIA Nemotron on Nebius. Names and links go to Tavily search. Nothing is sent to anyone else.</p>
       <p class="error" id="error" role="alert" hidden></p>
     </form>
@@ -131,6 +134,7 @@ summary { cursor: pointer; color: var(--muted); font-size: 0.8125rem; }
       </div>
       <ol id="findings"></ol>
       <div id="next"><h3>What to do</h3><ul id="next-steps"></ul></div>
+      <p id="tracked" hidden></p>
       <details><summary>The message that was checked</summary><p class="message-text" id="input"></p></details>
     </section>
 
@@ -195,7 +199,7 @@ function showHome() {
   $("home").hidden = false;
   $("view").hidden = true;
   $("new").hidden = true;
-  document.title = "ScamGraph · Continuum";
+  document.title = "Check a message · Continuum";
 }
 
 async function show(id) {
@@ -223,7 +227,7 @@ function render(d) {
   if (shown === key) return;
   shown = key;
   const running = d.status === "running";
-  $("status").textContent = running ? "Investigating…" : d.status === "failed" ? "The check didn't finish" : "Investigation done";
+  $("status").textContent = running ? "Checking…" : d.status === "failed" ? "The check didn't finish" : "Check done";
   const hosts = new Set(d.evidence.map((e) => e.host));
   const n = (count, one, many) => `${count} ${count === 1 ? one : many}`;
   $("counts").textContent = `${n(d.entities.length, "name or contact", "names and contacts")} · ${n(d.claims.length, "claim", "claims")} · ${n(hosts.size, "source", "sources")} with evidence · started ${new Date(d.created_at).toLocaleString()}`;
@@ -244,7 +248,7 @@ function renderResult(d) {
   const level = d.risk_level || "INSUFFICIENT_EVIDENCE";
   $("badge").textContent = LEVEL[level];
   $("badge").className = `badge ${LEVEL_CLASS[level]}`;
-  document.title = `${LEVEL[level]} · ScamGraph`;
+  document.title = `${LEVEL[level]} · Continuum`;
   const strong = new Set(d.evidence.filter((e) => e.tier === "A" || e.tier === "B").map((e) => e.url));
   const fact = (label, value) => el("span", {}, `${label} `, el("b", { textContent: value }));
   $("facts").replaceChildren(
@@ -271,6 +275,9 @@ function renderResult(d) {
     return el("li", {}, el("div", { textContent: f.text }), cites);
   }));
   $("next-steps").replaceChildren(...d.next_steps.map((t) => el("li", { textContent: t })));
+  $("tracked").hidden = !d.loop_title;  // the loop this check belongs to: made by a risky result, or checked from it
+  $("tracked").replaceChildren(...(d.loop_title
+    ? ["On your list: ", el("b", { textContent: d.loop_title }), " · ", el("a", { href: "/", textContent: "Open your loops" })] : []));
   $("input").textContent = [d.input_text, d.input_url].filter(Boolean).join("\n\n");
 }
 

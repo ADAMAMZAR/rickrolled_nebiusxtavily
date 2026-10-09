@@ -23,9 +23,9 @@ from app.config import settings
 from app.connectors.tavily import TavilyClient, TavilyError, WebResult
 from app.db import (
     Claim, ClaimCategory, Confidence, Direction, Entity, EntityType, Evidence, Identity, Investigation,
-    InvestigationStatus, RiskLevel, RiskSignal, Tier, Verdict, utcnow,
+    InvestigationStatus, OpenLoop, RiskLevel, RiskSignal, Tier, Verdict, utcnow,
 )
-from app.engine import InvalidRequest, NotFound
+from app.engine import RISKY, InvalidRequest, NotFound, track_check
 from app.extraction import (
     Completer, ExtractionError, PageFindings, Summary, classify_page, extract_scam, plan_searches, read_screenshot,
     summarize,
@@ -92,13 +92,17 @@ def image_ext(data: bytes) -> str | None:
 
 
 def create_investigation(
-    session: Session, text: str | None = None, url: str | None = None, screenshot: bytes | None = None
+    session: Session, text: str | None = None, url: str | None = None, screenshot: bytes | None = None,
+    loop_id: UUID | None = None,
 ) -> Investigation:
-    """Validate the input and save a running investigation. At least one input is needed."""
+    """Validate the input and save a running investigation. At least one input is needed.
+    `loop_id` links the check to the loop it's about (e.g. "Pay the deposit to …")."""
     text = (text or "").strip()
     url = (url or "").strip() or None
     if not (text or url or screenshot):
         raise InvalidRequest("Paste a message, a link or a screenshot.")
+    if loop_id is not None and session.get(OpenLoop, loop_id) is None:
+        raise NotFound(f"Loop {loop_id} not found.")
     if len(text) > MAX_TEXT:
         raise InvalidRequest(f"Keep the message under {MAX_TEXT} characters.")
     if url is not None and (len(url) > MAX_URL or not url.lower().startswith(("http://", "https://"))):
@@ -111,7 +115,7 @@ def create_investigation(
         if ext is None:
             raise InvalidRequest("The screenshot must be a PNG, JPEG or WebP image.")
 
-    investigation = Investigation(input_text=text, input_url=url)
+    investigation = Investigation(input_text=text, input_url=url, loop_id=loop_id)
     if screenshot is not None:
         folder = Path(settings.uploads_dir)
         folder.mkdir(parents=True, exist_ok=True)
@@ -179,6 +183,7 @@ def run_investigation(
                 _research(session, investigation, llm, get_web, only=checks, skip=frozenset(read))
             _score(session, investigation)
             _summarize(session, investigation, llm)
+            _track(session, investigation)
             investigation.status = InvestigationStatus.done
             _step(session, investigation, "Done")
         except (ExtractionError, LLMError, InvalidRequest) as e:
@@ -636,6 +641,25 @@ def _summarize(session: Session, investigation: Investigation, llm: Completer) -
                      "signal_ids": [str(s.id)]} for s in sids.values()]
     investigation.findings = findings[:5]
     investigation.next_steps = summary.next_steps or NEXT_STEPS.get(investigation.risk_level, CAUTION)  # type: ignore[arg-type]
+
+
+def _track(session: Session, investigation: Investigation) -> None:
+    """A risky check becomes a loop, "Verify <who> before paying", so Needs attention and the morning briefing
+    keep it in front of the user. A check started from a loop is already linked to it."""
+    if investigation.loop_id is not None or investigation.risk_level not in RISKY:
+        return
+    entities = get_investigation(session, investigation.id).entities
+    orgs = [e.value for e in entities if e.type == EntityType.org and not is_regulator(e)]
+    domains = [e.value for e in entities if e.type == EntityType.domain]
+    level = investigation.risk_level
+    summary = ("A message check couldn't verify the sender." if level == RiskLevel.insufficient
+               else f"A message check found {level.value} risk, confidence {investigation.confidence}.")  # type: ignore[union-attr]
+    loop = track_check(
+        session, f"Verify {(orgs or domains or ['the sender'])[0]} before paying", summary,
+        investigation.next_steps[0] if investigation.next_steps else None,
+        investigation.input_text, f"/investigate.html#{investigation.id}",
+    )
+    investigation.loop_id = loop.id
 
 
 def _domain_checks(session: Session, investigation: Investigation) -> list[Search]:

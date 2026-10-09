@@ -10,7 +10,7 @@ from sqlmodel import Session
 
 from app import engine as eng
 from app.config import settings
-from app.db import LoopKind, OpenLoop
+from app.db import Investigation, InvestigationStatus, LoopKind, OpenLoop, RiskLevel, utcnow
 from tests.conftest import FakeLLM
 
 TODAY = date(2026, 10, 2)
@@ -55,6 +55,30 @@ def test_each_rule_fires_in_order_with_boundaries(session: Session) -> None:
         ("Due tomorrow", "due tomorrow"),
         ("Stale promise", "no update in 6 days"),
         ("Stale wait", "waiting 4 days, no reply"),
+    ]
+
+
+def checked(session: Session, loop: OpenLoop, level: RiskLevel, minutes_later: int = 0) -> None:
+    """A finished message check linked to `loop`."""
+    session.add(Investigation(loop_id=loop.id, status=InvestigationStatus.done, risk_level=level,
+                              created_at=utcnow() + timedelta(minutes=minutes_later)))
+    session.commit()
+
+
+def test_risky_checks_go_first(session: Session) -> None:
+    add(session, "Overdue", due=TODAY - DAY)
+    deposit = add(session, "Pay the deposit", due=TODAY + 5 * DAY)  # risk beats a later due date
+    sender = add(session, "Verify the sender before paying")
+    bill = add(session, "Pay the electricity bill")
+    checked(session, deposit, RiskLevel.high)
+    checked(session, sender, RiskLevel.insufficient)
+    checked(session, bill, RiskLevel.critical)
+    checked(session, bill, RiskLevel.low, minutes_later=1)  # a newer check replaces the older level
+
+    assert attention(session) == [
+        ("Pay the deposit", "high risk, hold off paying"),
+        ("Verify the sender before paying", "sender not verified, hold off paying"),
+        ("Overdue", "overdue by 1 day"),
     ]
 
 

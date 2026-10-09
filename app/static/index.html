@@ -210,7 +210,7 @@ details.loop.resolved .kind { color: var(--accent); }
 <div class="app">
   <header>
     <h1><svg class="i"><use href="#i-loop"/></svg>Continuum</h1>
-    <p>Remembers what's still unfinished.</p>
+    <p>Remembers what's unfinished, and checks who's asking.</p>
     <a class="btn small" href="/investigate.html">Check a message</a>
     <details class="menu settings" id="settings">
       <summary class="btn small" aria-label="Settings"><svg class="i"><use href="#i-gear"/></svg>Settings</summary>
@@ -232,6 +232,7 @@ details.loop.resolved .kind { color: var(--accent); }
         <div class="hello" id="hello">
           <p>Tell me what you're working on, what you promised, or what you're waiting for.</p>
           <p>Ask "What am I waiting on?" any time.</p>
+          <p>Got a message asking you to pay? Paste it and ask "Is this legit?"</p>
         </div>
       </div>
       <form class="composer" id="composer">
@@ -255,7 +256,10 @@ details.loop.resolved .kind { color: var(--accent); }
 <script>
 const EXAMPLE = "I'm applying for an NVIDIA internship. I submitted my application yesterday. Sarah said she'll get back to me next Friday. I also need to finish my portfolio before the interview.";
 const KIND = { task: "Task", waiting: "Waiting on someone", commitment: "Your promise" };
-const BY = { user: "you", chat: "chat", email: "email", web: "the web" };
+const BY = { user: "you", chat: "chat", email: "email", web: "the web", check: "a message check" };
+// Loops about paying someone get a one-click check of the message they came from.
+// ponytail: a keyword test; widen it if real payment loops slip past.
+const MONEY = /https?:\/\/|www\.|\bRM ?\d|\$ ?\d|\b(pay|paid|payment|transfer|deposit|bank|account|invest\w*|fee|OTP|TAC)\b/i;
 const conversation = crypto.randomUUID();  // one Hermes conversation per page load
 const $ = (id) => document.getElementById(id);
 let seen = new Map();  // loop id -> updated_at, to highlight what a chat changed
@@ -321,7 +325,8 @@ async function loadAttention() {
     h("li", { class: "loop" },
       h("span", { class: `kind ${l.kind}`, title: KIND[l.kind] }, icon(l.kind)),
       h("span", { class: "title" }, h("b", {}, l.title),
-        h("small", {}, l.goal_title && `${l.goal_title} · `, h("span", { class: reason.startsWith("overdue") ? "late" : null }, reason))),
+        h("small", {}, l.goal_title && `${l.goal_title} · `,
+          h("span", { class: reason.startsWith("overdue") || reason.endsWith("hold off paying") ? "late" : null }, reason))),
       h("span", { class: "row-actions" },
         h("button", { class: "btn small", type: "button", onclick: () => draft(l) }, "Draft"),
         snoozeMenu(l.id, true)))));
@@ -512,7 +517,9 @@ async function loadDetail(row, id) {
       h("figcaption", {}, d.source.kind === "email"
         ? [`✉ Email${d.source.sender ? ` from ${d.source.sender}` : ""} · ${shortDate(said)}`,
            d.source.url && [" · ", h("a", { href: d.source.url, target: "_blank", rel: "noopener" }, "Open in Gmail")]]
-        : `You said this ${said.toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`)),
+        : d.source.kind === "investigation"
+          ? [`A message you checked · ${shortDate(said)} · `, h("a", { href: d.source.url }, "See the check")]
+          : `You said this ${said.toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`)),
     history.length > 0 && h("div", { class: "history" }, h("h4", {}, "History"),
       h("ul", {}, history.map((a) => h("li", {},
         h("span", {}, `${new Date(a.created_at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} · ${a.action.replace("_", " ")} by ${BY[a.by]}`,
@@ -523,7 +530,28 @@ async function loadDetail(row, id) {
     h("div", { class: "actions" },
       h("button", { class: "btn primary", type: "button", onclick: () => act(`/api/loops/${id}/${resolved ? "reopen" : "resolve"}`, "POST") }, resolved ? "Reopen" : "Resolve"),
       snooze,
+      !resolved && d.source.kind !== "investigation" && MONEY.test(d.source.text || "") &&
+        h("button", { class: "btn", type: "button", onclick: (e) => checkLoop(d, e.currentTarget) }, "Check who's asking"),
       h("button", { class: "btn danger", type: "button", onclick: () => confirm(`Delete "${d.title}"? This can't be undone.`) && act(`/api/loops/${id}`, "DELETE") }, "Delete"))].filter(Boolean));
+}
+
+// Checks the message a loop came from; the result stays with the loop (Needs attention if it's risky).
+async function checkLoop(d, button) {
+  button.disabled = true;
+  button.textContent = "Starting the check…";
+  const form = new FormData();
+  form.append("text", d.source.text);
+  form.append("loop_id", d.id);
+  try {
+    const res = await fetch("/api/investigations", { method: "POST", body: form });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.message || `Request failed (HTTP ${res.status}).`);
+    location.href = `/investigate.html#${body.id}`;
+  } catch (e) {
+    alert(e.message);
+    button.disabled = false;
+    button.textContent = "Check who's asking";
+  }
 }
 
 function contactForm(d) {

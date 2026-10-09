@@ -1,0 +1,17 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "pulsing-dot",
+        "value": "*",
+        "files": [
+          "app/static/index.html"
+        ],
+        "createdAt": "2026-10-06T05:39:19.122Z",
+        "reason": "Claude: the pulsing dots are the chat typing indicator (.typing), added only while a reply from Hermes is in flight and removed when it arrives; tied to a real pending request, not decorative"
+      }
+    ]
+  }
+}

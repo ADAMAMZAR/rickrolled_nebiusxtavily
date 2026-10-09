@@ -43,6 +43,7 @@ class ActivityBy(StrEnum):
     chat = "chat"
     email = "email"
     web = "web"
+    check = "check"  # a ScamGraph check of a message
 
 
 class ActionKind(StrEnum):
