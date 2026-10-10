@@ -1,6 +1,6 @@
 # Continuum — Plan: one Personal AI, not two apps
 
-**Status:** P0 and P1 built 2026-10-10 (D1–D3 taken as recommended). P2–P4 not started. Open: the Devpost text, "Built during the hackathon", and a live run through Hermes (§8).
+**Status:** P0, P1 and P2 built and checked live 2026-10-10 (D1–D3 taken as recommended). P3 (deploy) is issue #4 and needs the VM owner. P4 waits until after the video. Devpost text: §9.
 
 **Goal:** Personal AI track judges see one assistant. ScamGraph keeps its name and all its code. It becomes the step Continuum takes before you pay, not a second app.
 
@@ -78,14 +78,15 @@ Each tier works on its own, so you can stop at any tier. No schema change: `Inve
 
 ### P1 Connect checks and loops (half a day to a day; this is Phase 4 §9 "Track this")
 
-5. **A risky check saves itself as a loop.** At the end of `run_investigation` ([app/investigation.py](app/investigation.py)), when the level is ELEVATED, HIGH, CRITICAL or INSUFFICIENT_EVIDENCE and `loop_id` is empty:
+5. **A risky check saves itself as a loop.** At the end of `run_investigation` ([app/investigation.py](app/investigation.py)), when the level is anything but LOW and `loop_id` is empty:
    - Create a source with `kind="investigation"`, `text=input_text` and `url="/investigate.html#<id>"`.
    - Create a task loop **"Verify <first org, else domain, else the sender> before paying"**, with `next_action` set to the first next step. Skip it if an open loop with that title already exists (re-checks).
    - Set `loop_id` in the same commit as "Done".
    - `_reply` in [app/mcp_tools.py](app/mcp_tools.py) adds one line, built in code: *"On your list: …. It stays under Needs attention until you resolve it."* The result page shows "On your list: …" with a link to the dashboard (the API returns `loop_title`).
-   - LOW and GUARDED add nothing. This replaces the spec's "Track this" button (D1).
+   - LOW adds nothing. This replaces the spec's "Track this" button (D1).
+   - *Changed 2026-10-10: GUARDED counts too, so only LOW clears a payment loop. A live run with Tavily down scored the T. Rowe Price clone GUARDED and left the loop unflagged.*
 6. **Risky loops go first in Needs attention.** Add a first rule to `needs_attention` in [app/engine.py](app/engine.py):
-   - an open loop whose latest check is ELEVATED or above → e.g. `high risk, hold off paying`;
+   - an open loop whose latest check is GUARDED or above → e.g. `high risk, hold off paying`;
    - INSUFFICIENT_EVIDENCE → `sender not verified, hold off paying`.
 
    Read `Investigation` from `app.db`. The engine can't import `investigation.py`, because that would create an import cycle. The 8:00 briefing calls `needs_attention`, so it lists these loops without a prompt change. In `index.html`, show these reasons in red like "overdue", and show `investigation` sources in loop detail as "Checked message · See the check".
@@ -115,6 +116,20 @@ Each tier works on its own, so you can stop at any tier. No schema change: `Inve
     ```
 
     If the profile got Hermes' bundled skill catalog, opt out so the Telegram menu shows only Continuum's skills. `SOUL.md` keeps its short "is this legit?" rule: the skills toolset stays off, so the model can't load a skill by itself.
+
+*Done 2026-10-10:*
+- *Gate passed without a phone, through the gateway's cron runner. It loads skills the same way Telegram's `/skill` does (`gateway/run_inbound.py` swaps in the skill text, with no toolset check).*
+  - *Two temporary `--deliver local` jobs, Continuum's tools only, scratch DB:*
+    - *`briefing` followed the skill's format.*
+    - *`check` called `investigate` and returned its `reply` word for word: CRITICAL, BNM source, "On your list".*
+  - *Both jobs removed afterwards.*
+- *`hermes chat -q "/briefing"` (one-shot CLI) doesn't expand skills, and neither does the API server, so the dashboard chat still relies on `SOUL.md`.*
+- *`setup_hermes.py`:*
+  - *creates new profiles with `--no-skills`;*
+  - *runs `skills opt-out --remove --yes`, which leaves only Hermes' built-in `hermes-agent` skill;*
+  - *copies `hermes/skills/` to `<profile>/skills/continuum/`.*
+- *The user's 8:00 job `fd67c83eaacc` was switched with `cron edit --skill briefing --prompt "Send the morning briefing. Begin with Good morning."`.*
+- *Not yet seen on a phone: typing `/check` on Telegram.*
 
 ### P3 Always on ([issue #4](https://github.com/ADAMAMZAR/rickrolled_nebiusxtavily/issues/4), Phase 4 §11)
 
@@ -167,19 +182,63 @@ Each tier works on its own, so you can stop at any tier. No schema change: `Inve
 ## 8. Done checklist
 
 - [x] README opens with the tagline, the five steps, the track table and "Your data"; ScamGraph sits under Check; Token Factory and Feedback sections added
-  *Done 2026-10-10. Still open: "Built during the hackathon" (check the submission period first) and the Devpost text.*
+  *Done 2026-10-10.*
+  - *"Built during the hackathon": first commit 2026-09-29, inside the submission period. Third-party listings give 26 Aug – 30 Oct 2026; confirm on Devpost.*
+  - *Devpost text: §9.*
 - [x] Check page uses Continuum's header; tab title "Check a message · Continuum"
 - [x] A risky check saves one linked loop; LOW doesn't; re-checks don't duplicate it
   *Done 2026-10-10: `tests/test_investigation.py` (`test_risky_check_becomes_a_loop_in_needs_attention`, `test_low_risk_check_adds_no_loop`).*
 - [x] Risky loops top Needs attention and the 8:00 briefing
   *Done 2026-10-10: `tests/test_attention.py::test_risky_checks_go_first`. The briefing reads `needs_attention`, so it follows; not yet seen on Telegram.*
-- [ ] A loop can be checked from its detail panel and from chat; Hermes offers the check for payment loops (live)
+- [x] A loop can be checked from its detail panel and from chat; Hermes offers the check for payment loops (live)
   *Code and offline tests done 2026-10-10 (`test_check_started_from_a_loop_stays_with_it`).*
-  *Live 2026-10-10 through Hermes:*
-  - *"Is this legit?" + scenario A → HIGH, "Verify FalconRise Capital before paying" at the top of Needs attention.*
-  - *Own-words payment loop → saved due Friday, check run with its `loop_id`, no second loop.*
-  - *Still open: Tavily answered HTTP 432 (out of credits?), so that check had no evidence and scored GUARDED. Re-run with credits.*
-- [ ] (P2) `/check` and `/briefing` work on Telegram; the briefing cron uses the skill
+  *Live 2026-10-10 through Hermes, on a scratch DB, after the first Tavily key ran out (HTTP 432):*
+  - *"Is this legit?" + scenario A → HIGH 70, BNM source. "Verify FalconRise Capital before paying" at the top of Needs attention; the reply names it.*
+  - *Own-words payment loop → saved due Fri, Hermes asks "Want me to check who's asking first?" → "yes" → CRITICAL 80 on that loop (`loop_id`), no second loop, "critical risk, hold off paying".*
+  - *Check who's asking button (headless browser) → CRITICAL, page shows "On your list: Transfer to T. Rowe Price".*
+  - *"What's urgent?" → both risky loops first, with their reasons.*
+  - *`pytest -m live -k "scam_live or hermes"`: 7 of 8 passed. B came back `unverified` (the known 2-in-3 official-site miss) and passed on re-run.*
+  - *Seen: a summary finding overstated its source ("advises against transferring RM5,000"). The summary guard checks cites, not wording.*
+- [x] (P2) `/check` and `/briefing` work on Telegram; the briefing cron uses the skill
+  *Done 2026-10-10 through the gateway's cron runner (same skill loading as Telegram) and the user's 8:00 job. Still worth one `/check` from the phone.*
 - [ ] Runs on the Nebius VM; README limits updated
 - [ ] Video follows §5; Devpost uses §2
-- [ ] `pytest` passes; `pytest -m live` re-run after the MCP and SOUL changes
+- [x] `pytest` passes; `pytest -m live` re-run after the MCP and SOUL changes
+  *2026-10-10: `pytest` 261 passed. Live `scam_live or hermes`: 7 of 8 passed, and B passed on re-run (§8, live box).*
+
+---
+
+## 9. Devpost text (draft)
+
+Paste into Devpost. Fill in the two links once the deploy (P3) and the video exist.
+
+**Name:** Continuum
+
+**Tagline:** A personal AI that remembers what's unfinished, and checks who's asking before you pay.
+
+**Track:** Personal AI
+
+**What it does**
+
+You mention things in passing, like "Sarah said she'll get back to me Friday" or "I need to finish my portfolio", and then they slip. Some messages also ask you to act and aren't from who they claim: a "bank" asking you to verify your account, a fund promising 12% a month. Continuum handles both the same way. Every loop goes through five steps:
+
+1. **Capture.** You talk to it in the dashboard or on Telegram. Email from people you're waiting on comes in too, and you can forward a message or a screenshot.
+2. **Remember.** Nemotron pulls out goals, tasks, promises and things you're waiting on, and Continuum keeps them with the exact words they came from.
+3. **Check.** When a loop asks you to pay or share details, ScamGraph researches who's asking on the live web (Tavily): regulator alert lists and the company's real website. Fixed rules in code, not the model, set the risk level, and every finding links to its source.
+4. **Remind.** Needs attention and an 8:00 Telegram briefing list what's overdue, due soon, stalled, or risky ("critical risk, hold off paying").
+5. **Close.** Loops close when you say so, when an email reply answers them, or when the web watch finds the answer. Calendar events and Gmail drafts wait for your yes. Continuum never sends anything.
+
+**Why**
+
+Notes apps keep what you wrote, and chatbots forget it by the next session. A personal assistant should hold your commitments for you, and the commitments most worth guarding are the ones that cost you money.
+
+**How it works**
+
+- **Hermes Agent** is the assistant: dashboard chat, Telegram, cron jobs, and two reusable skills, `/check` and `/briefing`. It calls Continuum through 17 MCP tools and has nothing else: no terminal, files or browser.
+- **NVIDIA Nemotron 3 Super on Nebius Token Factory** does every reasoning step: the agent, loop extraction, and ScamGraph's extraction, research plan, page checks and summary. Screenshots are read by Gemma 3 on the same endpoint, because no Nemotron model there reads images.
+- **Tavily** Search and Extract gather the evidence. Our server never opens a suspicious link itself.
+- **Your data:** one SQLite file. Hermes' own memory is off, and logs hold ids and counts, never message text.
+
+**Built with:** NVIDIA Nemotron, Nebius Token Factory, Hermes Agent, Tavily, Python, FastAPI, MCP, SQLite, Cytoscape.js, Telegram, Gmail and Google Calendar APIs.
+
+**Links:** demo (P3 deploy) · video (§5) · repo with MIT license and README.

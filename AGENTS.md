@@ -8,7 +8,7 @@ Hackathon: Nebius x NVIDIA, Personal AI track. **Hermes Agent + NVIDIA Nemotron 
 - [continuum_phase_2.md](continuum_phase_2.md): Proactive: attention rules, snooze, Hermes cron briefing, Telegram *(done 2026-10-09)*
 - [continuum_phase_3.md](continuum_phase_3.md): Connected: web watch + lookup (Tavily), Gmail/Calendar, auto-resolve from email, approval-gated actions *(done 2026-10-09)*
 - [continuum_phase_4.md](continuum_phase_4.md): ScamGraph: investigate a suspicious message/URL/screenshot with Tavily evidence, fixed-rule risk score, evidence graph **← current phase** *(code done 2026-10-08; Telegram check, deploy and demo boxes run separately under issue #4)*
-  - Addendum [continuum_personal_ai_plan.md](continuum_personal_ai_plan.md): one Personal AI, not two apps. Risky checks become loops, loops can be checked. *(P0 + P1 built 2026-10-10)*
+  - Addendum [continuum_personal_ai_plan.md](continuum_personal_ai_plan.md): one Personal AI, not two apps. Risky checks become loops, loops can be checked, `/check` and `/briefing` skills. *(P0–P2 built 2026-10-10; P3 deploy is issue #4, P4 after the video)*
 
 Start a phase only after every box in the previous phase's Done Checklist is checked. When a phase is finished, move the "current phase" marker.
 
@@ -25,6 +25,7 @@ Start a phase only after every box in the previous phase's Done Checklist is che
 - Hermes runs in its own `continuum` profile (`%LOCALAPPDATA%\hermes\profiles\continuum`), built from `hermes/` by `scripts/setup_hermes.py`. Never edit the user's default Hermes profile. New MCP tools must be added to `tools.include` in `hermes/config.example.yaml`, then re-run the setup script.
 - MCP SDK is 2.x: `from mcp.server.mcpserver import MCPServer` (not `FastMCP`). Raise `ToolError` for expected failures; other exceptions reach the model only as "Error executing tool".
 - Tool docstrings (`app/mcp_tools.py`) and `hermes/SOUL.md` steer Hermes' tool choice. After editing either, re-run the setup script.
+- Hermes skills live in `hermes/skills/<name>/SKILL.md` (`/check`, `/briefing`). The setup script copies them into the profile and removes Hermes' bundled skills. Slash skills work on Telegram and in cron (`--skill`), not in the dashboard chat (the API server doesn't expand them), so keep the matching `SOUL.md` rule too. In Git Bash, set `MSYS_NO_PATHCONV=1` before passing `/briefing` to `hermes`, or it becomes a file path.
 - Testing writes through Hermes: run Continuum with `DATABASE_URL=sqlite:///<scratch path>` so the user's real `data/continuum.db` stays clean.
 - Extract first, then write everything in one DB transaction. A failure writes nothing.
 - Phase 4: `app/investigation.py` owns investigations (pipeline, risk rules, graph); `engine.py` keeps loops. Investigations commit per step so the page can show progress; a failed run is marked `failed`, never scored.

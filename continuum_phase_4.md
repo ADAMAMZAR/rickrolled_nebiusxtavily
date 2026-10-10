@@ -348,7 +348,7 @@ run(id) in a background thread:
   - Its `Source(kind="investigation", url="/investigate.html#<id>")` is built with the existing `add_source` / `add_loop`.
   - Sets `Investigation.loop_id`.
   - *Changed 2026-10-10 ([continuum_personal_ai_plan.md](continuum_personal_ai_plan.md) §4 P1, D1): no button.*
-    - *A check at ELEVATED, HIGH, CRITICAL or INSUFFICIENT_EVIDENCE saves the loop itself (`engine.track_check`). An open loop with the same title is reused.*
+    - *A check at any level but LOW saves the loop itself (`engine.track_check`). An open loop with the same title is reused. (GUARDED added 2026-10-10: a live run with Tavily down scored a clone GUARDED and left the payment loop unflagged.)*
     - *A check can start from a loop: `loop_id` on `POST /api/investigations` and on the `investigate` tool. It links to that loop and adds none.*
     - *A loop whose latest check is risky goes first in Needs attention ("high risk, hold off paying"), and so into the briefing.*
     - *The `investigate` reply and the result page name the loop. Activity shows "created by a message check" (`ActivityBy.check`).*

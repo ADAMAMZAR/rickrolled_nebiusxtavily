@@ -13,7 +13,7 @@ from app import engine as eng
 from app import investigation as inv
 from app.config import settings
 from app.connectors.tavily import ExtractedPage, TavilyError, WebResult, WebSearch
-from app.db import Entity, EntityType, LoopKind
+from app.db import Entity, EntityType, Investigation, LoopKind, RiskLevel
 from app.extraction import SCAM_INVALID, ScamExtraction
 from app.investigation import appears, canonical
 from app.llm import LLMError
@@ -682,10 +682,19 @@ def test_risky_check_becomes_a_loop_in_needs_attention(client: TestClient, resea
     assert again["loop_id"] == got["loop_id"] and len(client.get("/api/loops").json()) == 1
 
 
-def test_low_risk_check_adds_no_loop(client: TestClient) -> None:
-    got = investigate(client, text=MESSAGE)  # no web evidence: GUARDED
-    assert (got["risk_level"], got["loop_id"], got["loop_title"]) == ("GUARDED", None, None)
-    assert client.get("/api/loops").json() == []
+def test_guarded_check_is_tracked_too(client: TestClient) -> None:
+    """Only LOW clears a payment: a guarded result still has a risk signal."""
+    got = investigate(client, text=MESSAGE)  # no web evidence: the pressure tactic alone, GUARDED
+    assert (got["risk_level"], got["loop_title"]) == ("GUARDED", f"Verify {ORG} before paying")
+    assert client.get("/api/attention").json()[0]["reason"] == "guarded risk, hold off paying"
+
+
+def test_low_risk_check_adds_no_loop(session: Session) -> None:
+    investigation = Investigation(input_text=MESSAGE, risk_level=RiskLevel.low)
+    session.add(investigation)
+    session.commit()
+    inv._track(session, investigation)
+    assert investigation.loop_id is None and eng.list_loops(session) == []
 
 
 def test_check_started_from_a_loop_stays_with_it(client: TestClient, researched: FakeWeb) -> None:

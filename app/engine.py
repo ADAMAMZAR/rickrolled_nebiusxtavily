@@ -340,8 +340,9 @@ def _days(n: int) -> str:
 
 # --- message checks (ScamGraph, app/investigation.py) on loops ---
 
-# Levels that keep a loop at the top of Needs attention. Not enough evidence counts: the sender isn't verified.
-RISKY = (RiskLevel.elevated, RiskLevel.high, RiskLevel.critical, RiskLevel.insufficient)
+# Levels that keep a loop at the top of Needs attention: everything but LOW. Guarded still has a risk signal,
+# and not enough evidence means the sender isn't verified.
+RISKY = (RiskLevel.guarded, RiskLevel.elevated, RiskLevel.high, RiskLevel.critical, RiskLevel.insufficient)
 
 
 def risk_reason(level: RiskLevel) -> str:

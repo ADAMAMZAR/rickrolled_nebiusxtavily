@@ -112,6 +112,8 @@ Keep the briefing prompt in `hermes/briefing_prompt.md`:
 - Otherwise send a short list (≤ 6 items): bold title, (goal), reason. End with: "Reply to snooze, resolve, or draft a follow-up."
 - No extra chit-chat.
 
+*Changed 2026-10-10 ([continuum_personal_ai_plan.md](continuum_personal_ai_plan.md) P2): the prompt is now the Hermes skill `hermes/skills/briefing/SKILL.md`. The job runs it with `--skill briefing` and a one-line prompt, and Telegram gets `/briefing`. `briefing_prompt.md` is gone.*
+
 **Check in Hermes docs:** exact schedule syntax, the timezone the cron uses, and whether the cron platform needs MCP tools enabled (`hermes tools` → cron). Update this section with what works.
 
 What the Hermes 0.21 docs say (not yet run live):

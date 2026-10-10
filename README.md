@@ -6,7 +6,7 @@ You mention things in passing: "Sarah said she'll get back to me Friday", "I nee
 
 Some messages ask you to act and aren't from who they claim: a "bank" asking you to verify your account, a fund promising 12% a month. To Continuum, a request for your money or details is one more open loop. Before you close it, Continuum checks who's asking.
 
-Built for the Nebius x NVIDIA Global AI Hackathon, **Personal AI** track. It runs on **NVIDIA Nemotron** through **Nebius Token Factory**, with **Hermes Agent** as the assistant you talk to.
+Built for the Nebius x NVIDIA Global AI Hackathon, **Personal AI** track. It runs on **NVIDIA Nemotron** through **Nebius Token Factory**, with **Hermes Agent** as the assistant you talk to. Everything here was built during the submission period: the first commit is 2026-09-29.
 
 ## How it works
 
@@ -35,7 +35,8 @@ Every loop goes through five steps:
 | Always on | Hermes runs the Telegram bot, the 8:00 briefing and the 10-minute email and web sync for as long as its gateway runs ([hermes/](hermes/), [scripts/sync.py](scripts/sync.py)) |
 | Private, your data under your control | One SQLite file on your machine; see [Your data](#your-data) |
 | Persistent memory | Goals, loops, people, the words each loop came from, history with undo, and every message check ([app/engine.py](app/engine.py), [app/db.py](app/db.py)). Hermes' own memory is off, so there's one source of truth. |
-| Reusable skills, tools you choose | 17 MCP tools any MCP client can call ([app/mcp_tools.py](app/mcp_tools.py)). Google, Tavily and Telegram are each opt-in. |
+| Reusable skills | Two Hermes skills ([hermes/skills/](hermes/skills/)): `/check <message>` and `/briefing` on Telegram. The 8:00 cron job runs `briefing` too. |
+| Tools you choose | 17 MCP tools any MCP client can call ([app/mcp_tools.py](app/mcp_tools.py)). Google, Tavily and Telegram are each opt-in. |
 | Tasks across your daily workflows | Follow-up drafts, Gmail drafts, calendar events, web watch, loops closed by email replies, message checks. Anything that changes the outside world waits for your yes. |
 | NVIDIA open model | Nemotron 3 Super on Nebius Token Factory for every reasoning step ([app/llm.py](app/llm.py)) |
 | Hermes Agent | Chat, Telegram and cron, with Continuum's tools only ([hermes/config.example.yaml](hermes/config.example.yaml)) |
@@ -87,7 +88,7 @@ The check runs five steps:
 4. **Score.** Fixed rules in code, not the model, set the verdicts, risk signals, score, level (LOW to CRITICAL, or *not enough evidence*) and confidence. Every signal links to its source or to a quote from the message.
 5. **Show.** The page shows the steps live, then the risk level, cited findings, next steps, an evidence graph (click a node or line to open its evidence) and every claim with its sources.
 
-A risky result (elevated, high or critical, or not enough evidence to verify the sender) stays with you. The loop you checked, or a new one, *"Verify <who> before paying"*, goes to the top of **Needs attention** and into the morning briefing until you resolve it.
+Anything but low risk stays with you, including "not enough evidence to verify the sender". The loop you checked, or a new one, *"Verify <who> before paying"*, goes to the top of **Needs attention** and into the morning briefing until you resolve it.
 
 *AI investigates. Evidence supports. Deterministic rules assess. Humans decide.* It reports risk signals, never "scam" or "scammer", and never contacts or reports anyone for you.
 
@@ -198,17 +199,17 @@ Chat with Continuum from your phone. Hermes runs the bot, so there's no extra se
 
 Only the user ids in `TELEGRAM_ALLOWED_USERS` get replies. On Telegram, Continuum has the same tools as the dashboard chat, nothing else. Telegram keeps one ongoing conversation; send `/new` to start fresh.
 
+Two commands come from Continuum's Hermes skills ([hermes/skills/](hermes/skills/)), which `setup_hermes.py` installs: `/check <message>` checks who's asking, and `/briefing` sends what needs you now. Setup also removes Hermes' bundled skills from this profile; they need tools it doesn't have.
+
 ### Daily briefing (optional, needs Telegram)
 
-Every morning at 8:00 in your `TIMEZONE`, Continuum sends what needs attention to Telegram. Reply to it to snooze, resolve or draft a follow-up. Create the job once:
+Every morning at 8:00 in your `TIMEZONE`, Continuum sends what needs attention to Telegram. Reply to it to snooze, resolve or draft a follow-up. Create the job once (same command in bash and PowerShell):
 
 ```bash
-hermes -p continuum cron create "0 8 * * *" "$(cat hermes/briefing_prompt.md)" --deliver telegram --name briefing
+hermes -p continuum cron create "0 8 * * *" "Send the morning briefing. Begin with Good morning." --skill briefing --deliver telegram --name briefing
 ```
 
-```powershell
-hermes -p continuum cron create "0 8 * * *" (Get-Content hermes\briefing_prompt.md -Raw) --deliver telegram --name briefing
-```
+An older job made from `hermes/briefing_prompt.md` switches over with `hermes -p continuum cron edit <id> --skill briefing --prompt "Send the morning briefing. Begin with Good morning."`.
 
 The gateway (`hermes -p continuum gateway run`) must be running for it to fire. To try it now: `hermes -p continuum cron list` shows the job id, and `hermes -p continuum cron run <id>` sends it within a minute.
 
