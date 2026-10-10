@@ -46,17 +46,21 @@ def build_mcp(
     def remember(text: str) -> dict[str, Any]:
         """Save what the user said about their goals, tasks, promises, deadlines or things they're
         waiting on. Also updates or closes existing loops the message is about (e.g. "Sarah replied").
-        Pass the user's message word for word."""
+        Pass the user's message word for word.
+        If the result has `ask_user`, end your reply with that question. On yes, call `investigate` with the
+        user's message and `check_loop_id` as loop_id."""
         with session() as s:
             try:
                 changes = eng.process_message(s, get_llm(), text)
             except (ExtractionError, LLMError) as e:
                 raise ToolError(f"Couldn't save that: {e}") from e
+            money = next((loop for loop in changes.created_loops if eng.asks_for_money(loop)), None)
             return {
                 "new_goals": [g.title for g in changes.created_goals],
                 "new_loops": [_loop(s, loop) for loop in changes.created_loops],
                 "updated_loops": [_loop(s, loop) for loop in changes.updated_loops],
                 "resolved_loops": [loop.title for loop in changes.resolved_loops],
+                **({"ask_user": "Want me to check who's asking first?", "check_loop_id": str(money.id)} if money else {}),
             }
 
     @mcp.tool()

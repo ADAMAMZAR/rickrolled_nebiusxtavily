@@ -107,6 +107,13 @@ def test_e_conflicting(engine: Engine) -> None:
     assert got["cited"]
 
 
+def test_f_rental_payee_bank(engine: Engine) -> None:
+    got = run(engine, sample("f_rental.txt"))
+    assert "cimb" not in got["orgs"]  # the bank only holds the account; it isn't who's asking (Telegram check 2026-10-10)
+    assert "pay_before_seeing" in got["signals"]
+    assert got["cited"]
+
+
 def test_screenshot_is_read(engine: Engine) -> None:
     """Scenario D as an image: Gemma reads it, Nemotron extracts from the text."""
     got = run(engine, screenshot=(SCENARIOS / "d_sparse.png").read_bytes())

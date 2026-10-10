@@ -1,0 +1,3 @@
+TEST SAMPLE for ScamGraph scenario F (room rental, payee bank). Not a real message.
+
+Room at Setapak available, RM500 deposit to secure, transfer to 7620xxxxxx CIMB, owner overseas so cannot view first.

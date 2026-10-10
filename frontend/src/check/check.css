@@ -23,6 +23,7 @@
 .how b { color: var(--ink); font-weight: 700; }
 
 /* live steps */
+.steps .subhead { margin-top: 0; }
 .steps ol { margin: var(--s3) 0 var(--s2); padding-left: 2.2em; display: grid; gap: 2px; font-variant-numeric: tabular-nums; }
 .steps li::marker { color: var(--muted); }
 .steps li.now { font-weight: 650; }

@@ -8,6 +8,7 @@ import { SnoozeMenu } from "./menus";
 const BY: Record<ActivityBy, string> = { user: "you", chat: "chat", email: "email", web: "the web", check: "a message check" };
 // Loops about paying someone get a one-click check of the message they came from.
 // ponytail: a keyword test; widen it if real payment loops slip past.
+// Same pattern as engine.MONEY: Hermes offers a check for the loops this flags.
 const MONEY = /https?:\/\/|www\.|\bRM ?\d|\$ ?\d|\b(pay|paid|payment|transfer|deposit|bank|account|invest\w*|fee|OTP|TAC)\b/i;
 // Same wording as engine.risk_reason, which Needs attention shows.
 const riskReason = (level: string) =>

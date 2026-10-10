@@ -20,7 +20,7 @@ from app.connectors.tavily import TavilyClient
 from app.db import create_db_engine
 from app.main import create_app
 from tests.conftest import FakeLLM
-from tests.test_process_message import DEMO, DEMO_RESULT, result
+from tests.test_process_message import DEMO, DEMO_RESULT, loop, result
 
 HEADERS = {"Accept": "application/json, text/event-stream", "Content-Type": "application/json"}
 HERMES_CONFIG = Path(__file__).parent.parent / "hermes" / "config.example.yaml"
@@ -110,6 +110,14 @@ def test_remember_then_what_am_i_waiting_on(mcp: MCP, llm: FakeLLM) -> None:
     wait = group["loops"][0]
     assert (wait["waiting_on"], wait["due"]) == ("Sarah", "Fri 2026-10-02")
     assert "next_action" not in wait  # empty fields dropped
+
+
+def test_remember_offers_a_check_for_a_money_loop(mcp: MCP, llm: FakeLLM) -> None:
+    assert "ask_user" not in remember_demo(mcp, llm)
+    llm.replies.append(json.dumps(result(new=[loop("Pay RM500 deposit to Encik Rahman")])))
+    saved = mcp.call("remember", text="Encik Rahman wants RM500 deposit for the room before Monday.")
+    assert saved["ask_user"] == "Want me to check who's asking first?"
+    assert saved["check_loop_id"] == saved["new_loops"][0]["id"]
 
 
 def test_filter_by_goal(mcp: MCP, llm: FakeLLM) -> None:

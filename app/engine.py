@@ -351,6 +351,15 @@ def risk_reason(level: RiskLevel) -> str:
     return f"{level.value.lower()} risk, hold off paying"
 
 
+# Same pattern as MONEY in frontend/src/dashboard/Ledger.tsx, which marks a match "asks for money, not checked yet".
+MONEY = re.compile(r"https?://|www\.|\bRM ?\d|\$ ?\d|\b(pay|paid|payment|transfer|deposit|bank|account|invest\w*|fee|OTP|TAC)\b",
+                   re.IGNORECASE)
+
+
+def asks_for_money(loop: OpenLoop) -> bool:
+    return bool(MONEY.search(f"{loop.title} {loop.summary}"))
+
+
 def check_levels(session: Session, loop_ids: list[UUID]) -> dict[UUID, RiskLevel]:
     """Each loop's latest finished check. A newer check replaces an older one's level."""
     query = (

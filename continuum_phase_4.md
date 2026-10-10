@@ -281,6 +281,7 @@ run(id) in a background thread:
 | `contact_mismatch` | +15 | Official contacts are known (A/B page) and the submitted phone/email isn't among them |
 | `payment_pressure` | +15 | Behaviour flag with a checked input quote |
 | `guaranteed_returns` | +15 | Behaviour flag with a checked input quote |
+| `pay_before_seeing` | +15 | Behaviour flag with a checked input quote: pay before you can see or meet (no viewing, owner overseas). Added 2026-10-10 for rental scams |
 | `official_identity_confirmed` | −25 | The org is confirmed by A/B **and** all submitted contacts match the official ones |
 | `verified_domain` | −20 | The submitted domain matches the official domain |
 | `verified_regulatory_status` | −20 | A regulatory claim is `supported` by tier A |

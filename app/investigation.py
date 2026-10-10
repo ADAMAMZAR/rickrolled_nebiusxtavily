@@ -68,10 +68,13 @@ WEIGHTS = {
     "contact_mismatch": 15,
     "payment_pressure": 15,
     "guaranteed_returns": 15,
+    "pay_before_seeing": 15,
     "official_identity_confirmed": -25,
     "verified_domain": -20,
     "verified_regulatory_status": -20,
 }
+TACTICS = {"payment_pressure": "Pressure to pay now", "guaranteed_returns": "Promises guaranteed returns",
+           "pay_before_seeing": "Asks you to pay before you can see or meet"}
 # Checked by file signature, not by the name or content type the browser sends.
 IMAGE_TYPES = {b"\x89PNG\r\n\x1a\n": "png", b"\xff\xd8\xff": "jpg"}
 
@@ -272,7 +275,7 @@ def _extract(session: Session, investigation: Investigation, llm: Completer, tex
         if b.kind not in {s.kind for s in signals}:  # one signal per kind
             signals.append(RiskSignal(
                 investigation_id=investigation.id, kind=b.kind, weight=WEIGHTS[b.kind], input_quote=b.quote,
-                reason="Pressure to pay now" if b.kind == "payment_pressure" else "Promises guaranteed returns",
+                reason=TACTICS[b.kind],
             ))
     session.add_all([*entities.values(), *claims, *signals])
     _step(session, investigation, f"Found {_count(len(entities), 'name or contact', 'names and contacts')}, "
@@ -394,7 +397,8 @@ STRONG = (Tier.a, Tier.b)
 AGAINST = (Direction.contradicts, Direction.warns)
 MATERIAL = (ClaimCategory.identity, ClaimCategory.regulatory)  # claims worth a follow-up round
 # Behaviour that makes a claim of this category suspicious (§7.3).
-SUSPICIOUS_WITH = {ClaimCategory.investment: "guaranteed_returns", ClaimCategory.payment: "payment_pressure"}
+SUSPICIOUS_WITH = {ClaimCategory.investment: {"guaranteed_returns"},
+                   ClaimCategory.payment: {"payment_pressure", "pay_before_seeing"}}
 LEVELS = [(75, RiskLevel.critical), (50, RiskLevel.high), (25, RiskLevel.elevated), (1, RiskLevel.guarded)]
 
 
@@ -410,7 +414,7 @@ def claim_verdicts(claims: list[Claim], evidence: list[Evidence], behaviours: se
             out[claim.id] = (Verdict.contradicted, f"Contradicted by {against[0].host} (tier {against[0].tier.value})")
         elif support:
             out[claim.id] = (Verdict.supported, f"Confirmed by {support[0].host} (tier {support[0].tier.value})")
-        elif SUSPICIOUS_WITH.get(claim.category) in behaviours:
+        elif SUSPICIOUS_WITH.get(claim.category, set()) & behaviours:
             out[claim.id] = (Verdict.suspicious, "The message uses a pressure tactic for this")
         elif rows:
             out[claim.id] = (Verdict.unverified, f"Only weaker sources: {', '.join(sorted({e.host for e in rows}))}")

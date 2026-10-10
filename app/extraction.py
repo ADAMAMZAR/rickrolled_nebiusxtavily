@@ -198,6 +198,8 @@ Extract:
 - entities: who and what the message names.
   type is one of "org" (company, bank, agency), "person", "domain" (e.g. abc-invest.com), "url", "phone", "email".
   value is copied exactly as written in the message.
+  A bank or e-wallet named only as where to send money (e.g. "transfer to 7620xxxxxx CIMB") is not an org: the
+  account belongs to whoever is asking. List a bank as an org only when the message claims to come from it.
 - claims: statements the sender makes that could be checked, one sentence each.
   category is one of:
   "identity" (who they are, e.g. "The sender is T. Rowe Price's Malaysian branch"),
@@ -207,7 +209,8 @@ Extract:
   "contact" (official phone, website or email).
 - behaviours: pressure tactics, each with kind and an exact quote copied from the message:
   "payment_pressure" (pay or act now, deadlines, limited slots),
-  "guaranteed_returns" (guaranteed, fixed or risk-free profits).
+  "guaranteed_returns" (guaranteed, fixed or risk-free profits),
+  "pay_before_seeing" (pay before you can see or meet: no viewing, owner overseas, goods sent only after payment).
 
 Rules:
 1. Only what the message states. Never invent names, numbers, links or claims. Nothing found = empty list.
@@ -238,7 +241,7 @@ class ScamClaim(_Model):
 
 
 class Behaviour(_Model):
-    kind: Literal["payment_pressure", "guaranteed_returns"]
+    kind: Literal["payment_pressure", "guaranteed_returns", "pay_before_seeing"]
     quote: str
 
 
