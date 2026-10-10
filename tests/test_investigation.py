@@ -1,4 +1,5 @@
 import json
+import re
 import time
 from collections.abc import Iterator
 from pathlib import Path
@@ -200,8 +201,13 @@ def test_unknown_investigation_404(client: TestClient) -> None:
 
 
 def test_page_served(client: TestClient) -> None:
+    """Both pages are the React build in app/static (frontend/: npm run build); every asset they load is served."""
+    for page in ("/", "/investigate.html"):
+        html = client.get(page).text
+        assets = re.findall(r'(?:src|href)="(/assets/[^"]+)"', html)
+        assert '<div id="root">' in html and any(a.endswith(".js") for a in assets)
+        assert all(client.get(a).status_code == 200 for a in assets), assets
     assert "ScamGraph" in client.get("/investigate.html").text
-    assert 'href="/investigate.html"' in client.get("/").text
     # Browsers re-check pages, so an update shows without a hard refresh (2026-10-10: a stale tab hid one).
     assert client.get("/investigate.html").headers["cache-control"] == "no-cache"
 
@@ -675,6 +681,7 @@ def test_risky_check_becomes_a_loop_in_needs_attention(client: TestClient, resea
     }
     attention = client.get("/api/attention").json()
     assert [(a["loop"]["id"], a["reason"]) for a in attention] == [(got["loop_id"], "critical risk, hold off paying")]
+    assert [l["risk_level"] for l in client.get("/api/loops").json()] == ["CRITICAL"]  # the ledger flags it too
     assert [a["by"] for a in client.get(f"/api/activity?loop_id={got['loop_id']}").json()] == ["check"]
 
     llm.replies.append(EXTRACTION)

@@ -1,0 +1,217 @@
+@import "@fontsource-variable/archivo/standard.css";
+
+/* Continuum's world: the 555 pocket ledger. A red cover band, cool white ruled paper, graphite ink.
+   Two inks carry meaning: red is Continuum's warning (risk, overdue), ballpoint blue is settled and yours. */
+:root {
+  --cover: #c42127;
+  --cover-deep: #9f191e;
+  --on-cover: #ffffff;
+  --on-cover-soft: #fde3e4;
+  --paper: #fbfcfd;
+  --ground: #f0f3f7;
+  --rule: #d5e2f0;
+  --rule-strong: #9db9d8;
+  --margin: #eb9a9e;
+  --ink: #1b1e24;
+  --muted: #545c69;
+  --red: #c42127;
+  --red-wash: #fcecec;
+  --blue: #1f4b99;
+  --blue-wash: #e8eef9;
+  --shadow: 0 6px 24px rgb(27 30 36 / 0.14), 0 1px 3px rgb(27 30 36 / 0.1);
+
+  --font: "Archivo Variable", "Archivo", system-ui, sans-serif;
+  --fs-cap: 0.75rem;
+  --fs-small: 0.8125rem;
+  --fs-body: 0.9375rem;
+  --fs-title: 1.0625rem;
+  --fs-h2: 1.5rem;
+  --fs-h1: 2.25rem;
+  --fs-numeral: clamp(3.25rem, 2.2rem + 3.5vw, 5.25rem);
+
+  --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 24px; --s6: 32px; --s7: 48px;
+  --row: 48px;
+  --radius: 3px;
+  --page: 1280px;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --cover: #b11e24;
+    --cover-deep: #8e171c;
+    --paper: #1b1e24;
+    --ground: #101215;
+    --rule: #2a3442;
+    --rule-strong: #43546c;
+    --margin: #6e2b30;
+    --ink: #e8ebf0;
+    --muted: #a6afbc;
+    --red: #ff858a;
+    --red-wash: #3a1e22;
+    --blue: #93b6ff;
+    --blue-wash: #1d2a45;
+    --shadow: 0 8px 28px rgb(0 0 0 / 0.5), 0 1px 3px rgb(0 0 0 / 0.4);
+    color-scheme: dark;
+  }
+}
+
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--ink);
+  font: 400 var(--fs-body)/1.5 var(--font);
+  font-synthesis: none;
+  caret-color: var(--blue);
+  scrollbar-color: var(--rule-strong) transparent;
+}
+::selection { background: var(--blue-wash); color: var(--ink); }
+button, input, textarea, select { font: inherit; color: inherit; }
+a { color: var(--blue); text-decoration-thickness: 1px; text-underline-offset: 3px; }
+a:hover { text-decoration-thickness: 2px; }
+:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+[hidden] { display: none !important; }
+h1, h2, h3, h4 { margin: 0; font-weight: 800; line-height: 1.15; text-wrap: balance; }
+p { margin: 0; }
+.num { font-variant-numeric: tabular-nums; }
+.muted { color: var(--muted); }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+/* --- the cover band --- */
+.band { background: var(--cover); color: var(--on-cover); }
+.band ::selection { background: var(--on-cover); color: var(--cover); }
+.band :focus-visible { outline-color: var(--on-cover); }
+.band-inner {
+  max-width: var(--page); margin: 0 auto; padding: var(--s4) var(--s5);
+  display: flex; align-items: center; gap: var(--s5); flex-wrap: wrap;
+}
+.wordmark {
+  display: inline-flex; align-items: center; gap: var(--s2);
+  color: inherit; text-decoration: none;
+  font-weight: 750; font-stretch: 112%; font-size: 1.25rem; letter-spacing: -0.01em;
+}
+.wordmark svg { width: 26px; height: 26px; }
+.band-title { font-size: var(--fs-h2); font-weight: 800; font-stretch: 92%; }
+.tally { display: flex; align-items: center; gap: var(--s3); margin-left: auto; }
+.tally-n {
+  font-size: var(--fs-numeral); font-weight: 900; font-stretch: 62%; line-height: 0.82;
+  letter-spacing: -0.02em; font-variant-numeric: tabular-nums;
+}
+.tally-label { font-size: var(--fs-title); font-weight: 650; line-height: 1.15; max-width: 9ch; color: var(--on-cover-soft); }
+.band-actions { display: flex; align-items: center; gap: var(--s2); margin-left: auto; }
+.tally + .band-actions { margin-left: 0; }
+
+/* --- controls --- */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  min-height: 36px; padding: 0 14px; border-radius: var(--radius);
+  border: 1px solid var(--rule-strong); background: var(--paper); color: var(--ink);
+  font-size: var(--fs-small); font-weight: 650; text-decoration: none; cursor: pointer; white-space: nowrap;
+  transition: background-color 120ms ease-out, border-color 120ms ease-out;
+}
+.btn:hover { background: var(--ground); border-color: var(--muted); }
+.btn:disabled { opacity: 0.55; cursor: default; }
+.btn svg { width: 16px; height: 16px; }
+.btn.small { min-height: 30px; padding: 0 10px; font-size: var(--fs-cap); }
+.btn.primary { background: var(--blue); border-color: var(--blue); color: var(--paper); }
+.btn.primary:hover { background: color-mix(in oklab, var(--blue) 86%, var(--ink)); }
+.btn.danger { color: var(--red); border-color: color-mix(in oklab, var(--red) 45%, transparent); background: transparent; }
+.btn.danger:hover { background: var(--red-wash); border-color: var(--red); }
+.btn.on-cover { background: transparent; border-color: rgb(255 255 255 / 0.55); color: var(--on-cover); }
+.btn.on-cover:hover { background: var(--cover-deep); border-color: var(--on-cover); }
+.btn.on-cover.solid { background: var(--on-cover); color: var(--cover); border-color: var(--on-cover); }
+.btn.on-cover.solid:hover { background: var(--on-cover-soft); }
+.link-btn {
+  padding: 0; border: 0; background: none; color: var(--blue); font-size: var(--fs-small); font-weight: 600;
+  text-decoration: underline; text-underline-offset: 3px; cursor: pointer;
+}
+
+input[type="text"], input[type="email"], input[type="url"], input[type="date"], textarea {
+  width: 100%; min-height: 38px; padding: 8px 10px; border: 1px solid var(--rule-strong); border-radius: var(--radius);
+  background: var(--paper); line-height: 1.4;
+}
+input:hover, textarea:hover { border-color: var(--muted); }
+input:focus-visible, textarea:focus-visible { outline: 2px solid var(--blue); outline-offset: 0; border-color: var(--blue); }
+::placeholder { color: var(--muted); opacity: 1; }
+label.check { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-small); color: var(--muted); cursor: pointer; }
+input[type="checkbox"] { width: 16px; height: 16px; margin: 0; accent-color: var(--blue); }
+
+/* popover menus (Snooze, Settings) built on <details> */
+details.menu { position: relative; }
+details.menu > summary { list-style: none; }
+details.menu > summary::-webkit-details-marker { display: none; }
+.menu-pop {
+  position: absolute; right: 0; top: calc(100% + 6px); z-index: 20; min-width: 230px;
+  padding: var(--s2); background: var(--paper); color: var(--ink);
+  border: 1px solid var(--rule-strong); border-radius: var(--radius); box-shadow: var(--shadow);
+  display: grid; gap: 2px;
+}
+.menu-pop > button { text-align: left; padding: 8px 10px; border: 0; border-radius: 2px; background: none; cursor: pointer; font-size: var(--fs-small); }
+.menu-pop > button:hover { background: var(--ground); }
+.menu-pop label { display: grid; gap: 4px; padding: 8px 10px 4px; font-size: var(--fs-cap); color: var(--muted); }
+
+/* --- the page: ruled paper sheets on a grey-white ground --- */
+.page { max-width: var(--page); margin: 0 auto; padding: var(--s5) var(--s5) var(--s7); }
+.sheet {
+  background: var(--paper); border: 1px solid var(--rule); border-radius: var(--radius);
+  padding: var(--s5); box-shadow: 0 1px 2px rgb(27 30 36 / 0.05);
+}
+/* ruled lines behind running text, at its line height */
+.ruled {
+  --lh: 1.7em; line-height: var(--lh);
+  background: repeating-linear-gradient(to bottom, transparent 0 calc(var(--lh) - 1px), var(--rule) calc(var(--lh) - 1px) var(--lh));
+}
+.head {
+  display: flex; align-items: baseline; gap: var(--s3); flex-wrap: wrap;
+  padding-bottom: var(--s2); border-bottom: 2px solid var(--ink);
+}
+.head h2 { font-size: var(--fs-h2); font-stretch: 92%; letter-spacing: -0.01em; }
+.head .count { font-size: var(--fs-title); font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums; }
+.head .tools { margin-left: auto; display: flex; gap: var(--s4); flex-wrap: wrap; }
+.section + .section { margin-top: var(--s7); }
+.subhead { font-size: var(--fs-title); font-weight: 750; margin: var(--s5) 0 var(--s2); }
+
+/* ruled rows: pale-blue lines between entries, the same furniture in every state */
+.rows { list-style: none; margin: 0; padding: 0; }
+.rows > li { border-bottom: 1px solid var(--rule); }
+.entry {
+  display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; align-items: center; gap: var(--s3);
+  min-height: var(--row); padding: var(--s2) var(--s1);
+}
+.entry .kind { color: var(--muted); display: grid; place-items: center; }
+.entry .kind svg { width: 20px; height: 20px; }
+.entry .title { position: relative; min-width: 0; }
+.entry .title b { font-size: var(--fs-title); font-weight: 650; display: block; overflow-wrap: anywhere; }
+.entry .meta { display: block; font-size: var(--fs-small); color: var(--muted); }
+.entry .side { display: flex; align-items: center; gap: var(--s2); justify-content: flex-end; }
+.due { font-size: var(--fs-small); color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.due.soon { color: var(--blue); font-weight: 600; }
+.late, .due.late { color: var(--red); font-weight: 650; }
+
+/* the 555 margin: a double red rule, with Continuum's flag in the column left of it */
+.margined { --m: 44px; background:
+  linear-gradient(to right, transparent calc(var(--m) - 5px), var(--margin) calc(var(--m) - 5px) calc(var(--m) - 4px),
+    transparent calc(var(--m) - 4px) calc(var(--m) - 1px), var(--margin) calc(var(--m) - 1px) var(--m), transparent var(--m)); }
+/* the flag column ends at the rule; the entry's text starts a clear 10px after it */
+.margined .entry { grid-template-columns: calc(var(--m) - 6px) minmax(0, 1fr) auto; padding-left: 0; }
+.flag { color: var(--red); display: grid; place-items: center; }
+.flag svg { width: 20px; height: 20px; }
+.warn-text { color: var(--red); font-weight: 650; }
+
+/* signature move: settling strikes the entry through in ballpoint, in place */
+.strike { position: absolute; left: -2px; right: -2px; top: 0.62em; height: 10px; pointer-events: none; overflow: visible; }
+.strike path { fill: none; stroke: var(--blue); stroke-width: 2.2; stroke-linecap: round; }
+.strike.draw path { stroke-dasharray: 1; stroke-dashoffset: 1; animation: strike 420ms cubic-bezier(0.2, 0.7, 0.2, 1) forwards; }
+@keyframes strike { to { stroke-dashoffset: 0; } }
+@media (prefers-reduced-motion: reduce) { .strike.draw path { animation: none; stroke-dashoffset: 0; } }
+.settled .title b, .settled .meta { color: var(--muted); }
+
+.empty { padding: var(--s6) 0; color: var(--muted); }
+.empty h3 { color: var(--ink); font-size: var(--fs-title); margin-bottom: var(--s2); }
+.error-line { color: var(--red); font-size: var(--fs-small); }
+.chip {
+  display: inline-block; padding: 1px 7px; border: 1px solid currentColor; border-radius: 2px;
+  font-size: var(--fs-cap); font-weight: 700; line-height: 1.5; white-space: nowrap;
+}

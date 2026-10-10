@@ -175,6 +175,14 @@ hermes -p continuum gateway run                     # terminal 2
 
 Open **http://127.0.0.1:8000**. Re-run `setup_hermes.py` after changing keys or the model, and after updating Continuum (it copies new tools and instructions into Hermes).
 
+**Changing the UI** (Node 20+). The pages are React + Vite in `frontend/`. `app/static/` holds the built files, committed, so running Continuum needs no Node.
+
+```bash
+cd frontend && npm install
+npm run dev      # http://localhost:5173 with hot reload; /api goes to Continuum on :8000
+npm run build    # type-checks, then rebuilds app/static (commit it)
+```
+
 `TAVILY_API_KEY` in `.env` is needed for ScamGraph's research (without it, only the message itself is checked) and for web watch and lookup (free key at tavily.com). Then say "keep an eye on the hackathon results", or use **Watch the web** in a loop's detail. `python scripts/sync.py` runs the check: each watched loop is searched at most once a day, and anything found shows under **Pending actions**.
 
 `requirements.txt` pins the tested versions; `-e .` installs Continuum itself so the scripts can import it.

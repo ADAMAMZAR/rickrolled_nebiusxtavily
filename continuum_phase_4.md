@@ -81,7 +81,7 @@ flowchart LR
 
 | Source plan | This spec | Why |
 |---|---|---|
-| Next.js + Tailwind/shadcn + React Flow | Static `app/static/investigate.html` + **Cytoscape.js from cdnjs** | No JS build step in this repo. The REST API is the same, so a Next.js frontend can still be added later. |
+| Next.js + Tailwind/shadcn + React Flow | Static `app/static/investigate.html` + **Cytoscape.js from cdnjs** | No JS build step in this repo. The REST API is the same, so a Next.js frontend can still be added later. *Changed 2026-10-10: both pages are now React + Vite in `frontend/` (Cytoscape from npm), built into `app/static/` (user's choice during the redesign).* |
 | PostgreSQL | SQLite via `DATABASE_URL` | Enough for the demo. The URL can point to Postgres later. |
 | Server-Sent Events | The page **polls** `GET /api/investigations/{id}` every 1s; steps are stored on the record | Fewer moving parts, survives a reload, still no single opaque spinner. |
 | GraphEdge table | `graph()` builds nodes and edges from stored records | The plan's §6 step 10 already says the graph is generated from the record. |

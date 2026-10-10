@@ -19,6 +19,7 @@ Start a phase only after every box in the previous phase's Done Checklist is che
 
 ## Architecture (short)
 - `app/engine.py` owns all domain logic. FastAPI routes and MCP tools are thin wrappers around it.
+- UI: React + Vite in `frontend/` (dashboard and message check), built into `app/static/`. That folder is committed build output: never edit it by hand, rebuild it. Visual rules: PRODUCT.md, DESIGN.md, `.impeccable/surfaces/`. Untrusted text renders as React text; only http(s) links become clickable (`safeHref`).
 - Hermes = chat brain. It calls Continuum through MCP tools at `/mcp`. The UI chat proxies to the Hermes API server.
 - All LLM prompts live in `app/extraction.py`. All LLM calls go through `app/llm.py`.
 - The only LLM is NVIDIA Nemotron on Nebius Token Factory (`NEBIUS_*` in `.env`), for both extraction and Hermes. One exception: no Nemotron model there reads images, so screenshots go to `NEBIUS_VISION_MODEL` (`google/gemma-3-27b-it`, same endpoint) to become text only (Phase 4 §0.5). Re-run `pytest -m live` before submitting.
@@ -40,6 +41,7 @@ uvicorn app.main:app --reload     # Continuum on :8000 (MCP at /mcp/)
 hermes -p continuum gateway run   # Hermes API server on :8642
 pytest                            # offline, LLM mocked
 pytest -m live                    # real LLM + Hermes (needs keys and both servers running)
+cd frontend && npm install && npm run build   # after any UI change: type-checks and rebuilds app/static
 ```
 
 ## Rules

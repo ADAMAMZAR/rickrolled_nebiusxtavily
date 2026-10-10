@@ -230,7 +230,8 @@ def create_app(
         found = eng.list_loops(
             session, None if status == "all" else LoopStatus(status), goal_id, include_snoozed=include_snoozed
         )
-        return [loop_out(session, loop) for loop in found]
+        levels = eng.check_levels(session, [loop.id for loop in found])  # the ledger flags loops a check found risky
+        return [{**loop_out(session, loop), "risk_level": levels.get(loop.id)} for loop in found]
 
     @app.get("/api/loops/{loop_id}")
     def loop(loop_id: UUID, session: Session = Depends(get_session)) -> dict[str, Any]:

@@ -1,0 +1,100 @@
+/* Message check: the same ledger world. The level is set in the cover's condensed numerals;
+   the checked message sits beside the findings with its flagged words underlined in red. */
+.check > * + * { margin-top: var(--s5); }
+.status-line { color: var(--muted); padding: var(--s4) 0; }
+.pad { padding: var(--s3) var(--s1); }
+.empty.quiet { padding: var(--s4) var(--s1); }
+
+/* home: the form, with the facts that earn trust beside it */
+.home { display: grid; grid-template-columns: minmax(0, 1fr) minmax(260px, 340px); gap: var(--s7); align-items: start; }
+.check-form { display: grid; gap: var(--s4); padding-top: var(--s4); }
+.check-form label { display: grid; gap: 6px; font-size: var(--fs-small); font-weight: 650; }
+.check-form label .muted { font-weight: 400; }
+.check-form input { font-weight: 400; }
+.check-form textarea { min-height: 200px; resize: vertical; font-size: var(--fs-body); font-weight: 400; }
+.check-form input[type="file"] { font-size: var(--fs-small); font-weight: 400; }
+.check-form input[type="file"]::file-selector-button {
+  margin-right: var(--s3); min-height: 32px; padding: 0 12px; border: 1px solid var(--rule-strong); border-radius: var(--radius);
+  background: var(--paper); color: var(--ink); font: 650 var(--fs-cap) var(--font); cursor: pointer;
+}
+.submit-row { display: flex; align-items: center; gap: var(--s4); flex-wrap: wrap; }
+.btn.big { min-height: 44px; padding: 0 22px; font-size: var(--fs-body); }
+.how { display: grid; gap: var(--s4); padding-top: calc(var(--fs-h2) + var(--s5)); font-size: var(--fs-small); color: var(--muted); }
+.how b { color: var(--ink); font-weight: 700; }
+
+/* live steps */
+.steps ol { margin: var(--s3) 0 var(--s2); padding-left: 2.2em; display: grid; gap: 2px; font-variant-numeric: tabular-nums; }
+.steps li::marker { color: var(--muted); }
+.steps li.now { font-weight: 650; }
+.steps li.now::after { content: " …"; }
+
+/* the verdict */
+.verdict { display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 400px); gap: var(--s7); align-items: start; }
+.level {
+  font-size: clamp(2.75rem, 1.8rem + 3.2vw, 4.5rem); font-weight: 900; font-stretch: 62%; line-height: 0.95;
+  letter-spacing: -0.01em; text-transform: uppercase; padding-bottom: var(--s3); border-bottom: 2px solid var(--ink);
+}
+.level.warn { color: var(--red); }
+.level.settled { color: var(--blue); }
+.facts { display: flex; flex-wrap: wrap; gap: var(--s2) var(--s5); margin: var(--s3) 0 0; }
+.facts > div { display: flex; gap: 6px; align-items: baseline; font-size: var(--fs-small); }
+.facts dt { color: var(--muted); }
+.facts dd { margin: 0; font-weight: 700; }
+.rules-note { margin-top: var(--s1); font-size: var(--fs-cap); }
+.findings { margin-top: var(--s4); border-top: 1px solid var(--rule); }
+.findings li { padding: var(--s3) var(--s1); display: grid; gap: 2px; }
+.findings li > p:first-child { font-size: var(--fs-title); font-weight: 550; }
+.cites { display: flex; flex-wrap: wrap; gap: var(--s1) var(--s3); font-size: var(--fs-small); color: var(--muted); }
+.todo { margin-top: var(--s5); padding-top: var(--s3); border-top: 2px solid var(--ink); }
+.todo h3 { font-size: var(--fs-title); margin-bottom: var(--s2); }
+.todo ul { margin: 0; padding-left: 1.2em; display: grid; gap: var(--s1); }
+.tracked { margin-top: var(--s3); padding-top: var(--s3); border-top: 1px solid var(--rule-strong); }
+.checked { margin: 0; }
+.checked h3 { font-size: var(--fs-small); font-weight: 750; padding-bottom: var(--s2); border-bottom: 2px solid var(--ink); }
+.message-text {
+  margin: var(--s3) 0 var(--s2); white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.7;
+  background: repeating-linear-gradient(to bottom, transparent 0 calc(1.7em - 1px), var(--rule) calc(1.7em - 1px) 1.7em);
+}
+mark.flagged {
+  background: none; color: inherit;
+  text-decoration: underline 2px var(--red); text-underline-offset: 4px; text-decoration-skip-ink: none;
+}
+.checked figcaption { font-size: var(--fs-cap); }
+
+/* graph */
+.graph { height: 460px; margin-top: var(--s3); border: 1px solid var(--rule); border-radius: var(--radius); background: var(--paper); }
+.legend { display: flex; gap: var(--s4); flex-wrap: wrap; margin-top: var(--s2); font-size: var(--fs-cap); color: var(--muted); }
+.legend span::before { content: ""; display: inline-block; width: 18px; height: 3px; margin-right: 6px; vertical-align: middle; background: var(--c); }
+
+/* claims and evidence */
+.explorer .item { padding: var(--s4) var(--s1); display: grid; gap: var(--s2); scroll-margin: 80px; }
+.item > header { display: flex; gap: var(--s3); align-items: baseline; flex-wrap: wrap; }
+.item h3 { font-size: var(--fs-title); font-weight: 650; }
+.v-contradicted, .v-mismatch, .v-suspicious { color: var(--red); }
+.v-supported, .v-verified { color: var(--blue); }
+.v-unverified, .v-insufficient_evidence { color: var(--muted); }
+.ev { padding: var(--s3) var(--s2); border-top: 1px solid var(--rule); scroll-margin: 80px; transition: background-color 400ms ease-out; }
+.ev header { display: flex; gap: var(--s2); align-items: baseline; flex-wrap: wrap; font-size: var(--fs-small); }
+.ev blockquote { margin: 6px 0 0; overflow-wrap: anywhere; }
+.tier { font-weight: 800; font-size: var(--fs-cap); padding: 0 6px; border-radius: 2px; background: var(--rule); color: var(--ink); }
+.tier-A, .tier-B { background: var(--ink); color: var(--paper); }
+.dir { font-weight: 650; }
+.dir-warns, .dir-contradicts { color: var(--red); }
+.dir-supports { color: var(--blue); }
+.flash { background: var(--blue-wash) !important; }
+@media (prefers-reduced-motion: reduce) { .ev { transition: none; } }
+
+@media (max-width: 960px) {
+  .home, .verdict { grid-template-columns: minmax(0, 1fr); gap: var(--s6); }
+  .how { padding-top: 0; }
+  .checked { position: static; }
+}
+@media (max-width: 720px) {
+  .band-inner { padding: var(--s3) var(--s4); gap: var(--s2) var(--s4); }
+  .band-title { order: 2; font-size: var(--fs-title); }
+  .band-actions { order: 3; width: 100%; margin-left: 0; }
+  .band-actions > * { flex: 1; }
+  .sheet { padding: var(--s4); }
+  .page { padding: var(--s3) var(--s3) var(--s7); }
+  .graph { height: 520px; }
+}

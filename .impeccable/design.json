@@ -1,0 +1,472 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-10T00:00:00Z",
+  "title": "Design System: Continuum",
+  "extensions": {
+    "colorMeta": {
+      "cover": {
+        "role": "primary",
+        "displayName": "555 Cover Red",
+        "canonical": "oklch(53.0% 0.196 25.8)",
+        "tonalRamp": [
+          "oklch(15% 0.148 25.8)",
+          "oklch(26% 0.170 25.8)",
+          "oklch(38% 0.193 25.8)",
+          "oklch(49% 0.196 25.8)",
+          "oklch(61% 0.196 25.8)",
+          "oklch(72% 0.193 25.8)",
+          "oklch(84% 0.170 25.8)",
+          "oklch(95% 0.148 25.8)"
+        ],
+        "dark": "#b11e24"
+      },
+      "cover-deep": {
+        "role": "primary",
+        "displayName": "Cover Deep",
+        "canonical": "oklch(45.4% 0.168 25.8)",
+        "tonalRamp": [
+          "oklch(15% 0.131 25.8)",
+          "oklch(26% 0.150 25.8)",
+          "oklch(38% 0.168 25.8)",
+          "oklch(49% 0.168 25.8)",
+          "oklch(61% 0.168 25.8)",
+          "oklch(72% 0.168 25.8)",
+          "oklch(84% 0.150 25.8)",
+          "oklch(95% 0.131 25.8)"
+        ],
+        "dark": "#8e171c"
+      },
+      "on-cover": {
+        "role": "neutral",
+        "displayName": "On-Cover White",
+        "canonical": "oklch(100.0% 0.000 89.9)",
+        "tonalRamp": [
+          "oklch(15% 0.000 89.9)",
+          "oklch(26% 0.000 89.9)",
+          "oklch(38% 0.000 89.9)",
+          "oklch(49% 0.000 89.9)",
+          "oklch(61% 0.000 89.9)",
+          "oklch(72% 0.000 89.9)",
+          "oklch(84% 0.000 89.9)",
+          "oklch(95% 0.000 89.9)"
+        ],
+        "dark": "#ffffff"
+      },
+      "on-cover-soft": {
+        "role": "neutral",
+        "displayName": "On-Cover Blush",
+        "canonical": "oklch(93.7% 0.029 15.0)",
+        "tonalRamp": [
+          "oklch(15% 0.029 15.0)",
+          "oklch(26% 0.029 15.0)",
+          "oklch(38% 0.029 15.0)",
+          "oklch(49% 0.029 15.0)",
+          "oklch(61% 0.029 15.0)",
+          "oklch(72% 0.029 15.0)",
+          "oklch(84% 0.029 15.0)",
+          "oklch(95% 0.029 15.0)"
+        ],
+        "dark": "#fde3e4"
+      },
+      "paper": {
+        "role": "neutral",
+        "displayName": "Paper",
+        "canonical": "oklch(99.1% 0.002 247.8)",
+        "tonalRamp": [
+          "oklch(15% 0.002 247.8)",
+          "oklch(26% 0.002 247.8)",
+          "oklch(38% 0.002 247.8)",
+          "oklch(49% 0.002 247.8)",
+          "oklch(61% 0.002 247.8)",
+          "oklch(72% 0.002 247.8)",
+          "oklch(84% 0.002 247.8)",
+          "oklch(95% 0.002 247.8)"
+        ],
+        "dark": "#1b1e24"
+      },
+      "ground": {
+        "role": "neutral",
+        "displayName": "Ground",
+        "canonical": "oklch(96.3% 0.006 255.5)",
+        "tonalRamp": [
+          "oklch(15% 0.006 255.5)",
+          "oklch(26% 0.006 255.5)",
+          "oklch(38% 0.006 255.5)",
+          "oklch(49% 0.006 255.5)",
+          "oklch(61% 0.006 255.5)",
+          "oklch(72% 0.006 255.5)",
+          "oklch(84% 0.006 255.5)",
+          "oklch(95% 0.006 255.5)"
+        ],
+        "dark": "#101215"
+      },
+      "rule": {
+        "role": "neutral",
+        "displayName": "Pale Rule",
+        "canonical": "oklch(90.7% 0.024 250.1)",
+        "tonalRamp": [
+          "oklch(15% 0.024 250.1)",
+          "oklch(26% 0.024 250.1)",
+          "oklch(38% 0.024 250.1)",
+          "oklch(49% 0.024 250.1)",
+          "oklch(61% 0.024 250.1)",
+          "oklch(72% 0.024 250.1)",
+          "oklch(84% 0.024 250.1)",
+          "oklch(95% 0.024 250.1)"
+        ],
+        "dark": "#2a3442"
+      },
+      "rule-strong": {
+        "role": "neutral",
+        "displayName": "Strong Rule",
+        "canonical": "oklch(77.5% 0.054 251.1)",
+        "tonalRamp": [
+          "oklch(15% 0.054 251.1)",
+          "oklch(26% 0.054 251.1)",
+          "oklch(38% 0.054 251.1)",
+          "oklch(49% 0.054 251.1)",
+          "oklch(61% 0.054 251.1)",
+          "oklch(72% 0.054 251.1)",
+          "oklch(84% 0.054 251.1)",
+          "oklch(95% 0.054 251.1)"
+        ],
+        "dark": "#43546c"
+      },
+      "margin": {
+        "role": "neutral",
+        "displayName": "Margin Pink",
+        "canonical": "oklch(76.8% 0.097 16.4)",
+        "tonalRamp": [
+          "oklch(15% 0.088 16.4)",
+          "oklch(26% 0.097 16.4)",
+          "oklch(38% 0.097 16.4)",
+          "oklch(49% 0.097 16.4)",
+          "oklch(61% 0.097 16.4)",
+          "oklch(72% 0.097 16.4)",
+          "oklch(84% 0.097 16.4)",
+          "oklch(95% 0.088 16.4)"
+        ],
+        "dark": "#6e2b30"
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "Graphite Ink",
+        "canonical": "oklch(23.5% 0.012 264.3)",
+        "tonalRamp": [
+          "oklch(15% 0.012 264.3)",
+          "oklch(26% 0.012 264.3)",
+          "oklch(38% 0.012 264.3)",
+          "oklch(49% 0.012 264.3)",
+          "oklch(61% 0.012 264.3)",
+          "oklch(72% 0.012 264.3)",
+          "oklch(84% 0.012 264.3)",
+          "oklch(95% 0.012 264.3)"
+        ],
+        "dark": "#e8ebf0"
+      },
+      "muted": {
+        "role": "neutral",
+        "displayName": "Pencil Grey",
+        "canonical": "oklch(47.3% 0.023 260.1)",
+        "tonalRamp": [
+          "oklch(15% 0.023 260.1)",
+          "oklch(26% 0.023 260.1)",
+          "oklch(38% 0.023 260.1)",
+          "oklch(49% 0.023 260.1)",
+          "oklch(61% 0.023 260.1)",
+          "oklch(72% 0.023 260.1)",
+          "oklch(84% 0.023 260.1)",
+          "oklch(95% 0.023 260.1)"
+        ],
+        "dark": "#a6afbc"
+      },
+      "red": {
+        "role": "secondary",
+        "displayName": "Warning Red",
+        "canonical": "oklch(53.0% 0.196 25.8)",
+        "tonalRamp": [
+          "oklch(15% 0.148 25.8)",
+          "oklch(26% 0.170 25.8)",
+          "oklch(38% 0.193 25.8)",
+          "oklch(49% 0.196 25.8)",
+          "oklch(61% 0.196 25.8)",
+          "oklch(72% 0.193 25.8)",
+          "oklch(84% 0.170 25.8)",
+          "oklch(95% 0.148 25.8)"
+        ],
+        "dark": "#ff858a"
+      },
+      "red-wash": {
+        "role": "secondary",
+        "displayName": "Red Wash",
+        "canonical": "oklch(95.6% 0.017 17.5)",
+        "tonalRamp": [
+          "oklch(15% 0.017 17.5)",
+          "oklch(26% 0.017 17.5)",
+          "oklch(38% 0.017 17.5)",
+          "oklch(49% 0.017 17.5)",
+          "oklch(61% 0.017 17.5)",
+          "oklch(72% 0.017 17.5)",
+          "oklch(84% 0.017 17.5)",
+          "oklch(95% 0.017 17.5)"
+        ],
+        "dark": "#3a1e22"
+      },
+      "blue": {
+        "role": "tertiary",
+        "displayName": "Ballpoint Blue",
+        "canonical": "oklch(42.9% 0.137 260.9)",
+        "tonalRamp": [
+          "oklch(15% 0.112 260.9)",
+          "oklch(26% 0.128 260.9)",
+          "oklch(38% 0.137 260.9)",
+          "oklch(49% 0.137 260.9)",
+          "oklch(61% 0.137 260.9)",
+          "oklch(72% 0.137 260.9)",
+          "oklch(84% 0.128 260.9)",
+          "oklch(95% 0.112 260.9)"
+        ],
+        "dark": "#93b6ff"
+      },
+      "blue-wash": {
+        "role": "tertiary",
+        "displayName": "Blue Wash",
+        "canonical": "oklch(94.8% 0.016 262.8)",
+        "tonalRamp": [
+          "oklch(15% 0.016 262.8)",
+          "oklch(26% 0.016 262.8)",
+          "oklch(38% 0.016 262.8)",
+          "oklch(49% 0.016 262.8)",
+          "oklch(61% 0.016 262.8)",
+          "oklch(72% 0.016 262.8)",
+          "oklch(84% 0.016 262.8)",
+          "oklch(95% 0.016 262.8)"
+        ],
+        "dark": "#1d2a45"
+      }
+    },
+    "typographyMeta": {
+      "numeral": {
+        "displayName": "Cover Numeral",
+        "purpose": "The band's day count only."
+      },
+      "level": {
+        "displayName": "Check Level",
+        "purpose": "Risk level on the message check, uppercase, red or blue."
+      },
+      "headline": {
+        "displayName": "Sheet Head",
+        "purpose": "Sheet heads and band title, wdth 92%."
+      },
+      "title": {
+        "displayName": "Entry Title",
+        "purpose": "Entry titles, sub-heads, claims."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Running text; 1.7 line height on ruled text."
+      },
+      "small": {
+        "displayName": "Small",
+        "purpose": "Meta, dates, buttons, labels."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Chips, tags, legends, captions."
+      },
+      "wordmark": {
+        "displayName": "Wordmark",
+        "purpose": "Continuum wordmark on the band, wdth 112%."
+      }
+    },
+    "fonts": [
+      {
+        "family": "Archivo Variable",
+        "source": "@fontsource-variable/archivo/standard.css (self-hosted)",
+        "axes": {
+          "wght": "100-900",
+          "wdth": "62-125%"
+        }
+      }
+    ],
+    "shadows": [
+      {
+        "name": "sheet-lift",
+        "value": "0 1px 2px rgb(27 30 36 / 0.05)",
+        "purpose": "Every paper sheet."
+      },
+      {
+        "name": "popover",
+        "value": "0 6px 24px rgb(27 30 36 / 0.14), 0 1px 3px rgb(27 30 36 / 0.1)",
+        "dark": "0 8px 28px rgb(0 0 0 / 0.5), 0 1px 3px rgb(0 0 0 / 0.4)",
+        "purpose": "Snooze and Settings menus only."
+      }
+    ],
+    "motion": [
+      {
+        "name": "strike",
+        "value": "420ms cubic-bezier(0.2, 0.7, 0.2, 1)",
+        "purpose": "Signature: ballpoint stroke drawn once through a settling entry; reduced motion snaps it drawn."
+      },
+      {
+        "name": "state",
+        "value": "120ms ease-out",
+        "purpose": "Button and row background/border changes."
+      },
+      {
+        "name": "chevron",
+        "value": "160ms ease-out",
+        "purpose": "Row chevron rotates 90deg when its detail opens."
+      },
+      {
+        "name": "evidence-flash",
+        "value": "400ms ease-out",
+        "purpose": "Blue-wash flash on the evidence item a graph tap jumps to; off under reduced motion."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "phone",
+        "value": "720px"
+      },
+      {
+        "name": "check-stack",
+        "value": "960px"
+      },
+      {
+        "name": "dash-stack",
+        "value": "1080px"
+      }
+    ],
+    "themes": {
+      "dark": {
+        "trigger": "prefers-color-scheme: dark",
+        "note": "Same roles; values in colorMeta.<token>.dark."
+      }
+    }
+  },
+  "components": [
+    {
+      "name": "Button",
+      "kind": "button",
+      "refersTo": "button",
+      "description": "Default control: paper face, strong-rule border.",
+      "html": "<button class=\"ds-btn\">Snooze</button>",
+      "css": ".ds-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:36px;padding:0 14px;border-radius:var(--radius,3px);border:1px solid var(--rule-strong,#9db9d8);background:var(--paper,#fbfcfd);color:var(--ink,#1b1e24);font:650 0.8125rem/1.2 'Archivo Variable','Archivo',system-ui,sans-serif;cursor:pointer;transition:background-color 120ms ease-out,border-color 120ms ease-out}.ds-btn:focus-visible{outline:2px solid var(--blue,#1f4b99);outline-offset:2px}.ds-btn:hover{background:var(--ground,#f0f3f7);border-color:var(--muted,#545c69)}"
+    },
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Ballpoint-blue main action: Resolve, Check, Send.",
+      "html": "<button class=\"ds-btn ds-btn-primary\"><svg viewBox=\"0 0 24 24\" width=\"16\" height=\"16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><circle cx=\"11\" cy=\"11\" r=\"6\"/><path d=\"M15.5 15.5L20 20\"/></svg>Check</button>",
+      "css": ".ds-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:36px;padding:0 14px;border-radius:var(--radius,3px);border:1px solid var(--rule-strong,#9db9d8);background:var(--paper,#fbfcfd);color:var(--ink,#1b1e24);font:650 0.8125rem/1.2 'Archivo Variable','Archivo',system-ui,sans-serif;cursor:pointer;transition:background-color 120ms ease-out,border-color 120ms ease-out}.ds-btn:focus-visible{outline:2px solid var(--blue,#1f4b99);outline-offset:2px}.ds-btn-primary{background:var(--blue,#1f4b99);border-color:var(--blue,#1f4b99);color:var(--paper,#fbfcfd)}.ds-btn-primary:hover{background:color-mix(in oklab,var(--blue,#1f4b99) 86%,var(--ink,#1b1e24))}"
+    },
+    {
+      "name": "Danger Button",
+      "kind": "button",
+      "refersTo": "button-danger",
+      "description": "Delete, set apart from Resolve.",
+      "html": "<button class=\"ds-btn ds-btn-danger\">Delete</button>",
+      "css": ".ds-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:36px;padding:0 14px;border-radius:var(--radius,3px);border:1px solid var(--rule-strong,#9db9d8);background:var(--paper,#fbfcfd);color:var(--ink,#1b1e24);font:650 0.8125rem/1.2 'Archivo Variable','Archivo',system-ui,sans-serif;cursor:pointer;transition:background-color 120ms ease-out,border-color 120ms ease-out}.ds-btn:focus-visible{outline:2px solid var(--blue,#1f4b99);outline-offset:2px}.ds-btn-danger{color:var(--red,#c42127);border-color:color-mix(in oklab,var(--red,#c42127) 45%,transparent);background:transparent}.ds-btn-danger:hover{background:var(--red-wash,#fcecec);border-color:var(--red,#c42127)}"
+    },
+    {
+      "name": "Text Input",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "Native field on paper, blue focus.",
+      "html": "<input class=\"ds-input\" type=\"text\" placeholder=\"Type a message…\">",
+      "css": ".ds-input{width:280px;min-height:38px;padding:8px 10px;border:1px solid var(--rule-strong,#9db9d8);border-radius:3px;background:var(--paper,#fbfcfd);color:var(--ink,#1b1e24);font:400 0.9375rem/1.4 'Archivo Variable','Archivo',system-ui,sans-serif}.ds-input::placeholder{color:var(--muted,#545c69)}.ds-input:hover{border-color:var(--muted,#545c69)}.ds-input:focus-visible{outline:2px solid var(--blue,#1f4b99);outline-offset:0;border-color:var(--blue,#1f4b99)}"
+    },
+    {
+      "name": "Cover Band",
+      "kind": "nav",
+      "refersTo": "band",
+      "description": "555-red band on every page: wordmark, the day's count in 62%-width black numerals, actions.",
+      "html": "<header class=\"ds-band\"><a class=\"ds-wordmark\" href=\"#\"><svg viewBox=\"0 0 24 24\" width=\"26\" height=\"26\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><rect x=\"5\" y=\"3\" width=\"14\" height=\"18\" rx=\"1.5\"/><path d=\"M8.5 3v18M11.5 8.5h4.5M11.5 12h4.5M11 15.6c1.6-.5 3.4.4 5.6-.3\"/></svg>Continuum</a><div class=\"ds-tally\"><span class=\"ds-tally-n\">3</span><span class=\"ds-tally-l\">need you today</span></div><button class=\"ds-on-cover\">Check a message</button></header>",
+      "css": ".ds-band{display:flex;align-items:center;gap:24px;flex-wrap:wrap;padding:16px 24px;background:var(--cover,#c42127);color:#fff;font-family:'Archivo Variable','Archivo',system-ui,sans-serif}.ds-wordmark{display:inline-flex;align-items:center;gap:8px;color:inherit;text-decoration:none;font-weight:750;font-stretch:112%;font-size:1.25rem;letter-spacing:-0.01em}.ds-tally{display:flex;align-items:center;gap:12px;margin-left:auto}.ds-tally-n{font-size:4rem;font-weight:900;font-stretch:62%;line-height:.82;letter-spacing:-0.02em;font-variant-numeric:tabular-nums}.ds-tally-l{font-size:1.0625rem;font-weight:650;line-height:1.15;max-width:9ch;color:#fde3e4}.ds-on-cover{min-height:36px;padding:0 14px;border-radius:3px;border:1px solid rgb(255 255 255 / .55);background:transparent;color:#fff;font:650 .8125rem 'Archivo Variable','Archivo',system-ui,sans-serif;cursor:pointer;transition:background-color 120ms ease-out}.ds-on-cover:hover{background:var(--cover-deep,#9f191e);border-color:#fff}.ds-on-cover:focus-visible{outline:2px solid #fff;outline-offset:2px}"
+    },
+    {
+      "name": "Verdict Chip",
+      "kind": "chip",
+      "refersTo": "chip",
+      "description": "Outline tag in the verdict's ink; never fills.",
+      "html": "<span class=\"ds-chip ds-chip-warn\">Contradicted</span> <span class=\"ds-chip ds-chip-ok\">Official</span>",
+      "css": ".ds-chip{display:inline-block;padding:1px 7px;border:1px solid currentColor;border-radius:2px;font:700 .75rem/1.5 'Archivo Variable','Archivo',system-ui,sans-serif;white-space:nowrap}.ds-chip-warn{color:var(--red,#c42127)}.ds-chip-ok{color:var(--blue,#1f4b99)}"
+    },
+    {
+      "name": "Sheet",
+      "kind": "card",
+      "refersTo": "sheet",
+      "description": "Paper sheet on the ground with a 2px ink-ruled head.",
+      "html": "<section class=\"ds-sheet\"><div class=\"ds-head\"><h2>Owed to you</h2><span class=\"ds-count\">4</span></div><p>Entries go here.</p></section>",
+      "css": ".ds-sheet{max-width:420px;background:var(--paper,#fbfcfd);border:1px solid var(--rule,#d5e2f0);border-radius:3px;padding:24px;box-shadow:0 1px 2px rgb(27 30 36 / .05);color:var(--ink,#1b1e24);font:400 .9375rem/1.5 'Archivo Variable','Archivo',system-ui,sans-serif}.ds-head{display:flex;align-items:baseline;gap:12px;padding-bottom:8px;border-bottom:2px solid var(--ink,#1b1e24);margin-bottom:12px}.ds-head h2{margin:0;font-size:1.5rem;font-weight:800;font-stretch:92%;letter-spacing:-0.01em}.ds-count{font-size:1.0625rem;font-weight:600;color:var(--muted,#545c69);font-variant-numeric:tabular-nums}"
+    },
+    {
+      "name": "Margined Ledger Rows",
+      "kind": "custom",
+      "refersTo": "entry",
+      "description": "Ruled entries with the double red margin, a red flag column, and the ballpoint strike through a settled entry.",
+      "html": "<ul class=\"ds-rows\"><li><div class=\"ds-entry\"><span class=\"ds-flag\"><svg viewBox=\"0 0 24 24\" width=\"20\" height=\"20\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><circle cx=\"12\" cy=\"12\" r=\"8.5\"/><path d=\"M12 7.6v5.2\"/><circle cx=\"12\" cy=\"16.3\" r=\".9\" fill=\"currentColor\" stroke=\"none\"/></svg></span><span class=\"ds-t\"><b>Pay RM250 deposit to Apex Careers</b><small>Risk signals</small></span><span class=\"ds-due ds-late\">2 days late</span></div></li><li><div class=\"ds-entry\"><span></span><span class=\"ds-t ds-settled\"><b>Send CV to Aina</b><small>You owe</small><svg class=\"ds-strike\" viewBox=\"0 0 100 10\" preserveAspectRatio=\"none\"><path pathLength=\"1\" vector-effect=\"non-scaling-stroke\" d=\"M1 6.2C18 3.6 36 7.4 55 4.8S86 5.6 99 3.4\"/></svg></span><span class=\"ds-due ds-soon\">Fri</span></div></li></ul>",
+      "css": ".ds-rows{list-style:none;margin:0;padding:0;max-width:480px;background:var(--paper,#fbfcfd) linear-gradient(to right,transparent 39px,var(--margin,#eb9a9e) 39px 40px,transparent 40px 43px,var(--margin,#eb9a9e) 43px 44px,transparent 44px);font:400 .9375rem/1.5 'Archivo Variable','Archivo',system-ui,sans-serif;color:var(--ink,#1b1e24)}.ds-rows>li{border-bottom:1px solid var(--rule,#d5e2f0)}.ds-entry{display:grid;grid-template-columns:38px minmax(0,1fr) auto;align-items:center;gap:12px;min-height:48px;padding:8px 4px 8px 0}.ds-flag{color:var(--red,#c42127);display:grid;place-items:center}.ds-t{position:relative;min-width:0}.ds-t b{display:block;font-size:1.0625rem;font-weight:650}.ds-t small{display:block;font-size:.8125rem;color:var(--muted,#545c69)}.ds-settled b,.ds-settled small{color:var(--muted,#545c69)}.ds-due{font-size:.8125rem;color:var(--muted,#545c69);font-variant-numeric:tabular-nums;white-space:nowrap}.ds-late{color:var(--red,#c42127);font-weight:650}.ds-soon{color:var(--blue,#1f4b99);font-weight:600}.ds-strike{position:absolute;left:-2px;top:.62em;width:calc(100% + 4px);height:10px;overflow:visible;pointer-events:none}.ds-strike path{fill:none;stroke:var(--blue,#1f4b99);stroke-width:2.2;stroke-linecap:round;stroke-dasharray:1;stroke-dashoffset:1;animation:ds-strike 420ms cubic-bezier(.2,.7,.2,1) forwards}@keyframes ds-strike{to{stroke-dashoffset:0}}@media (prefers-reduced-motion:reduce){.ds-strike path{animation:none;stroke-dashoffset:0}}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Buku 555 Pocket Ledger",
+    "overview": "Continuum is kept like the kedai runcit's 555 book: a red cover band on top, cool white ruled sheets underneath, graphite handwriting-weight ink. What you owe, what's owed to you, and requests that want your money are entries on lines, not cards on a board. The system refuses the SaaS task board (sidebar, card grid, blue-accent chrome) and the dark threat console.\n\nTwo inks carry meaning and nothing else gets colour. Red is Continuum's warning: risk signals, overdue, payment asks not yet checked. Ballpoint blue is settled and yours: resolve, soon, supports, your own chat messages. The ledger's furniture (pale-blue rules, the double red margin, the cover band) stays the same in every state, so meaning comes only from which ink an entry is written in.\n\nDensity is a working notebook: 48px rows, small type, tabular numerals, no decorative imagery. The one flourish is the strike: settling an entry draws a single ballpoint line through it, in place. This is an Operate-mode product; controls, inputs and menus stay standard and legible.",
+    "keyCharacteristics": [
+      "Red 555 cover band with the day's count in extra-condensed black numerals.",
+      "Paper sheets on a grey-white ground, pale-blue rules between entries and behind running text.",
+      "Two meaning-bearing inks: red warns, blue settles.",
+      "Archivo Variable throughout, width axis doing the expressive work.",
+      "Authored one-stroke line icons.",
+      "One animation that matters: the ballpoint strike."
+    ],
+    "rules": [
+      {
+        "name": "The Two Inks Rule",
+        "body": "Red means Continuum is warning you; blue means it's settled or it's yours. Never use either as decoration, and never swap them.",
+        "section": "colors"
+      },
+      {
+        "name": "The No Grey Box Rule",
+        "body": "Content lives on paper sheets with rules, never in grey or tinted filled boxes. Washes and the ground appear only as hover, selection or a brief flash.",
+        "section": "colors"
+      },
+      {
+        "name": "The Width Not Size Rule",
+        "body": "Emphasis comes from Archivo's width and weight axes, not from new families or ever-larger sizes. Condensed 62% is reserved for numerals and the check level.",
+        "section": "typography"
+      },
+      {
+        "name": "The Tabular Rule",
+        "body": "Counts, dates and step numbers use tabular numerals, like an amount column.",
+        "section": "typography"
+      },
+      {
+        "name": "The Paper Not Plastic Rule",
+        "body": "If it isn't a floating menu, it doesn't cast a visible shadow.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "**Do** put every page under the red cover band, with the wordmark at left.",
+      "**Do** write warnings in red and settled or user-owned things in blue, and nothing else in either.",
+      "**Do** separate entries with 1px pale-blue rules and close sheet heads with a 2px ink rule.",
+      "**Do** use the double margin rule and flag column for any list where Continuum may warn.",
+      "**Do** use Archivo's width axis for emphasis: 62% black for numerals and the check level only.",
+      "**Do** keep motion to small state transitions (120–160ms colour and rotate, a 400ms evidence flash) plus the strike; honour reduced motion.",
+      "**Do** word every risk as \"risk signals\", \"warning found\", \"hold off paying\". The level shown is the fixed-rule result.",
+      "**Do** keep Operate controls standard: native inputs, details-based menus, visible focus rings."
+    ],
+    "donts": [
+      "**Don't** fill sections, cards or callouts with grey or tinted boxes; sheets are paper.",
+      "**Don't** show \"scam\", \"scammer\" or \"fraud\" as a verdict, label or chip.",
+      "**Don't** add a second display family, or use the 62% condensed width for body text or section heads.",
+      "**Don't** animate entrances, lists or numbers; the strike is the only drawn motion.",
+      "**Don't** use shadows beyond the sheet hairline and the popover.",
+      "**Don't** use icon fonts, emoji or text glyphs as icons; draw them in the authored line set.",
+      "**Don't** rebuild the SaaS task board: no sidebar, no card grid, no blue as a generic brand accent."
+    ]
+  }
+}
