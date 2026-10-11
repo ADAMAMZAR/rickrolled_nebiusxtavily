@@ -1,0 +1,121 @@
+/* Dashboard layout: Needs attention leads full width; then the ledger beside the chat.
+   Phone: attention, chat, ledger. Each is a ruled paper sheet on the ground. */
+.dash {
+  display: grid; gap: var(--s5);
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 400px);
+  grid-template-areas: "attention attention" "ledger chat";
+  align-items: start;
+}
+.attention { grid-area: attention; }
+.ledger { grid-area: ledger; }
+.chat { grid-area: chat; }
+.dash > .section + .section { margin-top: 0; }
+
+.empty.quiet { padding: var(--s4) var(--s1); }
+.pad { padding: var(--s3) var(--s1); }
+.count.num { font-weight: 600; color: var(--muted); }
+.attention .subhead { display: flex; gap: var(--s2); align-items: baseline; }
+
+/* the ledger's two sides: stacked beside the chat, side by side when the ledger has the full width */
+.sides { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--s5) var(--s6); }
+.side-col .subhead { display: flex; gap: var(--s2); align-items: baseline; padding-bottom: var(--s2); border-bottom: 1px solid var(--rule-strong); margin-bottom: 0; }
+.empty blockquote { margin: var(--s4) 0; padding: 0 var(--s1); color: var(--ink); }
+
+/* a loop row: margin mark, title, due (the ledger's amount column), chevron */
+.loop-entry { grid-template-columns: 28px minmax(0, 1fr) auto 16px; grid-template-areas: "kind title due chev"; }
+.margined .loop-entry { grid-template-columns: calc(var(--m) - 6px) minmax(0, 1fr) auto 16px; }
+.loop-entry .kind, .loop-entry .flag { grid-area: kind; }
+.loop-entry .title { grid-area: title; }
+.loop-entry .due { grid-area: due; }
+.loop-entry .chev { grid-area: chev; }
+
+/* a loop row opens its detail in place */
+.row-btn {
+  width: 100%; border: 0; background: none; text-align: left; cursor: pointer; color: inherit; border-radius: 0;
+  transition: background-color 120ms ease-out;
+}
+.row-btn:hover { background: color-mix(in oklab, var(--blue-wash) 45%, transparent); }
+.chev { color: var(--muted); display: grid; transition: transform 160ms ease-out; }
+.chev svg { width: 16px; height: 16px; }
+.chev.open { transform: rotate(90deg); }
+li.fresh > .row-btn { background: var(--blue-wash); }
+li.fresh > .row-btn .title b::after {
+  content: "updated"; margin-left: var(--s2); font-size: var(--fs-cap); font-weight: 650; color: var(--blue); vertical-align: 1px;
+}
+
+.detail { padding: var(--s3) var(--s4) var(--s5) 54px; display: grid; gap: var(--s5); }
+.detail dl { margin: 0; display: grid; grid-template-columns: max-content 1fr; gap: var(--s1) var(--s4); }
+.detail dl > div { display: contents; }
+.detail dt { color: var(--muted); font-size: var(--fs-small); }
+.detail dd { margin: 0; overflow-wrap: anywhere; }
+.detail h4 { font-size: var(--fs-small); font-weight: 750; margin-bottom: var(--s2); }
+.why { margin: 0; }
+.why blockquote { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.why figcaption { margin-top: var(--s2); font-size: var(--fs-small); color: var(--muted); }
+.history ul { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s1); font-size: var(--fs-small); color: var(--muted); }
+.history li { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); }
+.field { display: grid; gap: var(--s2); }
+.field .row { display: flex; gap: var(--s2); }
+.actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); padding-top: var(--s4); border-top: 1px solid var(--rule); }
+.actions .apart { margin-left: auto; } /* Delete stands alone, away from Resolve */
+.actions .error-line { width: 100%; }
+
+/* chat: sized to its content until a conversation starts, then a fixed sheet that scrolls */
+.chat { position: sticky; top: var(--s4); display: flex; flex-direction: column; }
+.chat.filled { height: min(640px, calc(100dvh - 2 * var(--s4))); }
+.messages {
+  display: flex; flex-direction: column; gap: var(--s3); padding: var(--s4) 0 var(--s2); overscroll-behavior: contain;
+}
+.chat.filled .messages { flex: 1; min-height: 0; overflow-y: auto; }
+.hello { color: var(--muted); display: grid; gap: var(--s2); }
+.hello p:first-child { color: var(--ink); font-size: var(--fs-title); font-weight: 600; line-height: 1.35; }
+.msg { max-width: 92%; padding: var(--s2) var(--s3); border-radius: var(--radius); white-space: pre-wrap; overflow-wrap: anywhere; }
+.msg.user { align-self: flex-end; background: var(--blue); color: var(--paper); }
+.msg.user a { color: inherit; }
+.msg.bot { align-self: flex-start; border: 1px solid var(--rule); }
+.msg.error { align-self: flex-start; color: var(--red); border: 1px solid color-mix(in oklab, var(--red) 40%, transparent); }
+.msg .copy { display: flex; margin-top: var(--s2); }
+.writing { color: var(--muted); font-size: var(--fs-small); }
+.composer { display: flex; gap: var(--s2); align-items: flex-end; padding-top: var(--s3); border-top: 1px solid var(--rule); }
+.composer textarea { resize: none; max-height: 9.5em; }
+
+.settings-pop { min-width: 300px; max-width: 340px; gap: var(--s2); padding: var(--s4); font-size: var(--fs-small); }
+.settings-pop h3 { font-size: var(--fs-small); font-weight: 750; }
+.settings-pop h3:not(:first-child) { margin-top: var(--s3); padding-top: var(--s3); border-top: 1px solid var(--rule); }
+.ok { color: var(--blue); font-weight: 650; }
+
+@media (max-width: 1080px) {
+  .dash { grid-template-columns: minmax(0, 1fr); grid-template-areas: "attention" "chat" "ledger"; }
+  .chat { position: static; }
+  .chat.filled { height: min(560px, 75dvh); }
+  .sides { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 720px) {
+  .page { padding: var(--s3) var(--s3) var(--s7); }
+  .sheet { padding: var(--s4); }
+  .band-inner { padding: var(--s3) var(--s4); gap: var(--s3) var(--s4); }
+  .tally { gap: var(--s2); }
+  .tally-n { font-size: 3rem; }
+  .tally-label { font-size: var(--fs-small); }
+  .band-actions { order: 3; width: 100%; margin-left: 0; }
+  .band-actions > * { flex: 1; }
+  .band-actions .btn, .band-actions summary.btn { width: 100%; }
+  .sides { grid-template-columns: minmax(0, 1fr); }
+  .entry { grid-template-columns: 24px minmax(0, 1fr); }
+  .entry .side { grid-column: 2; justify-content: flex-start; flex-wrap: wrap; }
+  .margined .entry { grid-template-columns: calc(var(--m) - 6px) minmax(0, 1fr); }
+  .loop-entry, .margined .loop-entry { grid-template-areas: "kind title chev" "kind due chev"; row-gap: 2px; }
+  .loop-entry { grid-template-columns: 24px minmax(0, 1fr) 16px; }
+  .margined .loop-entry { grid-template-columns: calc(var(--m) - 6px) minmax(0, 1fr) 16px; }
+  .loop-entry .due { justify-self: start; }
+  .detail { padding-left: var(--s2); }
+  .detail dl { grid-template-columns: 1fr; }
+  .detail dd { margin-bottom: var(--s2); }
+  .field .row { flex-wrap: wrap; }
+}
+
+/* a failed action, above the sheets */
+.notice {
+  display: flex; justify-content: space-between; gap: var(--s4); align-items: center; margin-bottom: var(--s5);
+  padding: var(--s3) var(--s4); background: var(--paper); border: 1px solid var(--red); border-radius: var(--radius); color: var(--red);
+}

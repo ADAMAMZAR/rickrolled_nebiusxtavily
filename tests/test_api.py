@@ -53,7 +53,7 @@ def test_health(client: TestClient) -> None:
 
 def test_ui_is_served(client: TestClient) -> None:
     response = client.get("/")
-    assert response.status_code == 200 and "Continuum" in response.text
+    assert response.status_code == 200 and "Troth" in response.text
 
 
 def test_chat_proxies_to_hermes(client: TestClient, hermes: FakeHermes) -> None:

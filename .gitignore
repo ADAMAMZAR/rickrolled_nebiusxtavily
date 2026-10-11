@@ -10,3 +10,6 @@ __pycache__/
 data/uploads/
 data/tavily_cache/
 .gstack/
+frontend/node_modules/
+.impeccable/questions/
+.impeccable/review/

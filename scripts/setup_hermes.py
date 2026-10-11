@@ -43,7 +43,7 @@ try:
         [PYTHON, os.path.join("scripts", "sync.py")], cwd=ROOT, env=env, capture_output=True, encoding="utf-8", errors="replace"
     )
 except OSError as e:  # the project or its .venv moved
-    sys.exit(f"Can't run Continuum's sync ({{e}}). Re-run scripts/setup_hermes.py in the Continuum folder.")
+    sys.exit(f"Can't run Troth's sync ({{e}}). Re-run scripts/setup_hermes.py in the project folder.")
 for stream, text in ((sys.stdout, done.stdout), (sys.stderr, done.stderr)):
     stream.reconfigure(encoding="utf-8")
     stream.write(text)
@@ -120,7 +120,10 @@ def main() -> None:
 
     profile_dir = hermes_root() / "profiles" / PROFILE
     if not (profile_dir / "config.yaml").exists():
-        subprocess.run([hermes, "profile", "create", PROFILE], check=True)
+        subprocess.run([hermes, "profile", "create", PROFILE, "--no-skills"], check=True)
+    # Hermes' bundled skills need tools this profile doesn't have; dropping them keeps the Telegram menu to
+    # Continuum's own (/check, /briefing). Only unmodified bundled skills are removed.
+    subprocess.run([hermes, "-p", PROFILE, "skills", "opt-out", "--remove", "--yes"], check=True, stdout=subprocess.DEVNULL)
 
     config_path = profile_dir / "config.yaml"
     config = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
@@ -129,6 +132,7 @@ def main() -> None:
     template["timezone"] = settings.timezone  # Hermes' clock and cron schedules follow it
     config_path.write_text(yaml.safe_dump(merge(config, template), sort_keys=False), encoding="utf-8")
     shutil.copyfile(ROOT / "hermes" / "SOUL.md", profile_dir / "SOUL.md")
+    shutil.copytree(ROOT / "hermes" / "skills", profile_dir / "skills" / "continuum", dirs_exist_ok=True)
     write_sync_script(profile_dir / "scripts", ROOT, sys.executable)  # this Python has Continuum's packages
 
     api_key = settings.hermes_api_key.get_secret_value() or secrets.token_urlsafe(24)
@@ -145,7 +149,7 @@ def main() -> None:
         print(f"Telegram: on for user(s) {telegram['TELEGRAM_ALLOWED_USERS']}")
     else:
         print("Telegram: off (optional, see README)")
-    print("Next: start Continuum (uvicorn app.main:app), then: hermes -p continuum gateway run")
+    print("Next: start Troth (uvicorn app.main:app), then: hermes -p continuum gateway run")
 
 
 if __name__ == "__main__":

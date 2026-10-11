@@ -70,6 +70,11 @@ def test_claim_verdicts(rows: list[tuple[Tier, Direction]], behaviours: set[str]
     assert inv.claim_verdicts([RETURNS], evidence, behaviours)[RETURNS.id][0] == verdict
 
 
+def test_paying_before_seeing_makes_a_payment_suspicious() -> None:
+    deposit = claim("Transfer the RM500 deposit to 7620xxxxxx CIMB.", ClaimCategory.payment)
+    assert inv.claim_verdicts([deposit], [], {"pay_before_seeing"})[deposit.id][0] == Verdict.suspicious
+
+
 # --- §7.4 signals ---
 
 

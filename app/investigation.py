@@ -23,9 +23,9 @@ from app.config import settings
 from app.connectors.tavily import TavilyClient, TavilyError, WebResult
 from app.db import (
     Claim, ClaimCategory, Confidence, Direction, Entity, EntityType, Evidence, Identity, Investigation,
-    InvestigationStatus, RiskLevel, RiskSignal, Tier, Verdict, utcnow,
+    InvestigationStatus, OpenLoop, RiskLevel, RiskSignal, Tier, Verdict, utcnow,
 )
-from app.engine import InvalidRequest, NotFound
+from app.engine import RISKY, InvalidRequest, NotFound, track_check
 from app.extraction import (
     Completer, ExtractionError, PageFindings, Summary, classify_page, extract_scam, plan_searches, read_screenshot,
     summarize,
@@ -68,10 +68,13 @@ WEIGHTS = {
     "contact_mismatch": 15,
     "payment_pressure": 15,
     "guaranteed_returns": 15,
+    "pay_before_seeing": 15,
     "official_identity_confirmed": -25,
     "verified_domain": -20,
     "verified_regulatory_status": -20,
 }
+TACTICS = {"payment_pressure": "Pressure to pay now", "guaranteed_returns": "Promises guaranteed returns",
+           "pay_before_seeing": "Asks you to pay before you can see or meet"}
 # Checked by file signature, not by the name or content type the browser sends.
 IMAGE_TYPES = {b"\x89PNG\r\n\x1a\n": "png", b"\xff\xd8\xff": "jpg"}
 
@@ -92,13 +95,17 @@ def image_ext(data: bytes) -> str | None:
 
 
 def create_investigation(
-    session: Session, text: str | None = None, url: str | None = None, screenshot: bytes | None = None
+    session: Session, text: str | None = None, url: str | None = None, screenshot: bytes | None = None,
+    loop_id: UUID | None = None,
 ) -> Investigation:
-    """Validate the input and save a running investigation. At least one input is needed."""
+    """Validate the input and save a running investigation. At least one input is needed.
+    `loop_id` links the check to the loop it's about (e.g. "Pay the deposit to …")."""
     text = (text or "").strip()
     url = (url or "").strip() or None
     if not (text or url or screenshot):
         raise InvalidRequest("Paste a message, a link or a screenshot.")
+    if loop_id is not None and session.get(OpenLoop, loop_id) is None:
+        raise NotFound(f"Loop {loop_id} not found.")
     if len(text) > MAX_TEXT:
         raise InvalidRequest(f"Keep the message under {MAX_TEXT} characters.")
     if url is not None and (len(url) > MAX_URL or not url.lower().startswith(("http://", "https://"))):
@@ -111,7 +118,7 @@ def create_investigation(
         if ext is None:
             raise InvalidRequest("The screenshot must be a PNG, JPEG or WebP image.")
 
-    investigation = Investigation(input_text=text, input_url=url)
+    investigation = Investigation(input_text=text, input_url=url, loop_id=loop_id)
     if screenshot is not None:
         folder = Path(settings.uploads_dir)
         folder.mkdir(parents=True, exist_ok=True)
@@ -179,6 +186,7 @@ def run_investigation(
                 _research(session, investigation, llm, get_web, only=checks, skip=frozenset(read))
             _score(session, investigation)
             _summarize(session, investigation, llm)
+            _track(session, investigation)
             investigation.status = InvestigationStatus.done
             _step(session, investigation, "Done")
         except (ExtractionError, LLMError, InvalidRequest) as e:
@@ -267,7 +275,7 @@ def _extract(session: Session, investigation: Investigation, llm: Completer, tex
         if b.kind not in {s.kind for s in signals}:  # one signal per kind
             signals.append(RiskSignal(
                 investigation_id=investigation.id, kind=b.kind, weight=WEIGHTS[b.kind], input_quote=b.quote,
-                reason="Pressure to pay now" if b.kind == "payment_pressure" else "Promises guaranteed returns",
+                reason=TACTICS[b.kind],
             ))
     session.add_all([*entities.values(), *claims, *signals])
     _step(session, investigation, f"Found {_count(len(entities), 'name or contact', 'names and contacts')}, "
@@ -389,7 +397,8 @@ STRONG = (Tier.a, Tier.b)
 AGAINST = (Direction.contradicts, Direction.warns)
 MATERIAL = (ClaimCategory.identity, ClaimCategory.regulatory)  # claims worth a follow-up round
 # Behaviour that makes a claim of this category suspicious (§7.3).
-SUSPICIOUS_WITH = {ClaimCategory.investment: "guaranteed_returns", ClaimCategory.payment: "payment_pressure"}
+SUSPICIOUS_WITH = {ClaimCategory.investment: {"guaranteed_returns"},
+                   ClaimCategory.payment: {"payment_pressure", "pay_before_seeing"}}
 LEVELS = [(75, RiskLevel.critical), (50, RiskLevel.high), (25, RiskLevel.elevated), (1, RiskLevel.guarded)]
 
 
@@ -405,7 +414,7 @@ def claim_verdicts(claims: list[Claim], evidence: list[Evidence], behaviours: se
             out[claim.id] = (Verdict.contradicted, f"Contradicted by {against[0].host} (tier {against[0].tier.value})")
         elif support:
             out[claim.id] = (Verdict.supported, f"Confirmed by {support[0].host} (tier {support[0].tier.value})")
-        elif SUSPICIOUS_WITH.get(claim.category) in behaviours:
+        elif SUSPICIOUS_WITH.get(claim.category, set()) & behaviours:
             out[claim.id] = (Verdict.suspicious, "The message uses a pressure tactic for this")
         elif rows:
             out[claim.id] = (Verdict.unverified, f"Only weaker sources: {', '.join(sorted({e.host for e in rows}))}")
@@ -636,6 +645,25 @@ def _summarize(session: Session, investigation: Investigation, llm: Completer) -
                      "signal_ids": [str(s.id)]} for s in sids.values()]
     investigation.findings = findings[:5]
     investigation.next_steps = summary.next_steps or NEXT_STEPS.get(investigation.risk_level, CAUTION)  # type: ignore[arg-type]
+
+
+def _track(session: Session, investigation: Investigation) -> None:
+    """A risky check becomes a loop, "Verify <who> before paying", so Needs attention and the morning briefing
+    keep it in front of the user. A check started from a loop is already linked to it."""
+    if investigation.loop_id is not None or investigation.risk_level not in RISKY:
+        return
+    entities = get_investigation(session, investigation.id).entities
+    orgs = [e.value for e in entities if e.type == EntityType.org and not is_regulator(e)]
+    domains = [e.value for e in entities if e.type == EntityType.domain]
+    level = investigation.risk_level
+    summary = ("A message check couldn't verify the sender." if level == RiskLevel.insufficient
+               else f"A message check found {level.value} risk, confidence {investigation.confidence}.")  # type: ignore[union-attr]
+    loop = track_check(
+        session, f"Verify {(orgs or domains or ['the sender'])[0]} before paying", summary,
+        investigation.next_steps[0] if investigation.next_steps else None,
+        investigation.input_text, f"/investigate.html#{investigation.id}",
+    )
+    investigation.loop_id = loop.id
 
 
 def _domain_checks(session: Session, investigation: Investigation) -> list[Search]:

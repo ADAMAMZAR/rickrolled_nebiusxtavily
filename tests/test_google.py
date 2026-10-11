@@ -134,6 +134,8 @@ def test_event_uses_the_users_timezone_and_lasts_an_hour() -> None:
         "start": {"dateTime": "2026-10-08T10:00:00", "timeZone": "Asia/Kuala_Lumpur"},
         "end": {"dateTime": "2026-10-08T11:00:00", "timeZone": "Asia/Kuala_Lumpur"},
     }
+    google(handler).create_event("NVIDIA interview", datetime(2026, 10, 8, 10, 0), description="Role: SWE intern")
+    assert json.loads(seen[1].content)["description"] == "Role: SWE intern"
 
 
 @pytest.mark.parametrize(("response", "message"), [

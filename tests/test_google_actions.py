@@ -23,13 +23,13 @@ DRAFT = eng.GmailDraft(to=SARAH, subject="Thank you", body="Thanks, Sarah! See y
 class FakeGoogle:
     def __init__(self, fail: bool = False) -> None:
         self.fail = fail
-        self.events: list[tuple[str, datetime, datetime | None]] = []
+        self.events: list[tuple[str, datetime, datetime | None, str | None]] = []
         self.drafts: list[tuple[str, str, str, str | None]] = []
 
-    def create_event(self, title: str, start: datetime, end: datetime | None = None) -> Event:
+    def create_event(self, title: str, start: datetime, end: datetime | None = None, description: str | None = None) -> Event:
         if self.fail:
             raise GoogleError("Google returned HTTP 500: oops")
-        self.events.append((title, start, end))
+        self.events.append((title, start, end, description))
         return Event(id="e1", link="https://calendar.google.com/event?eid=e1")
 
     def create_draft(self, to: str, subject: str, body: str, thread_id: str | None = None) -> str:
@@ -53,7 +53,7 @@ def test_propose_then_approve_creates_the_event_once(session: Session) -> None:
 
     done = eng.approve_action(session, action.id, lambda: google)
     assert (done.status, done.external_id) == (ActionStatus.done, "e1")
-    assert google.events == [("NVIDIA interview", datetime(2026, 10, 8, 10, 0), None)]
+    assert google.events == [("NVIDIA interview", datetime(2026, 10, 8, 10, 0), None, None)]
     with pytest.raises(eng.InvalidRequest, match="already done"):
         eng.approve_action(session, action.id, lambda: google)
     assert len(google.events) == 1
@@ -133,19 +133,26 @@ def test_from_chat_and_dashboard(db_url: str, tmp_path: Path, monkeypatch: pytes
     with TestClient(app, base_url="http://127.0.0.1:8000") as http:
         mcp = MCP(http)
         mcp.rpc("initialize", {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "t", "version": "0"}})
-        loop_id = remember_demo(mcp, llm)["new_loops"][0]["id"]
+        loops = remember_demo(mcp, llm)["new_loops"]
+        loop_id = loops[0]["id"]
 
         assert "ask the user" in next(t for t in mcp.rpc("tools/list")["tools"] if t["name"] == "propose_calendar_event")["description"]
-        event = mcp.call("propose_calendar_event", loop_id=loop_id, title="NVIDIA interview", start="2026-10-08T10:00")
+        event = mcp.call("propose_calendar_event", loop_id=loop_id, title="NVIDIA interview", start="2026-10-08T10:00",
+                         description="Role: SWE intern. Interviewer: Sarah.")
         assert event["proposed"] == 'Add "NVIDIA interview" to your calendar, Thu Oct 8 10:00?'
         assert "end after it starts" in mcp.call("propose_calendar_event", loop_id=loop_id, title="x",
                                                  start="2026-10-08T10:00", end="2026-10-08T09:00")["error"]
+        # a bare time lands on the loop's due date (Fri Oct 2), so the model never works out weekdays
+        assert mcp.call("propose_calendar_event", loop_id=loop_id, title="Call Sarah",
+                        start="8:00")["proposed"] == 'Add "Call Sarah" to your calendar, Fri Oct 2 08:00?'
+        assert "no due date" in mcp.call("propose_calendar_event", loop_id=loops[1]["id"], title="x", start="08:00")["error"]
         draft = mcp.call("propose_gmail_draft", loop_id=loop_id, to=SARAH, subject="Thanks", body="Thank you!")
         assert google.events == google.drafts == []
 
         assert mcp.call("approve_action", action_id=event["id"]) == {"done": event["proposed"]}
         assert http.post(f"/api/actions/{draft['id']}/approve").json()["status"] == "done"
         assert len(google.events) == len(google.drafts) == 1
+        assert google.events[0][3] == "Role: SWE intern. Interviewer: Sarah."
         assert http.post(f"/api/actions/{draft['id']}/approve").status_code == 422
 
         monkeypatch.setattr(settings, "google_token_file", str(tmp_path / "missing.json"))

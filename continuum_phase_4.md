@@ -81,7 +81,7 @@ flowchart LR
 
 | Source plan | This spec | Why |
 |---|---|---|
-| Next.js + Tailwind/shadcn + React Flow | Static `app/static/investigate.html` + **Cytoscape.js from cdnjs** | No JS build step in this repo. The REST API is the same, so a Next.js frontend can still be added later. |
+| Next.js + Tailwind/shadcn + React Flow | Static `app/static/investigate.html` + **Cytoscape.js from cdnjs** | No JS build step in this repo. The REST API is the same, so a Next.js frontend can still be added later. *Changed 2026-10-10: both pages are now React + Vite in `frontend/` (Cytoscape from npm), built into `app/static/` (user's choice during the redesign).* |
 | PostgreSQL | SQLite via `DATABASE_URL` | Enough for the demo. The URL can point to Postgres later. |
 | Server-Sent Events | The page **polls** `GET /api/investigations/{id}` every 1s; steps are stored on the record | Fewer moving parts, survives a reload, still no single opaque spinner. |
 | GraphEdge table | `graph()` builds nodes and edges from stored records | The plan's §6 step 10 already says the graph is generated from the record. |
@@ -281,6 +281,7 @@ run(id) in a background thread:
 | `contact_mismatch` | +15 | Official contacts are known (A/B page) and the submitted phone/email isn't among them |
 | `payment_pressure` | +15 | Behaviour flag with a checked input quote |
 | `guaranteed_returns` | +15 | Behaviour flag with a checked input quote |
+| `pay_before_seeing` | +15 | Behaviour flag with a checked input quote: pay before you can see or meet (no viewing, owner overseas). Added 2026-10-10 for rental scams |
 | `official_identity_confirmed` | −25 | The org is confirmed by A/B **and** all submitted contacts match the official ones |
 | `verified_domain` | −20 | The submitted domain matches the official domain |
 | `verified_regulatory_status` | −20 | A regulatory claim is `supported` by tier A |
@@ -347,6 +348,11 @@ run(id) in a background thread:
   - Creates a task loop such as *"Verify <org> before paying"*.
   - Its `Source(kind="investigation", url="/investigate.html#<id>")` is built with the existing `add_source` / `add_loop`.
   - Sets `Investigation.loop_id`.
+  - *Changed 2026-10-10 ([continuum_personal_ai_plan.md](continuum_personal_ai_plan.md) §4 P1, D1): no button.*
+    - *A check at any level but LOW saves the loop itself (`engine.track_check`). An open loop with the same title is reused. (GUARDED added 2026-10-10: a live run with Tavily down scored a clone GUARDED and left the payment loop unflagged.)*
+    - *A check can start from a loop: `loop_id` on `POST /api/investigations` and on the `investigate` tool. It links to that loop and adds none.*
+    - *A loop whose latest check is risky goes first in Needs attention ("high risk, hold off paying"), and so into the briefing.*
+    - *The `investigate` reply and the result page name the loop. Activity shows "created by a message check" (`ActivityBy.check`).*
 - **Watch for warnings** (P1): `watch_loop(loop, "<org> scam warning")`. Reuses Phase 3's web watch, and like it, findings only propose.
 
 ---

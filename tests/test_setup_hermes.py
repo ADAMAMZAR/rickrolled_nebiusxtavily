@@ -49,9 +49,13 @@ def test_every_platform_gets_continuum_tools_only() -> None:
     assert all(tools == ["continuum"] for tools in toolsets.values())
 
 
-def test_briefing_prompt_has_no_double_quotes() -> None:
-    """The README passes it as a command argument; Windows PowerShell 5.1 drops double quotes there."""
-    assert '"' not in (HERMES / "briefing_prompt.md").read_text(encoding="utf-8")
+def test_skills_are_named_after_their_folders() -> None:
+    """Hermes makes each skill's `name` its slash command (/check, /briefing); setup copies the folders."""
+    skills = sorted((HERMES / "skills").glob("*/SKILL.md"))
+    assert [p.parent.name for p in skills] == ["briefing", "check"]
+    for path in skills:
+        front = yaml.safe_load(path.read_text(encoding="utf-8").split("---")[1])
+        assert front["name"] == path.parent.name and front["description"]
 
 
 def test_cron_wrapper_runs_sync_with_continuums_python(tmp_path: Path) -> None:
