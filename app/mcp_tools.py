@@ -3,6 +3,7 @@
 Tool docstrings are what Hermes reads to decide which tool to use, so keep them precise.
 """
 
+import re
 import threading
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -26,6 +27,7 @@ from app.extraction import Completer, ExtractionError
 from app.llm import LLMError
 
 INVESTIGATE_WAIT = 100
+TIME = re.compile(r"\d{1,2}:\d{2}")
 
 
 def build_mcp(
@@ -181,16 +183,24 @@ def build_mcp(
             }
 
     @mcp.tool()
-    def propose_calendar_event(loop_id: str, title: str, start: str, end: str | None = None) -> dict[str, Any]:
-        """Propose adding an event to the user's Google Calendar, e.g. an interview from an email.
-        start/end are local times like 2026-10-08T10:00 (no end = one hour). If the date or time is unclear,
-        ask the user, never guess. Nothing is created until the user says yes, so tell them it waits for their OK."""
-        try:
-            event = eng.CalendarEvent(title=title, start=start, end=end)
-        except ValidationError as e:
-            raise ToolError(f"Can't propose that: {e.errors()[0]['msg']}") from e
+    def propose_calendar_event(
+        loop_id: str, title: str, start: str, end: str | None = None, description: str | None = None
+    ) -> dict[str, Any]:
+        """Propose adding an event to the user's Google Calendar, e.g. an interview from an email, or
+        "remind me Monday at 8am". The title says what and for whom ("Write job application: Google SWE intern").
+        start/end are local times like 2026-10-08T10:00, or just a time like "08:00" for the loop's due date
+        (no end = one hour). `description` holds the details the user gave: company, role, people, links.
+        If the date or time is unclear, ask the user, never guess.
+        Nothing is created until the user says yes, so tell them it waits for their OK."""
         with session() as s:
-            action = eng.propose_google(s, _uuid(loop_id), event)
+            loop_uuid = _uuid(loop_id)
+            due = eng.get_loop(s, loop_uuid).loop.due
+            try:
+                event = eng.CalendarEvent(title=title, start=_on_due(start, due), end=_on_due(end, due),
+                                          description=description)
+            except ValidationError as e:
+                raise ToolError(f"Can't propose that: {e.errors()[0]['msg']}") from e
+            action = eng.propose_google(s, loop_uuid, event)
             return {"id": str(action.id), "proposed": eng.describe_action(s, action)}
 
     @mcp.tool()
@@ -305,6 +315,15 @@ def _reply(d: dict[str, Any]) -> str:
     if d.get("loop"):
         lines += ["", f"On your list: {d['loop']}. It stays under Needs attention until you resolve it."]
     return "\n".join(lines + ["", f"Details: {d['dashboard']}"])
+
+
+def _on_due(value: str | None, due: date | None) -> str | None:
+    """A bare time like "08:00" goes on the loop's due date, so the model never works out weekdays."""
+    if value is None or not TIME.fullmatch(value):
+        return value
+    if due is None:
+        raise ToolError("This loop has no due date. Give the full start, e.g. 2026-10-12T08:00.")
+    return f"{due}T{value.zfill(5)}"
 
 
 def _uuid(value: str, what: str = "loop", where: str = "list_open_loops") -> UUID:

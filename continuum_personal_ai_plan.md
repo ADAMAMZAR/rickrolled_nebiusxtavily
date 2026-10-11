@@ -131,6 +131,17 @@ Each tier works on its own, so you can stop at any tier. No schema change: `Inve
 - *The user's 8:00 job `fd67c83eaacc` was switched with `cron edit --skill briefing --prompt "Send the morning briefing. Begin with Good morning."`.*
 - *Not yet seen on a phone: typing `/check` on Telegram.*
 
+### P2b Follow-up questions and fuller calendar events (added 2026-10-11)
+
+- `SOUL.md`: a new task that's too vague to act on ("write a job application") gets one short question first (company? role?). Then `remember` saves the first message and the answer together, word for word. "Remind me Monday at 8am" also proposes a calendar event: Continuum has no timed reminders of its own.
+- `propose_calendar_event`:
+  - takes `description`, which goes into the Google event;
+  - takes a bare time (`"08:00"`), which lands on the loop's due date, because Nemotron sometimes gets the weekday wrong ("Monday" → Tue Oct 13).
+- *Checked 2026-10-11 against real Nemotron with `SOUL.md` and the tool list, with tool results faked (not through Hermes):*
+  - *it asked in 8 of 9 vague runs; with the final wording it joined the answer every time (once it trimmed the last sentence);*
+  - *it never asked when the details were already given;*
+  - *after the bare-time change, 4 of 6 events used it. Other runs still sometimes write a wrong full date, but the approval line shows the weekday.*
+
 ### P3 Always on ([issue #4](https://github.com/ADAMAMZAR/rickrolled_nebiusxtavily/issues/4), Phase 4 §11)
 
 11. Run the planned Nebius VM: uvicorn and `hermes -p continuum gateway run` as services, Telegram on, the briefing and sync cron jobs, `APP_PASSWORD`, `PUBLIC_URL`, a fresh DB and Google off. Then remove the README limit "only work while Hermes' gateway is running on your machine". Do this before recording, so the video can say "running on Nebius".

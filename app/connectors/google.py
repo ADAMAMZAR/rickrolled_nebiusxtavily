@@ -154,7 +154,7 @@ class GoogleClient:
             message["threadId"] = thread_id
         return self._call("POST", f"{GMAIL}/drafts", json={"message": message})["id"]
 
-    def create_event(self, title: str, start: datetime, end: datetime | None = None) -> Event:
+    def create_event(self, title: str, start: datetime, end: datetime | None = None, description: str | None = None) -> Event:
         """Times without a timezone are in the user's TIMEZONE. Ends after an hour unless `end` is given."""
         end = end or start + timedelta(hours=1)
         body = {
@@ -162,6 +162,8 @@ class GoogleClient:
             "start": {"dateTime": start.isoformat(), "timeZone": self.timezone},
             "end": {"dateTime": end.isoformat(), "timeZone": self.timezone},
         }
+        if description:
+            body["description"] = description
         event = self._call("POST", EVENTS, json=body)
         return Event(id=event["id"], link=event.get("htmlLink", ""))
 

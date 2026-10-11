@@ -587,6 +587,7 @@ class CalendarEvent(BaseModel):
     title: str = Field(min_length=1, max_length=200)
     start: datetime
     end: datetime | None = None
+    description: str | None = Field(default=None, max_length=2000)  # details: company, role, people, links
 
     @field_validator("start", "end")
     @classmethod
@@ -732,7 +733,7 @@ def _apply_loop_update(session: Session, action: PendingAction) -> None:
 def _run_google(session: Session, action: PendingAction, client: GoogleClient) -> None:
     if action.kind == ActionKind.calendar_event:
         event = CalendarEvent.model_validate(action.payload)
-        created = client.create_event(event.title, event.start, event.end)
+        created = client.create_event(event.title, event.start, event.end, event.description)
         action.external_id, detail = created.id, created.link or f'calendar event "{event.title}"'
     else:
         draft = GmailDraft.model_validate(action.payload)
