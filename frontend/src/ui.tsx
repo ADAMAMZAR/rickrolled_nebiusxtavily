@@ -28,8 +28,8 @@ export function Icon({ name, label }: { name: IconName; label?: string }) {
 
 export function Wordmark() {
   return (
-    <a className="wordmark" href="/" aria-label="Continuum, your loops">
-      <Icon name="ledger" />Continuum
+    <a className="wordmark" href="/" aria-label="Troth, your loops">
+      <Icon name="ledger" />Troth
     </a>
   );
 }

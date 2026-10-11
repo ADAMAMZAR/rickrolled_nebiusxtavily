@@ -15,7 +15,7 @@ interface Props {
   draft: (loopId: string, title: string) => void;
 }
 
-/** What needs the user now: Continuum's flags in the red margin, then proposals waiting for a yes. */
+/** What needs the user now: Troth's flags in the red margin, then proposals waiting for a yes. */
 export function Attention({ items, error, actions, actionsError, act, draft }: Props) {
   return (
     <section className="section sheet attention" aria-labelledby="attention-h">

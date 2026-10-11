@@ -5,7 +5,7 @@ primary_target: "frontend/index.html"
 related_targets: ["frontend/investigate.html"]
 ---
 
-# Continuum dashboard and message check
+# Troth dashboard and message check
 
 Scope: the dashboard (`frontend/index.html`) and the message check (`frontend/investigate.html`), one visual world. Mode: Operate. Audience: students and job seekers in Malaysia, laptop and phone equally. Task: see what needs you today, capture by chatting, settle loops, check a payment request before paying. Constraints: never-accuse wording; untrusted text rendered as text.
 
@@ -13,7 +13,7 @@ Scope: the dashboard (`frontend/index.html`) and the message check (`frontend/in
 
 THESIS: One pocket ledger of what's owed, read like the kedai runcit's 555 book: what you owe, what's owed to you, and requests that want your money. Refuses the SaaS task board (sidebar, card grid, blue accent) and the dark threat console.
 
-OWN-WORLD: A 555-red cover band carries the day's count in heavy condensed numerals. Cool white sheets sit on a grey-white ground, with pale-blue rules between entries and graphite ink. Two inks carry meaning: red is Continuum's warning (risk, overdue), ballpoint blue is settled and yours. Archivo throughout: extra-condensed black for numerals, normal width for UI. Authored line icons, one stroke.
+OWN-WORLD: A 555-red cover band carries the day's count in heavy condensed numerals. Cool white sheets sit on a grey-white ground, with pale-blue rules between entries and graphite ink. Two inks carry meaning: red is Troth's warning (risk, overdue), ballpoint blue is settled and yours. Archivo throughout: extra-condensed black for numerals, normal width for UI. Authored line icons, one stroke.
 
 STORY: The student sees what needs them and what's risky at once, captures by chatting, settles entries, and checks a payment request before paying.
 

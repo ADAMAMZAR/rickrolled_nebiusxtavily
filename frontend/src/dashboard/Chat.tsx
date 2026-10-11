@@ -25,7 +25,7 @@ export function useChat(onReplied: () => void) {
       });
       setMessages((m) => [...m, { role: "bot", text: reply || "(no reply)", copy: copy && !!reply }]);
     } catch (e) {
-      setMessages((m) => [...m, { role: "error", text: `Couldn't reach Continuum. ${(e as Error).message}` }]);
+      setMessages((m) => [...m, { role: "error", text: `Couldn't reach Troth. ${(e as Error).message}` }]);
     } finally {
       setPending(false);
       onReplied();
@@ -60,7 +60,7 @@ export function Chat({ chat }: { chat: ReturnType<typeof useChat> }) {
 
   return (
     <section className={`chat sheet${messages.length ? " filled" : ""}`} aria-labelledby="chat-h">
-      <div className="head"><h2 id="chat-h">Talk to Continuum</h2></div>
+      <div className="head"><h2 id="chat-h">Talk to Troth</h2></div>
       <div className="messages" aria-live="polite">
         {messages.length === 0 && (
           <div className="hello">
@@ -75,7 +75,7 @@ export function Chat({ chat }: { chat: ReturnType<typeof useChat> }) {
             {m.copy && <CopyButton text={m.text} />}
           </div>
         ))}
-        {pending && <p className="writing">Continuum is writing…</p>}
+        {pending && <p className="writing">Troth is writing…</p>}
         <div ref={end} />
       </div>
       <form className="composer" onSubmit={submit}>

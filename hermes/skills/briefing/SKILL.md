@@ -1,11 +1,11 @@
 ---
 name: briefing
-description: What needs the user today, from Continuum, as a short list for Telegram. Used by the 8:00 cron job.
+description: What needs the user today, from Troth, as a short list for Telegram. Used by the 8:00 cron job.
 version: 1.0.0
 license: MIT
 metadata:
   hermes:
-    tags: [Continuum, briefing]
+    tags: [Troth, briefing]
 ---
 
 # Briefing

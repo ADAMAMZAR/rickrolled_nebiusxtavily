@@ -50,7 +50,7 @@ export function Ledger(p: Props) {
       {p.loops && p.loops.length === 0 && (
         <div className="empty">
           <h3>Nothing open yet</h3>
-          <p>Tell Continuum about a goal, a deadline, or something someone owes you. It turns that into loops it keeps track of.</p>
+          <p>Tell Troth about a goal, a deadline, or something someone owes you. It turns that into loops it keeps track of.</p>
           <blockquote className="ruled">{EXAMPLE}</blockquote>
           <button className="btn" type="button" onClick={() => p.useExample(EXAMPLE)}>Use this example</button>
         </div>
@@ -90,7 +90,7 @@ function LoopRow({ loop: l, fresh, version, webEnabled, act, refresh, goalOpen }
   const [resolveError, setResolveError] = useState<string | null>(null);
   const resolved = l.status === "resolved";
   const due = l.due && !resolved ? dueInfo(l.due) : null;
-  // Continuum's flag in the margin: a check found risk, or the loop asks for money and nobody checked yet.
+  // Troth's flag in the margin: a check found risk, or the loop asks for money and nobody checked yet.
   const risky = !resolved && !!l.risk_level && l.risk_level !== "LOW";
   const unchecked = !resolved && !l.risk_level && MONEY.test(`${l.title} ${l.summary}`);
   const warning = risky ? riskReason(l.risk_level!) : unchecked ? "asks for money, not checked yet" : null;
@@ -191,7 +191,7 @@ function Detail({ id, version, webEnabled, act, resolve, resolveError, goalOpen 
         )}
       </dl>
       <figure className="why">
-        <h4>Why Continuum knows this</h4>
+        <h4>Why Troth knows this</h4>
         {d.source.text ? <blockquote className="ruled">{d.source.text}</blockquote> : <p className="muted">Source deleted.</p>}
         <figcaption>
           {d.source.kind === "email" ? (
@@ -242,7 +242,7 @@ function ContactForm({ d, act }: { d: LoopDetail; act: Act }) {
   return (
     <form className="field" onSubmit={save}>
       <h4>Contact email</h4>
-      <p className="muted">Lets Continuum notice when {d.person_name} replies. It never sends email.</p>
+      <p className="muted">Lets Troth notice when {d.person_name} replies. It never sends email.</p>
       <div className="row">
         <input type="email" value={email} placeholder={`${d.person_name}'s email`} aria-label={`${d.person_name}'s email`} onChange={(e) => setEmail(e.target.value)} />
         <button className="btn small" type="submit">Save</button>

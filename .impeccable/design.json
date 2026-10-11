@@ -1,7 +1,7 @@
 {
   "schemaVersion": 2,
   "generatedAt": "2026-10-10T00:00:00Z",
-  "title": "Design System: Continuum",
+  "title": "Design System: Troth",
   "extensions": {
     "colorMeta": {
       "cover": {
@@ -276,7 +276,7 @@
       },
       "wordmark": {
         "displayName": "Wordmark",
-        "purpose": "Continuum wordmark on the band, wdth 112%."
+        "purpose": "Troth wordmark on the band, wdth 112%."
       }
     },
     "fonts": [
@@ -383,7 +383,7 @@
       "kind": "nav",
       "refersTo": "band",
       "description": "555-red band on every page: wordmark, the day's count in 62%-width black numerals, actions.",
-      "html": "<header class=\"ds-band\"><a class=\"ds-wordmark\" href=\"#\"><svg viewBox=\"0 0 24 24\" width=\"26\" height=\"26\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><rect x=\"5\" y=\"3\" width=\"14\" height=\"18\" rx=\"1.5\"/><path d=\"M8.5 3v18M11.5 8.5h4.5M11.5 12h4.5M11 15.6c1.6-.5 3.4.4 5.6-.3\"/></svg>Continuum</a><div class=\"ds-tally\"><span class=\"ds-tally-n\">3</span><span class=\"ds-tally-l\">need you today</span></div><button class=\"ds-on-cover\">Check a message</button></header>",
+      "html": "<header class=\"ds-band\"><a class=\"ds-wordmark\" href=\"#\"><svg viewBox=\"0 0 24 24\" width=\"26\" height=\"26\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><rect x=\"5\" y=\"3\" width=\"14\" height=\"18\" rx=\"1.5\"/><path d=\"M8.5 3v18M11.5 8.5h4.5M11.5 12h4.5M11 15.6c1.6-.5 3.4.4 5.6-.3\"/></svg>Troth</a><div class=\"ds-tally\"><span class=\"ds-tally-n\">3</span><span class=\"ds-tally-l\">need you today</span></div><button class=\"ds-on-cover\">Check a message</button></header>",
       "css": ".ds-band{display:flex;align-items:center;gap:24px;flex-wrap:wrap;padding:16px 24px;background:var(--cover,#c42127);color:#fff;font-family:'Archivo Variable','Archivo',system-ui,sans-serif}.ds-wordmark{display:inline-flex;align-items:center;gap:8px;color:inherit;text-decoration:none;font-weight:750;font-stretch:112%;font-size:1.25rem;letter-spacing:-0.01em}.ds-tally{display:flex;align-items:center;gap:12px;margin-left:auto}.ds-tally-n{font-size:4rem;font-weight:900;font-stretch:62%;line-height:.82;letter-spacing:-0.02em;font-variant-numeric:tabular-nums}.ds-tally-l{font-size:1.0625rem;font-weight:650;line-height:1.15;max-width:9ch;color:#fde3e4}.ds-on-cover{min-height:36px;padding:0 14px;border-radius:3px;border:1px solid rgb(255 255 255 / .55);background:transparent;color:#fff;font:650 .8125rem 'Archivo Variable','Archivo',system-ui,sans-serif;cursor:pointer;transition:background-color 120ms ease-out}.ds-on-cover:hover{background:var(--cover-deep,#9f191e);border-color:#fff}.ds-on-cover:focus-visible{outline:2px solid #fff;outline-offset:2px}"
     },
     {
@@ -413,7 +413,7 @@
   ],
   "narrative": {
     "northStar": "The Buku 555 Pocket Ledger",
-    "overview": "Continuum is kept like the kedai runcit's 555 book: a red cover band on top, cool white ruled sheets underneath, graphite handwriting-weight ink. What you owe, what's owed to you, and requests that want your money are entries on lines, not cards on a board. The system refuses the SaaS task board (sidebar, card grid, blue-accent chrome) and the dark threat console.\n\nTwo inks carry meaning and nothing else gets colour. Red is Continuum's warning: risk signals, overdue, payment asks not yet checked. Ballpoint blue is settled and yours: resolve, soon, supports, your own chat messages. The ledger's furniture (pale-blue rules, the double red margin, the cover band) stays the same in every state, so meaning comes only from which ink an entry is written in.\n\nDensity is a working notebook: 48px rows, small type, tabular numerals, no decorative imagery. The one flourish is the strike: settling an entry draws a single ballpoint line through it, in place. This is an Operate-mode product; controls, inputs and menus stay standard and legible.",
+    "overview": "Troth is kept like the kedai runcit's 555 book: a red cover band on top, cool white ruled sheets underneath, graphite handwriting-weight ink. What you owe, what's owed to you, and requests that want your money are entries on lines, not cards on a board. The system refuses the SaaS task board (sidebar, card grid, blue-accent chrome) and the dark threat console.\n\nTwo inks carry meaning and nothing else gets colour. Red is Troth's warning: risk signals, overdue, payment asks not yet checked. Ballpoint blue is settled and yours: resolve, soon, supports, your own chat messages. The ledger's furniture (pale-blue rules, the double red margin, the cover band) stays the same in every state, so meaning comes only from which ink an entry is written in.\n\nDensity is a working notebook: 48px rows, small type, tabular numerals, no decorative imagery. The one flourish is the strike: settling an entry draws a single ballpoint line through it, in place. This is an Operate-mode product; controls, inputs and menus stay standard and legible.",
     "keyCharacteristics": [
       "Red 555 cover band with the day's count in extra-condensed black numerals.",
       "Paper sheets on a grey-white ground, pale-blue rules between entries and behind running text.",
@@ -425,7 +425,7 @@
     "rules": [
       {
         "name": "The Two Inks Rule",
-        "body": "Red means Continuum is warning you; blue means it's settled or it's yours. Never use either as decoration, and never swap them.",
+        "body": "Red means Troth is warning you; blue means it's settled or it's yours. Never use either as decoration, and never swap them.",
         "section": "colors"
       },
       {
@@ -453,7 +453,7 @@
       "**Do** put every page under the red cover band, with the wordmark at left.",
       "**Do** write warnings in red and settled or user-owned things in blue, and nothing else in either.",
       "**Do** separate entries with 1px pale-blue rules and close sheet heads with a 2px ink rule.",
-      "**Do** use the double margin rule and flag column for any list where Continuum may warn.",
+      "**Do** use the double margin rule and flag column for any list where Troth may warn.",
       "**Do** use Archivo's width axis for emphasis: 62% black for numerals and the check level only.",
       "**Do** keep motion to small state transitions (120–160ms colour and rotate, a 400ms evidence flash) plus the strike; honour reduced motion.",
       "**Do** word every risk as \"risk signals\", \"warning found\", \"hold off paying\". The level shown is the fixed-rule result.",

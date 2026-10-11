@@ -43,7 +43,7 @@ export function Settings({ onChange }: { onChange: () => void }) {
   }
 
   async function forget() {
-    if (!confirm('Forget all email text Continuum stored? Loops stay, marked "source deleted".')) return;
+    if (!confirm('Forget all email text Troth stored? Loops stay, marked "source deleted".')) return;
     try {
       const { forgotten } = await api<{ forgotten: number }>("/api/google/forget", { method: "POST" });
       setResult({ ok: true, text: `Forgot ${forgotten} email${forgotten === 1 ? "" : "s"}.` });
@@ -72,7 +72,7 @@ export function Settings({ onChange }: { onChange: () => void }) {
         </>)}
         {status && !status.connected && !status.set_up && <p>Not set up: add your OAuth client file first (README: Google setup).</p>}
         <h3>Email data</h3>
-        <p className="muted">Deletes the text of every email Continuum read. Loops made from them stay.</p>
+        <p className="muted">Deletes the text of every email Troth read. Loops made from them stay.</p>
         <div><button className="btn small danger" type="button" onClick={forget}>Forget email data</button></div>
         {result && <p className={result.ok ? "ok" : "error-line"} role={result.ok ? "status" : "alert"}>{result.text}</p>}
       </div>

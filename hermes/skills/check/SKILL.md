@@ -1,11 +1,11 @@
 ---
 name: check
-description: Check who's asking before you pay. Runs Continuum's message check (ScamGraph) on a pasted message.
+description: Check who's asking before you pay. Runs Troth's message check (ScamGraph) on a pasted message.
 version: 1.0.0
 license: MIT
 metadata:
   hermes:
-    tags: [Continuum, ScamGraph, payments]
+    tags: [Troth, ScamGraph, payments]
 ---
 
 # Check a message

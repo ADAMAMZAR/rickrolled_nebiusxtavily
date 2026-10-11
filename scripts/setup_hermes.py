@@ -43,7 +43,7 @@ try:
         [PYTHON, os.path.join("scripts", "sync.py")], cwd=ROOT, env=env, capture_output=True, encoding="utf-8", errors="replace"
     )
 except OSError as e:  # the project or its .venv moved
-    sys.exit(f"Can't run Continuum's sync ({{e}}). Re-run scripts/setup_hermes.py in the Continuum folder.")
+    sys.exit(f"Can't run Troth's sync ({{e}}). Re-run scripts/setup_hermes.py in the project folder.")
 for stream, text in ((sys.stdout, done.stdout), (sys.stderr, done.stderr)):
     stream.reconfigure(encoding="utf-8")
     stream.write(text)
@@ -149,7 +149,7 @@ def main() -> None:
         print(f"Telegram: on for user(s) {telegram['TELEGRAM_ALLOWED_USERS']}")
     else:
         print("Telegram: off (optional, see README)")
-    print("Next: start Continuum (uvicorn app.main:app), then: hermes -p continuum gateway run")
+    print("Next: start Troth (uvicorn app.main:app), then: hermes -p continuum gateway run")
 
 
 if __name__ == "__main__":

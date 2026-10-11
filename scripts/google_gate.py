@@ -30,12 +30,12 @@ def main() -> None:
         for email in emails:
             print(f"   {email.received.astimezone(ZoneInfo(settings.timezone)):%Y-%m-%d %H:%M}  {email.subject or '(no subject)'}")
 
-        google.create_draft(address, "Continuum test draft", "Created by Continuum's Google check. Not sent. Delete it.")
+        google.create_draft(address, "Troth test draft", "Created by Troth's Google check. Not sent. Delete it.")
         print("2. Draft saved, not sent: https://mail.google.com/mail/u/0/#drafts")
 
         tomorrow = datetime.now(ZoneInfo(settings.timezone)) + timedelta(days=1)
         start = tomorrow.replace(hour=10, minute=0, second=0, microsecond=0, tzinfo=None)
-        event = google.create_event("Continuum test event", start)
+        event = google.create_event("Troth test event", start)
         print(f"3. Event created for {start:%a %b %d} 10:00: {event.link}")
     except GoogleError as e:
         sys.exit(f"Google check failed: {e}")

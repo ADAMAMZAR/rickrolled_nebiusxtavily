@@ -150,7 +150,7 @@ def build_mcp(
 
     @mcp.tool()
     def list_pending_actions() -> dict[str, Any]:
-        """Things Continuum proposed that wait for the user's yes or no, e.g. "Resolve X? Found on the web".
+        """Things Troth proposed that wait for the user's yes or no, e.g. "Resolve X? Found on the web".
         Use it to find the one the user is answering before approve_action or reject_action."""
         with session() as s:
             return {"actions": [{"id": str(a.id), "summary": eng.describe_action(s, a)} for a in eng.list_actions(s)]}
@@ -173,7 +173,7 @@ def build_mcp(
     @mcp.tool()
     def set_person_email(name: str, email: str) -> dict[str, Any]:
         """Save someone's email address when the user gives it, e.g. "Sarah's email is sarah@nvidia.com".
-        Continuum uses it to notice their replies and never sends email. Never guess an address."""
+        Troth uses it to notice their replies and never sends email. Never guess an address."""
         with session() as s:
             person = eng.set_person_email(s, name, email)
             return {
@@ -208,7 +208,7 @@ def build_mcp(
         """Propose saving an email as a Gmail draft, e.g. "draft a thank-you reply to Sarah". Write the full body.
         `to` must be the person's real address (inspect_loop shows contact_email; never guess). If their loop is
         closed, find it with list_open_loops(include_resolved=true). A draft to the
-        loop's person replies in their email thread. Continuum never sends email: after the user's yes, the draft
+        loop's person replies in their email thread. Troth never sends email: after the user's yes, the draft
         waits in Gmail for them to send. Tell them it waits for their OK."""
         try:
             draft = eng.GmailDraft(to=to.strip(), subject=subject.strip(), body=body, thread_id=thread_id)
@@ -248,7 +248,7 @@ def build_mcp(
 
     @mcp.tool()
     def watch_loop(loop_id: str, query: str | None = None) -> dict[str, Any]:
-        """Watch the web for one open loop, e.g. "keep an eye on the hackathon results". Continuum searches
+        """Watch the web for one open loop, e.g. "keep an eye on the hackathon results". Troth searches
         `query` once a day and asks the user before changing anything. Use a short search like
         "NVIDIA hackathon 2026 winners". Leave query empty to stop watching. Get the id from list_open_loops.
         Only call it when the user asks to watch something in this message, never for a reply from a person."""

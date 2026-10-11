@@ -45,7 +45,7 @@ export function App() {
 function Home() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  useEffect(() => { document.title = "Check a message · Continuum"; }, []);
+  useEffect(() => { document.title = "Check a message · Troth"; }, []);
 
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -54,7 +54,7 @@ function Home() {
     try { location.hash = await startCheck(new FormData(e.currentTarget)); }
     catch (err) {
       const message = (err as Error).message;
-      setError(message === "Failed to fetch" ? "Couldn't reach Continuum. Is it running?" : message);
+      setError(message === "Failed to fetch" ? "Couldn't reach Troth. Is it running?" : message);
     } finally { setBusy(false); }
   }
 
@@ -74,7 +74,7 @@ function Home() {
         </form>
       </section>
       <aside className="how" aria-label="How the check works">
-        <p><b>Who's asking?</b> Continuum looks the sender up on Bank Negara's and the Securities Commission's alert lists, and finds the company's real website.</p>
+        <p><b>Who's asking?</b> Troth looks the sender up on Bank Negara's and the Securities Commission's alert lists, and finds the company's real website.</p>
         <p><b>Fixed rules set the risk level</b>, not the AI. Every finding links to its source or to the words in the message.</p>
         <p><b>Takes 1–2 minutes.</b> The message, screenshot and page text go to NVIDIA Nemotron on Nebius; names and links go to Tavily search. Nothing is sent to anyone else.</p>
       </aside>
@@ -99,7 +99,7 @@ function Result({ id }: { id: string }) {
         if (body.status === "running") timer = window.setTimeout(load, 1000);
       } catch {
         if (!live) return;
-        setStatus("Couldn't reach Continuum. Retrying…");
+        setStatus("Couldn't reach Troth. Retrying…");
         timer = window.setTimeout(load, 3000);
       }
     }
@@ -108,7 +108,7 @@ function Result({ id }: { id: string }) {
   }, [id]);
 
   useEffect(() => {
-    if (d?.status === "done") document.title = `${LEVEL[d.risk_level ?? "INSUFFICIENT_EVIDENCE"]} · Continuum`;
+    if (d?.status === "done") document.title = `${LEVEL[d.risk_level ?? "INSUFFICIENT_EVIDENCE"]} · Troth`;
   }, [d?.status, d?.risk_level]);
 
   const focus = useCallback((selector: string) => {

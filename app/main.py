@@ -146,7 +146,7 @@ def create_app(
             yield
         app.state.db.dispose()
 
-    app = FastAPI(title="Continuum", lifespan=lifespan)
+    app = FastAPI(title="Troth", lifespan=lifespan)
 
     @app.middleware("http")
     async def password(request: Request, call_next: Callable[[Request], Any]) -> Any:
@@ -167,7 +167,7 @@ def create_app(
         if secrets.compare_digest(given.encode(), expected.encode()):
             return await call_next(request)
         response = error(401, "unauthorized", "Password needed.")
-        response.headers["WWW-Authenticate"] = 'Basic realm="Continuum"'
+        response.headers["WWW-Authenticate"] = 'Basic realm="Troth"'
         return response
     app.mount("/mcp", mcp_app)
 

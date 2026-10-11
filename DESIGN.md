@@ -1,5 +1,5 @@
 ---
-name: Continuum
+name: Troth
 description: A personal AI that remembers what's unfinished and checks who's asking before you pay, kept as a Buku 555 pocket ledger.
 colors:
   cover: "#c42127"
@@ -153,15 +153,15 @@ components:
     padding: "{spacing.s2}"
 ---
 
-# Design System: Continuum
+# Design System: Troth
 
 ## Overview
 
 **Creative North Star: "The Buku 555 Pocket Ledger"**
 
-Continuum is kept like the kedai runcit's 555 book: a red cover band on top, cool white ruled sheets underneath, graphite handwriting-weight ink. What you owe, what's owed to you, and requests that want your money are entries on lines, not cards on a board. The system refuses the SaaS task board (sidebar, card grid, blue-accent chrome) and the dark threat console.
+Troth is kept like the kedai runcit's 555 book: a red cover band on top, cool white ruled sheets underneath, graphite handwriting-weight ink. What you owe, what's owed to you, and requests that want your money are entries on lines, not cards on a board. The system refuses the SaaS task board (sidebar, card grid, blue-accent chrome) and the dark threat console.
 
-Two inks carry meaning and nothing else gets colour. Red is Continuum's warning: risk signals, overdue, payment asks not yet checked. Ballpoint blue is settled and yours: resolve, soon, supports, your own chat messages. The ledger's furniture (pale-blue rules, the double red margin, the cover band) stays the same in every state, so meaning comes only from which ink an entry is written in.
+Two inks carry meaning and nothing else gets colour. Red is Troth's warning: risk signals, overdue, payment asks not yet checked. Ballpoint blue is settled and yours: resolve, soon, supports, your own chat messages. The ledger's furniture (pale-blue rules, the double red margin, the cover band) stays the same in every state, so meaning comes only from which ink an entry is written in.
 
 Density is a working notebook: 48px rows, small type, tabular numerals, no decorative imagery. The one flourish is the strike: settling an entry draws a single ballpoint line through it, in place. This is an Operate-mode product; controls, inputs and menus stay standard and legible.
 
@@ -182,7 +182,7 @@ A cool paper-and-graphite palette with two inks, red and ballpoint blue, each re
 - **Cover Deep** (#9f191e): hover fill for outline buttons on the band only.
 
 ### Secondary
-- **Warning Red** (#c42127, `red`): Continuum's warning ink. Risk flags in the margin column, overdue dates, "warns/contradicts" verdicts and graph edges, the flagged-phrase underline, error lines. Same hex as the cover in light mode; it splits to a lighter #ff858a in dark so it stays legible on dark paper.
+- **Warning Red** (#c42127, `red`): Troth's warning ink. Risk flags in the margin column, overdue dates, "warns/contradicts" verdicts and graph edges, the flagged-phrase underline, error lines. Same hex as the cover in light mode; it splits to a lighter #ff858a in dark so it stays legible on dark paper.
 - **Red Wash** (#fcecec): hover fill behind the danger button. Never a section fill.
 
 ### Tertiary
@@ -202,7 +202,7 @@ A cool paper-and-graphite palette with two inks, red and ballpoint blue, each re
 Dark theme (via `prefers-color-scheme`) keeps the same roles: paper #1b1e24 on ground #101215, rules #2a3442 / #43546c, ink #e8ebf0, muted #a6afbc, red #ff858a, blue #93b6ff, cover #b11e24. Full map in `.impeccable/design.json`.
 
 ### Named Rules
-**The Two Inks Rule.** Red means Continuum is warning you; blue means it's settled or it's yours. Never use either as decoration, and never swap them.
+**The Two Inks Rule.** Red means Troth is warning you; blue means it's settled or it's yours. Never use either as decoration, and never swap them.
 
 **The No Grey Box Rule.** Content lives on paper sheets with rules, never in grey or tinted filled boxes. Washes and the ground appear only as hover, selection or a brief flash.
 
@@ -277,13 +277,13 @@ Standard, quiet, legible: a ledger's pen, not a toy.
 - **File picker:** its button matches the default button.
 
 ### Navigation
-- **The cover band:** cover red, full width, on every page. Wordmark (ledger icon + "Continuum", 750, wdth 112%) left; on the dashboard the day's count and "need you today" in on-cover blush; actions right. On the check page a band title replaces the tally.
+- **The cover band:** cover red, full width, on every page. Wordmark (ledger icon + "Troth", 750, wdth 112%) left; on the dashboard the day's count and "need you today" in on-cover blush; actions right. On the check page a band title replaces the tally.
 
 ### Ruled Rows
 Pale-blue 1px rules between entries, the same furniture in every state. A row is a full-width button that opens its detail in place; hover is a faint blue wash, the chevron rotates 90° (160ms). A freshly updated row gets the blue wash and a small blue "updated" tag.
 
 ### Margin and Flag Column
-Lists that can carry warnings (Needs attention, the ledger) draw the double margin rule. Continuum's flag sits in the column left of it in red: a filled-dot risk icon for risk signals, a question icon for payment asks not yet checked. Entry text starts 10px after the rule.
+Lists that can carry warnings (Needs attention, the ledger) draw the double margin rule. Troth's flag sits in the column left of it in red: a filled-dot risk icon for risk signals, a question icon for payment asks not yet checked. Entry text starts 10px after the rule.
 
 ### The Strike (signature)
 Settling an entry draws one ballpoint-blue stroke (2.2px, round caps, a slightly wavering path) through its title, in place, over 420ms on `cubic-bezier(0.2, 0.7, 0.2, 1)`. It draws once; resolved entries render it static. Reduced motion snaps it drawn. Settled titles and meta go pencil grey.
@@ -292,7 +292,7 @@ Settling an entry draws one ballpoint-blue stroke (2.2px, round caps, a slightly
 Running source text (quotes, the checked message) sits on pale rules at a 1.7em line height, like writing on the page. Flagged phrases in a checked message get a 2px red underline, 4px offset, no fill.
 
 ### Chat
-A sheet that sizes to content, then becomes a fixed scrolling sheet (max 640px). Your messages are blue bubbles with paper text, right-aligned; Continuum's are outlined in pale rule; errors are outlined in red.
+A sheet that sizes to content, then becomes a fixed scrolling sheet (max 640px). Your messages are blue bubbles with paper text, right-aligned; Troth's are outlined in pale rule; errors are outlined in red.
 
 ### Evidence Graph
 Cytoscape on paper inside a ruled border, in the same inks: red edges and borders for warnings, blue for support, pale rule for neutral; ink for strong sources. Edge labels appear on hover only. A legend of short coloured lines sits below.
@@ -306,7 +306,7 @@ Authored set on a 24px grid, one 1.8 stroke, round caps and joins, in currentCol
 - **Do** put every page under the red cover band, with the wordmark at left.
 - **Do** write warnings in red and settled or user-owned things in blue, and nothing else in either.
 - **Do** separate entries with 1px pale-blue rules and close sheet heads with a 2px ink rule.
-- **Do** use the double margin rule and flag column for any list where Continuum may warn.
+- **Do** use the double margin rule and flag column for any list where Troth may warn.
 - **Do** use Archivo's width axis for emphasis: 62% black for numerals and the check level only.
 - **Do** keep motion to small state transitions (120–160ms colour and rotate, a 400ms evidence flash) plus the strike; honour reduced motion.
 - **Do** word every risk as "risk signals", "warning found", "hold off paying". The level shown is the fixed-rule result.

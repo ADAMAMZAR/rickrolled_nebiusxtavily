@@ -168,7 +168,7 @@ Each tier works on its own, so you can stop at any tier. No schema change: `Inve
 | 0:50 | Telegram, in your own words: *"I need to transfer RM5,000 to T. Rowe Price Group Sdn. Bhd. at troweprice-my-invest.com by Friday for their 12% monthly fund."* (scenario B's entities, [b_clone_company.txt](tests/scenarios/b_clone_company.txt)) → loop saved, due Friday → *"Want me to check who's asking first?"* → "yes" → (cut the 40–60 s wait) CRITICAL, official troweprice.com, BNM clone warning, next steps. Dashboard: the loop tops Needs attention. Open the check: live steps, graph, click the BNM edge → quote. | Works for you, tools, fixed rules |
 | 1:50 | Briefing on Telegram (`cron run`): the deposit loop first, then Sarah's reply due tomorrow. Reply "snooze the portfolio till Monday". | Always on, proactive |
 | 2:20 | (Google set up) Sarah's email closes her loop; a calendar proposal waits; approve it. | Tasks, your yes |
-| 2:40 | Architecture: Hermes ↔ MCP ↔ Continuum; Nemotron 3 Super on Nebius Token Factory for every reasoning step; Tavily for evidence; one SQLite file; nothing sent. 2 s of the Token Factory usage page. | NVIDIA + Nebius |
+| 2:40 | Architecture: Hermes ↔ MCP ↔ Troth; Nemotron 3 Super on Nebius Token Factory for every reasoning step; Tavily for evidence; one SQLite file; nothing sent. 2 s of the Token Factory usage page. | NVIDIA + Nebius |
 
 - **Use your own words, not a pasted message:** Hermes checks a forwarded money message right away, without saving the loop first or offering (seen live 2026-10-10). That path still saves a "Verify …" loop, but it has no due date.
 - **If the offer doesn't come:** forward the message with "is this legit?". Step 5 saves the loop anyway.
@@ -223,7 +223,7 @@ Each tier works on its own, so you can stop at any tier. No schema change: `Inve
 
 Paste into Devpost. Fill in the two links once the deploy (P3) and the video exist.
 
-**Name:** Continuum
+**Name:** Troth
 
 **Tagline:** A personal AI that remembers what's unfinished, and checks who's asking before you pay.
 
@@ -231,13 +231,13 @@ Paste into Devpost. Fill in the two links once the deploy (P3) and the video exi
 
 **What it does**
 
-You mention things in passing, like "Sarah said she'll get back to me Friday" or "I need to finish my portfolio", and then they slip. Some messages also ask you to act and aren't from who they claim: a "bank" asking you to verify your account, a fund promising 12% a month. Continuum handles both the same way. Every loop goes through five steps:
+You mention things in passing, like "Sarah said she'll get back to me Friday" or "I need to finish my portfolio", and then they slip. Some messages also ask you to act and aren't from who they claim: a "bank" asking you to verify your account, a fund promising 12% a month. Troth handles both the same way. Every loop goes through five steps:
 
 1. **Capture.** You talk to it in the dashboard or on Telegram. Email from people you're waiting on comes in too, and you can forward a message or a screenshot.
-2. **Remember.** Nemotron pulls out goals, tasks, promises and things you're waiting on, and Continuum keeps them with the exact words they came from.
+2. **Remember.** Nemotron pulls out goals, tasks, promises and things you're waiting on, and Troth keeps them with the exact words they came from.
 3. **Check.** When a loop asks you to pay or share details, ScamGraph researches who's asking on the live web (Tavily): regulator alert lists and the company's real website. Fixed rules in code, not the model, set the risk level, and every finding links to its source.
 4. **Remind.** Needs attention and an 8:00 Telegram briefing list what's overdue, due soon, stalled, or risky ("critical risk, hold off paying").
-5. **Close.** Loops close when you say so, when an email reply answers them, or when the web watch finds the answer. Calendar events and Gmail drafts wait for your yes. Continuum never sends anything.
+5. **Close.** Loops close when you say so, when an email reply answers them, or when the web watch finds the answer. Calendar events and Gmail drafts wait for your yes. Troth never sends anything.
 
 **Why**
 
@@ -245,7 +245,7 @@ Notes apps keep what you wrote, and chatbots forget it by the next session. A pe
 
 **How it works**
 
-- **Hermes Agent** is the assistant: dashboard chat, Telegram, cron jobs, and two reusable skills, `/check` and `/briefing`. It calls Continuum through 17 MCP tools and has nothing else: no terminal, files or browser.
+- **Hermes Agent** is the assistant: dashboard chat, Telegram, cron jobs, and two reusable skills, `/check` and `/briefing`. It calls Troth through 17 MCP tools and has nothing else: no terminal, files or browser.
 - **NVIDIA Nemotron 3 Super on Nebius Token Factory** does every reasoning step: the agent, loop extraction, and ScamGraph's extraction, research plan, page checks and summary. Screenshots are read by Gemma 3 on the same endpoint, because no Nemotron model there reads images.
 - **Tavily** Search and Extract gather the evidence. Our server never opens a suspicious link itself.
 - **Your data:** one SQLite file. Hermes' own memory is off, and logs hold ids and counts, never message text.

@@ -96,7 +96,7 @@ def disconnect(settings: Settings, transport: httpx.BaseTransport | None = None)
                 http.post(REVOKE, data={"token": token})
         except httpx.HTTPError as e:
             raise GoogleError("Disconnected here, but couldn't reach Google to revoke access. "
-                              "Remove Continuum at https://myaccount.google.com/permissions") from e
+                              "Remove Troth at https://myaccount.google.com/permissions") from e
 
 
 def _save(settings: Settings, credentials: Credentials) -> None:

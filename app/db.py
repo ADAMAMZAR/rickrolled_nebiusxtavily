@@ -287,7 +287,7 @@ def create_db_engine(url: str) -> Engine:
         if missing:
             engine.dispose()
             raise RuntimeError(
-                f"{engine.url.database} is from an older version of Continuum (no column {table.name}.{missing[0]}). "
+                f"{engine.url.database} is from an older version of Troth (no column {table.name}.{missing[0]}). "
                 "Delete it and restart; a new one is created."
             )
     return engine

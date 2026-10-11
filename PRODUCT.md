@@ -12,11 +12,11 @@ React + Vite frontend (user's choice, 2026-10-10), built to static files that th
 
 ## Users
 
-Students and job seekers in Malaysia. They juggle applications, deadlines, promises and things other people owe them, across chat and email. The same people get investment and job-offer messages that ask for money or personal details and aren't from who they claim. They use Continuum on a laptop and on a phone about equally: the dashboard in a browser, plus a Telegram bot.
+Students and job seekers in Malaysia. They juggle applications, deadlines, promises and things other people owe them, across chat and email. The same people get investment and job-offer messages that ask for money or personal details and aren't from who they claim. They use Troth on a laptop and on a phone about equally: the dashboard in a browser, plus a Telegram bot.
 
 ## Product Purpose
 
-Continuum is a personal AI that remembers what's unfinished and checks who's asking before you pay. It pulls open loops (tasks, promises, things you're waiting on, deadlines) out of normal conversation, keeps them with the words they came from, reminds you before they slip, and closes them when they're done. When a loop asks for money or details, its message check (ScamGraph) researches the sender on the live web and fixed rules score the risk. Success: nothing the user cares about slips, and they don't pay someone who isn't who they claim.
+Troth is a personal AI that remembers what's unfinished and checks who's asking before you pay. It pulls open loops (tasks, promises, things you're waiting on, deadlines) out of normal conversation, keeps them with the words they came from, reminds you before they slip, and closes them when they're done. When a loop asks for money or details, its message check (ScamGraph) researches the sender on the live web and fixed rules score the risk. Success: nothing the user cares about slips, and they don't pay someone who isn't who they claim.
 
 ## Positioning
 
@@ -41,7 +41,7 @@ One assistant holds both your commitments and the requests trying to become one.
 ## Brand Commitments
 
 - Never-accuse wording (binding): say "risk signals", "warning found", "hold off paying". Never call anyone a scammer, fraudster or criminal, and never show "scam" as a verdict. The risk level is set by fixed rules, not by the model.
-- Names in use: Continuum (product), ScamGraph (the message check). Not marked binding.
+- Names in use: Troth (product; renamed from Continuum 2026-10-11, the code still says continuum), ScamGraph (the message check). Not marked binding.
 
 ## Evidence on Hand
 
@@ -50,7 +50,7 @@ One assistant holds both your commitments and the requests trying to become one.
 
 ## Product Principles
 
-1. The user decides. Continuum proposes, cites and reminds; it never sends, pays or reports for them.
+1. The user decides. Troth proposes, cites and reminds; it never sends, pays or reports for them.
 2. Evidence over opinion. Every risk claim links to a source or to the user's own message.
 3. Keep the original words. Every loop shows what it came from.
 4. Missing evidence isn't safety. Only a low-risk result clears a payment loop.

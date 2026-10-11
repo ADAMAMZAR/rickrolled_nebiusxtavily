@@ -1,7 +1,7 @@
 @import "@fontsource-variable/archivo/standard.css";
 
-/* Continuum's world: the 555 pocket ledger. A red cover band, cool white ruled paper, graphite ink.
-   Two inks carry meaning: red is Continuum's warning (risk, overdue), ballpoint blue is settled and yours. */
+/* Troth's world: the 555 pocket ledger. A red cover band, cool white ruled paper, graphite ink.
+   Two inks carry meaning: red is Troth's warning (risk, overdue), ballpoint blue is settled and yours. */
 :root {
   --cover: #c42127;
   --cover-deep: #9f191e;
@@ -190,7 +190,7 @@ details.menu > summary::-webkit-details-marker { display: none; }
 .due.soon { color: var(--blue); font-weight: 600; }
 .late, .due.late { color: var(--red); font-weight: 650; }
 
-/* the 555 margin: a double red rule, with Continuum's flag in the column left of it */
+/* the 555 margin: a double red rule, with Troth's flag in the column left of it */
 .margined { --m: 44px; background:
   linear-gradient(to right, transparent calc(var(--m) - 5px), var(--margin) calc(var(--m) - 5px) calc(var(--m) - 4px),
     transparent calc(var(--m) - 4px) calc(var(--m) - 1px), var(--margin) calc(var(--m) - 1px) var(--m), transparent var(--m)); }
