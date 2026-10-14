@@ -276,9 +276,15 @@ class RiskSignal(SQLModel, table=True):
 
 def create_db_engine(url: str) -> Engine:
     """Create the engine and any missing tables. There are no migrations, so an older file fails here."""
-    if url.startswith("sqlite:///"):
+    if url.startswith("postgres://"):
+        url = "postgresql+psycopg://" + url.removeprefix("postgres://")
+    elif url.startswith("postgresql://"):
+        url = "postgresql+psycopg://" + url.removeprefix("postgresql://")
+    is_sqlite = url.startswith("sqlite:///")
+    if is_sqlite:
         Path(url.removeprefix("sqlite:///")).parent.mkdir(parents=True, exist_ok=True)
-    engine = create_engine(url, connect_args={"check_same_thread": False})
+    connect_args = {"check_same_thread": False} if is_sqlite else {}
+    engine = create_engine(url, connect_args=connect_args)
     SQLModel.metadata.create_all(engine)
     db = inspect(engine)
     for table in SQLModel.metadata.sorted_tables:
