@@ -41,7 +41,8 @@ export function Chat({ chat }: { chat: ReturnType<typeof useChat> }) {
   const end = useRef<HTMLDivElement>(null);
   const box = useRef<HTMLTextAreaElement>(null);
 
-  useEffect(() => end.current?.scrollIntoView({ block: "end" }), [messages, pending]);
+  // Braces: newer browsers return a Promise from scrollIntoView, which React would call as a cleanup.
+  useEffect(() => { end.current?.scrollIntoView({ block: "end" }); }, [messages, pending]);
   useEffect(() => { // grow with the text, up to the CSS max-height
     const t = box.current;
     if (t) { t.style.height = "auto"; t.style.height = `${t.scrollHeight + 2}px`; }
