@@ -8,7 +8,8 @@ interface Message {
   copy?: boolean;
 }
 
-const conversation = crypto.randomUUID(); // one Hermes conversation per page load
+// One Hermes conversation per page load. Not crypto.randomUUID: browsers only allow it on https or localhost.
+const conversation = Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, "0")).join("");
 
 /** Chat with Hermes through /api/chat. `onReplied` runs after every answer, so the lists can refresh. */
 export function useChat(onReplied: () => void) {
