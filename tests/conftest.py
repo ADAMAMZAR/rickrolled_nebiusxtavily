@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 from pydantic import SecretStr
-from sqlalchemy import Engine
+from sqlalchemy import Engine, event
 from sqlmodel import Session
 
 from app import engine as eng
@@ -41,12 +41,20 @@ def no_real_services(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyP
     if request.node.get_closest_marker("live") is None:
         monkeypatch.setattr(settings, "nebius_api_key", SecretStr(""))
         monkeypatch.setattr(settings, "tavily_api_key", SecretStr(""))
+    monkeypatch.setattr(settings, "app_password", SecretStr(""))  # a server .env's password; tests that need one set it
 
 
 @pytest.fixture
 def on_friday(monkeypatch: pytest.MonkeyPatch) -> None:
     """Freeze the user's "now" at FRIDAY for code that reads today's date (attention, snooze)."""
     monkeypatch.setattr(eng, "local_now", lambda: FRIDAY)
+
+
+@event.listens_for(Engine, "connect")
+def _foreign_keys_on(conn: Any, _: Any) -> None:
+    """Postgres (production) enforces foreign keys; make test SQLite do the same."""
+    if type(conn).__module__.startswith("sqlite3"):
+        conn.execute("PRAGMA foreign_keys=ON")
 
 
 @pytest.fixture

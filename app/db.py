@@ -285,6 +285,11 @@ def create_db_engine(url: str) -> Engine:
         Path(url.removeprefix("sqlite:///")).parent.mkdir(parents=True, exist_ok=True)
     connect_args = {"check_same_thread": False} if is_sqlite else {}
     engine = create_engine(url, connect_args=connect_args)
+    # Check foreign keys at commit, not per insert: without relationships, the flush doesn't insert in foreign key
+    # order, and Postgres enforces them (SQLite only does with PRAGMA foreign_keys, which tests turn on).
+    for table in SQLModel.metadata.tables.values():
+        for constraint in table.foreign_key_constraints:
+            constraint.deferrable, constraint.initially = True, "DEFERRED"
     SQLModel.metadata.create_all(engine)
     db = inspect(engine)
     for table in SQLModel.metadata.sorted_tables:
