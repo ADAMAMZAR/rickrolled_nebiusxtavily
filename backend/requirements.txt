@@ -11,7 +11,7 @@ google-auth-oauthlib==1.5.0
 mcp==2.2.0
 pyyaml==6.0.3
 tzdata==2026.4
-psycopg[binary]==3.2.4
+psycopg[binary]==3.2.13
 
 # Tests
 pytest==9.1.1

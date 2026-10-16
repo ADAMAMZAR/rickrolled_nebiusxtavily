@@ -1,4 +1,4 @@
-// The REST API under /api (app/main.py). Everything in these shapes that came from a message, an email or a web
+// The REST API under /api (backend/app/main.py). Everything in these shapes that came from a message, an email or a web
 // page is untrusted text: React renders it as text, and only http(s) links become clickable (see safeHref).
 
 export type LoopKind = "task" | "waiting" | "commitment";

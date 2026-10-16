@@ -20,8 +20,9 @@ Start a phase only after every box in the previous phase's Done Checklist is che
 3. **Short and direct.** Code comments, docs, UI text, and replies to the user: no filler.
 
 ## Architecture (short)
+- Layout: `backend/` holds the Python app (`app/`, `scripts/`, `tests/`, `hermes/`, `data/`, `.env`); `frontend/` holds the UI; the docs stay at the root. Paths below are relative to `backend/` unless they start with `frontend/`. Run every Python, pytest and setup command from `backend/`.
 - `app/engine.py` owns all domain logic. FastAPI routes and MCP tools are thin wrappers around it.
-- UI: React + Vite in `frontend/` (dashboard and message check), built into `app/static/`. That folder is committed build output: never edit it by hand, rebuild it. Visual rules: PRODUCT.md, DESIGN.md, `.impeccable/surfaces/`. Untrusted text renders as React text; only http(s) links become clickable (`safeHref`).
+- UI: React + Vite in `frontend/` (dashboard and message check), built into `backend/app/static/`. That folder is committed build output: never edit it by hand, rebuild it. Visual rules: PRODUCT.md, DESIGN.md, `.impeccable/surfaces/`. Untrusted text renders as React text; only http(s) links become clickable (`safeHref`).
 - Hermes = chat brain. It calls Troth through MCP tools at `/mcp`. The UI chat proxies to the Hermes API server.
 - All LLM prompts live in `app/extraction.py`. All LLM calls go through `app/llm.py`.
 - The only LLM is NVIDIA Nemotron on Nebius Token Factory (`NEBIUS_*` in `.env`), for both extraction and Hermes. One exception: no Nemotron model there reads images, so screenshots go to `NEBIUS_VISION_MODEL` (`google/gemma-3-27b-it`, same endpoint) to become text only (Phase 4 §0.5). Re-run `pytest -m live` before submitting.
@@ -36,6 +37,7 @@ Start a phase only after every box in the previous phase's Done Checklist is che
 
 ## Commands
 ```bash
+cd backend                         # all Python commands run from here
 python -m venv .venv && .venv\Scripts\activate   # Windows (source .venv/bin/activate elsewhere)
 pip install -r requirements.txt -e .  # pinned, tested versions + the app itself (scripts import `app`)
 python scripts/setup_hermes.py    # once, and after changing keys or the model
@@ -43,7 +45,7 @@ uvicorn app.main:app --reload     # Troth on :8000 (MCP at /mcp/)
 hermes -p continuum gateway run   # Hermes API server on :8642
 pytest                            # offline, LLM mocked
 pytest -m live                    # real LLM + Hermes (needs keys and both servers running)
-cd frontend && npm install && npm run build   # after any UI change: type-checks and rebuilds app/static
+cd ../frontend && npm install && npm run build   # after any UI change: type-checks and rebuilds backend/app/static
 ```
 
 ## Rules

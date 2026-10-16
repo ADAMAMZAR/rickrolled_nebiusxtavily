@@ -78,14 +78,14 @@ Each tier works on its own, so you can stop at any tier. No schema change: `Inve
 
 ### P1 Connect checks and loops (half a day to a day; this is Phase 4 §9 "Track this")
 
-5. **A risky check saves itself as a loop.** At the end of `run_investigation` ([app/investigation.py](app/investigation.py)), when the level is anything but LOW and `loop_id` is empty:
+5. **A risky check saves itself as a loop.** At the end of `run_investigation` ([app/investigation.py](backend/app/investigation.py)), when the level is anything but LOW and `loop_id` is empty:
    - Create a source with `kind="investigation"`, `text=input_text` and `url="/investigate.html#<id>"`.
    - Create a task loop **"Verify <first org, else domain, else the sender> before paying"**, with `next_action` set to the first next step. Skip it if an open loop with that title already exists (re-checks).
    - Set `loop_id` in the same commit as "Done".
-   - `_reply` in [app/mcp_tools.py](app/mcp_tools.py) adds one line, built in code: *"On your list: …. It stays under Needs attention until you resolve it."* The result page shows "On your list: …" with a link to the dashboard (the API returns `loop_title`).
+   - `_reply` in [app/mcp_tools.py](backend/app/mcp_tools.py) adds one line, built in code: *"On your list: …. It stays under Needs attention until you resolve it."* The result page shows "On your list: …" with a link to the dashboard (the API returns `loop_title`).
    - LOW adds nothing. This replaces the spec's "Track this" button (D1).
    - *Changed 2026-10-10: GUARDED counts too, so only LOW clears a payment loop. A live run with Tavily down scored the T. Rowe Price clone GUARDED and left the loop unflagged.*
-6. **Risky loops go first in Needs attention.** Add a first rule to `needs_attention` in [app/engine.py](app/engine.py):
+6. **Risky loops go first in Needs attention.** Add a first rule to `needs_attention` in [app/engine.py](backend/app/engine.py):
    - an open loop whose latest check is GUARDED or above → e.g. `high risk, hold off paying`;
    - INSUFFICIENT_EVIDENCE → `sender not verified, hold off paying`.
 
@@ -97,8 +97,8 @@ Each tier works on its own, so you can stop at any tier. No schema change: `Inve
    - New `SOUL.md` rule: *"When `remember` saves a loop about paying money or sharing personal details (bank account, OTP, IC number) with a company, person or website, ask once: 'Want me to check who's asking first?' On yes, call `investigate` with the user's message and that loop's id."* This is prompt-only. Add a flag in code only if live runs show Nemotron skipping the offer.
    - Re-run `setup_hermes.py`.
 8. **Tests:**
-   - [tests/test_investigation.py](tests/test_investigation.py): HIGH saves one linked loop; LOW, a re-check and a check started from a loop save none.
-   - [tests/test_attention.py](tests/test_attention.py): the new rule and its order.
+   - [tests/test_investigation.py](backend/tests/test_investigation.py): HIGH saves one linked loop; LOW, a re-check and a check started from a loop save none.
+   - [tests/test_attention.py](backend/tests/test_attention.py): the new rule and its order.
    - `loop_id` in the API and the MCP tool.
    - Then run `pytest`, and `pytest -m live -k "scam_live or hermes"` for the reply and SOUL changes.
 
@@ -165,7 +165,7 @@ Each tier works on its own, so you can stop at any tier. No schema change: `Inve
 |---|---|---|
 | 0:00 | Hook: *"Two things slip: what you promised, and the message pretending to be someone you trust."* Phone (Telegram) next to the dashboard. | — |
 | 0:15 | Dashboard chat: the NVIDIA internship message → goal + 2 loops; click one to show the exact sentence. Telegram: "What am I waiting on?" → the same answer. | Memory, Hermes + Nemotron |
-| 0:50 | Telegram, in your own words: *"I need to transfer RM5,000 to T. Rowe Price Group Sdn. Bhd. at troweprice-my-invest.com by Friday for their 12% monthly fund."* (scenario B's entities, [b_clone_company.txt](tests/scenarios/b_clone_company.txt)) → loop saved, due Friday → *"Want me to check who's asking first?"* → "yes" → (cut the 40–60 s wait) CRITICAL, official troweprice.com, BNM clone warning, next steps. Dashboard: the loop tops Needs attention. Open the check: live steps, graph, click the BNM edge → quote. | Works for you, tools, fixed rules |
+| 0:50 | Telegram, in your own words: *"I need to transfer RM5,000 to T. Rowe Price Group Sdn. Bhd. at troweprice-my-invest.com by Friday for their 12% monthly fund."* (scenario B's entities, [b_clone_company.txt](backend/tests/scenarios/b_clone_company.txt)) → loop saved, due Friday → *"Want me to check who's asking first?"* → "yes" → (cut the 40–60 s wait) CRITICAL, official troweprice.com, BNM clone warning, next steps. Dashboard: the loop tops Needs attention. Open the check: live steps, graph, click the BNM edge → quote. | Works for you, tools, fixed rules |
 | 1:50 | Briefing on Telegram (`cron run`): the deposit loop first, then Sarah's reply due tomorrow. Reply "snooze the portfolio till Monday". | Always on, proactive |
 | 2:20 | (Google set up) Sarah's email closes her loop; a calendar proposal waits; approve it. | Tasks, your yes |
 | 2:40 | Architecture: Hermes ↔ MCP ↔ Troth; Nemotron 3 Super on Nebius Token Factory for every reasoning step; Tavily for evidence; one SQLite file; nothing sent. 2 s of the Token Factory usage page. | NVIDIA + Nebius |

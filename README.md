@@ -26,24 +26,24 @@ Every loop goes through five steps:
 - **15:40:** Sarah emails back. Her loop closes on its own, and the interview time waits as a calendar proposal until you say yes.
 - **Next morning:** the briefing still lists the deposit until you mark it done.
 
-*(The T. Rowe Price message is test sample B in [tests/scenarios/](tests/scenarios/).)*
+*(The T. Rowe Price message is test sample B in [tests/scenarios/](backend/tests/scenarios/).)*
 
 ### Personal AI track
 
 | The track asks for | Troth |
 |---|---|
-| Always on | Hermes runs the Telegram bot, the 8:00 briefing and the 10-minute email and web sync for as long as its gateway runs ([hermes/](hermes/), [scripts/sync.py](scripts/sync.py)) |
+| Always on | Hermes runs the Telegram bot, the 8:00 briefing and the 10-minute email and web sync for as long as its gateway runs ([hermes/](backend/hermes/), [scripts/sync.py](backend/scripts/sync.py)) |
 | Private, your data under your control | One SQLite file on your machine; see [Your data](#your-data) |
-| Persistent memory | Goals, loops, people, the words each loop came from, history with undo, and every message check ([app/engine.py](app/engine.py), [app/db.py](app/db.py)). Hermes' own memory is off, so there's one source of truth. |
-| Reusable skills | Two Hermes skills ([hermes/skills/](hermes/skills/)): `/check <message>` and `/briefing` on Telegram. The 8:00 cron job runs `briefing` too. |
-| Tools you choose | 17 MCP tools any MCP client can call ([app/mcp_tools.py](app/mcp_tools.py)). Google, Tavily and Telegram are each opt-in. |
+| Persistent memory | Goals, loops, people, the words each loop came from, history with undo, and every message check ([app/engine.py](backend/app/engine.py), [app/db.py](backend/app/db.py)). Hermes' own memory is off, so there's one source of truth. |
+| Reusable skills | Two Hermes skills ([hermes/skills/](backend/hermes/skills/)): `/check <message>` and `/briefing` on Telegram. The 8:00 cron job runs `briefing` too. |
+| Tools you choose | 17 MCP tools any MCP client can call ([app/mcp_tools.py](backend/app/mcp_tools.py)). Google, Tavily and Telegram are each opt-in. |
 | Tasks across your daily workflows | Follow-up drafts, Gmail drafts, calendar events, web watch, loops closed by email replies, message checks. Anything that changes the outside world waits for your yes. |
-| NVIDIA open model | Nemotron 3 Super on Nebius Token Factory for every reasoning step ([app/llm.py](app/llm.py)) |
-| Hermes Agent | Chat, Telegram and cron, with Troth's tools only ([hermes/config.example.yaml](hermes/config.example.yaml)) |
+| NVIDIA open model | Nemotron 3 Super on Nebius Token Factory for every reasoning step ([app/llm.py](backend/app/llm.py)) |
+| Hermes Agent | Chat, Telegram and cron, with Troth's tools only ([hermes/config.example.yaml](backend/hermes/config.example.yaml)) |
 
 ### Your data
 
-- Your loops, goals and people live in one SQLite file (`data/continuum.db`) on your machine.
+- Your loops, goals and people live in one SQLite file (`backend/data/continuum.db`) on your machine.
 - Hermes' own memory is off, and it only has Troth's tools: no terminal, files or browser.
 - Troth never sends anything for you.
 - Our server never opens a suspicious link: Tavily reads it. Messages being checked are treated as untrusted text and never followed.
@@ -147,17 +147,20 @@ ScamGraph also uses Nemotron for every step except one: no Nemotron model on Tok
 
 ### Tavily
 
-ScamGraph's research runs on **Tavily**: Search (basic depth, with `include_domains` for the regulators' sites) and Extract for the pages worth reading. A run uses at most 8 searches and 5 page reads per round, with one follow-up round. Each good reply is cached in `data/tavily_cache/`; if Tavily fails, the cached reply is used and the step says so.
+ScamGraph's research runs on **Tavily**: Search (basic depth, with `include_domains` for the regulators' sites) and Extract for the pages worth reading. A run uses at most 8 searches and 5 page reads per round, with one follow-up round. Each good reply is cached in `backend/data/tavily_cache/`; if Tavily fails, the cached reply is used and the step says so.
 
 ## Setup
 
 The code uses Troth's working name, `continuum`: the Hermes profile, the DB file and the package keep it.
+
+The Python app lives in `backend/` and the UI in `frontend/`. Run every command below from `backend/` unless it says otherwise.
 
 Needs **Python 3.11+**, **[Hermes Agent](https://hermes-agent.nousresearch.com)** (tested with 0.21) on your PATH, and a **Nebius API key**.
 
 **macOS / Linux**
 
 ```bash
+cd backend
 python -m venv .venv && .venv/bin/pip install -r requirements.txt -e .
 cp .env.example .env                                # then set NEBIUS_API_KEY
 .venv/bin/python scripts/setup_hermes.py            # creates the Hermes "continuum" profile
@@ -168,6 +171,7 @@ hermes -p continuum gateway run                     # terminal 2: Hermes on :864
 **Windows (PowerShell)**
 
 ```powershell
+cd backend
 python -m venv .venv; .venv\Scripts\pip install -r requirements.txt -e .
 copy .env.example .env                              # then set NEBIUS_API_KEY
 .venv\Scripts\python scripts\setup_hermes.py
@@ -177,12 +181,12 @@ hermes -p continuum gateway run                     # terminal 2
 
 Open **http://127.0.0.1:8000**. Re-run `setup_hermes.py` after changing keys or the model, and after updating Troth (it copies new tools and instructions into Hermes).
 
-**Changing the UI** (Node 20+). The pages are React + Vite in `frontend/`. `app/static/` holds the built files, committed, so running Troth needs no Node.
+**Changing the UI** (Node 20+). The pages are React + Vite in `frontend/`. `backend/app/static/` holds the built files, committed, so running Troth needs no Node.
 
 ```bash
-cd frontend && npm install
+cd frontend && npm install   # from the repo root
 npm run dev      # http://localhost:5173 with hot reload; /api goes to Troth on :8000
-npm run build    # type-checks, then rebuilds app/static (commit it)
+npm run build    # type-checks, then rebuilds backend/app/static (commit it)
 ```
 
 `TAVILY_API_KEY` in `.env` is needed for ScamGraph's research (without it, only the message itself is checked) and for web watch and lookup (free key at tavily.com). Then say "keep an eye on the hackathon results", or use **Watch the web** in a loop's detail. `python scripts/sync.py` runs the check: each watched loop is searched at most once a day, and anything found shows under **Pending actions**.
@@ -209,7 +213,7 @@ Chat with Troth from your phone. Hermes runs the bot, so there's no extra server
 
 Only the user ids in `TELEGRAM_ALLOWED_USERS` get replies. On Telegram, Troth has the same tools as the dashboard chat, nothing else. Telegram keeps one ongoing conversation; send `/new` to start fresh.
 
-Two commands come from Troth's Hermes skills ([hermes/skills/](hermes/skills/)), which `setup_hermes.py` installs: `/check <message>` checks who's asking, and `/briefing` sends what needs you now. Setup also removes Hermes' bundled skills from this profile; they need tools it doesn't have.
+Two commands come from Troth's Hermes skills ([hermes/skills/](backend/hermes/skills/)), which `setup_hermes.py` installs: `/check <message>` checks who's asking, and `/briefing` sends what needs you now. Setup also removes Hermes' bundled skills from this profile; they need tools it doesn't have.
 
 ### Daily briefing (optional, needs Telegram)
 
@@ -239,13 +243,13 @@ Lets Troth read email from people you're waiting on and, with your yes, save Gma
 
 1. In [Google Cloud Console](https://console.cloud.google.com/), create a project and enable the **Gmail API** and the **Google Calendar API**.
 2. Under **Google Auth Platform → Audience**, set the user type to **External**, leave the status at **Testing**, and under **Test users** add the Google account you'll sign in with. Without it, Google stops sign-in with *"Access blocked … Error 403: access_denied"* (the app is in testing and you're not a tester).
-3. Under **Clients**, create a client of type **Desktop app**. Download its JSON and save it as `data/client_secret.json`.
+3. Under **Clients**, create a client of type **Desktop app**. Download its JSON and save it as `backend/data/client_secret.json`.
 4. In the dashboard, open **Settings** and click **Connect Google**. Your browser opens Google's sign-in.
 5. Give someone's address, in chat (*"Sarah's email is sarah@nvidia.com"*) or in a loop's **Contact email**. From then on, `python scripts/sync.py` (or the cron job above) reads their new email and updates their loops. The first run reads the last 7 days (`SYNC_LOOKBACK_DAYS`).
 
 To check the connection on its own: `python scripts/google_gate.py someone@example.com` lists the last 5 emails from that address, saves a test draft (not sent) and creates a test event tomorrow at 10:00. Delete both afterwards.
 
-Access asked for: read Gmail, write drafts, write calendar events. The token is saved in `data/google_token.json` (gitignored). While the Google app is in testing, Google ends the connection after 7 days: connect again in Settings. **Disconnect** in Settings revokes access and deletes the token.
+Access asked for: read Gmail, write drafts, write calendar events. The token is saved in `backend/data/google_token.json` (gitignored). While the Google app is in testing, Google ends the connection after 7 days: connect again in Settings. **Disconnect** in Settings revokes access and deletes the token.
 
 ## Tests
 
@@ -260,9 +264,9 @@ The live suite runs the acceptance inputs against real Nemotron, e.g. "Alex said
 
 ## Privacy
 
-- Everything stays local in `data/continuum.db` (SQLite). What leaves your machine: text sent to Nebius for Nemotron to do its job; your Telegram messages if you turn Telegram on (they pass through Telegram's servers); with a Tavily key, only your watch searches and lookup questions go to Tavily, never your messages. Only the names of people you wait on go to the model, not their email addresses.
+- Everything stays local in `backend/data/continuum.db` (SQLite). What leaves your machine: text sent to Nebius for Nemotron to do its job; your Telegram messages if you turn Telegram on (they pass through Telegram's servers); with a Tavily key, only your watch searches and lookup questions go to Tavily, never your messages. Only the names of people you wait on go to the model, not their email addresses.
 - **Email** (if you connect Google): only mail *from* people you gave an address for, and only while they have an open loop. Troth never lists or searches the rest of your inbox. Each email's subject and new text (quotes and signature removed, at most 4,000 characters) go to Nemotron. The text is stored only if it changed a loop. Attachments are never downloaded. **Forget email data** in Settings deletes all stored email text; loops made from it stay, marked "source deleted".
-- **ScamGraph**: the message, screenshot and page text go to Nebius. Names, websites, phone numbers and the submitted link go to Tavily as searches. Screenshots are saved in `data/uploads/` (gitignored, never served). A risky check's message is also kept as its loop's source. Logs hold ids, counts and step names, never the message, quotes or searches.
+- **ScamGraph**: the message, screenshot and page text go to Nebius. Names, websites, phone numbers and the submitted link go to Tavily as searches. Screenshots are saved in `backend/data/uploads/` (gitignored, never served). A risky check's message is also kept as its loop's source. Logs hold ids, counts and step names, never the message, quotes or searches.
 - Every loop links to the message it came from, and you can delete any loop.
 - Troth never sends anything on your behalf. Drafts are text for you to copy, or Gmail drafts you send yourself.
 - Messages that change nothing (questions, small talk) aren't stored by Troth. Hermes keeps its own chat history in its `continuum` profile folder.
