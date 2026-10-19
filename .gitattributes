@@ -1,0 +1,3 @@
+# LF for the UI source and its build output, so a build on Windows matches CI's byte for byte.
+frontend/** text=auto eol=lf
+backend/app/static/** text=auto eol=lf
