@@ -1,6 +1,6 @@
 # Troth — Plan: see what your promises depend on
 
-**Status:** draft for review, 2026-10-11. Nothing built yet. Decisions in §7.
+**Status:** C1–C3 plus a "Needs: …" line in loop detail built 2026-10-19 (decisions in §7, results in §6 and §10). Still to check live: Telegram and Hermes. C4's chain editor, loop editing (C4), export and delete-everything (C5) wait. D3 is already built.
 
 **Source:** [Troth_AI_Moat_Strategy.md](Troth_AI_Moat_Strategy.md), reviewed and mapped onto Troth. The product keeps the name Troth (renamed from Continuum on 2026-10-11), its users and its stack.
 
@@ -72,9 +72,11 @@ class Dependency(SQLModel, table=True):
 
 ### 3.2 Extraction (`app/extraction.py`)
 
-- JSON shape: `new_loops[].needs` and `updated_loops[].needs`, lists of existing loop ids or exact titles of other new loops in the same reply.
-- New rule 9: *"needs: loops that must be done before this one, only when the message says so ("once", "after", "first", "depends on", "can't … until"). Use an existing loop's id or the exact title of another loop in your new_loops. Never link loops just because they share a topic."*
-- Rule for commitments: *"kind commitment: set waiting_on to who the user promised."*
+- JSON shape: a top-level `links: [{"loop": …, "needs": …}]`, each end an existing loop's id or the exact title of a loop in `new_loops`.
+  *Changed 2026-10-19 from `new_loops[].needs`: live, the model only filled `needs` when it happened to write the needed loop first (5 of 8 runs). A list written after every loop doesn't depend on order.*
+- New rule 9: links only when the message says one thing has to happen before another ("once", "after", "first", "needs", "depends on", "can't … until"), or that something is *for* another loop ("my reference letter for it"). Never from a shared topic, goal or person.
+- `waiting_on` now covers both kinds: who they wait on (waiting) or who they promised (commitment), with the known-people rule for both. *(Written only for commitments at first, it made the model drop known full names, e.g. "Sarah" for "Sarah Chen": 3 of 12 live runs failed vs 0 of 12 before; shared, 16 of 16 passed.)*
+- An existing loop can also be named by its exact title (the model sometimes does), but only within the message's scope.
 - **Code guard** in `process_message`, same transaction: resolve each ref, then drop unknown refs, self-links, duplicates and anything that would make a cycle. Log `dependency_dropped reason=…`. An email may link only its in-scope loops and its new loops.
 - Still one LLM call per message. Risk detection adds no LLM call.
 
@@ -148,6 +150,15 @@ About 4 days in total. That leaves room for P3 deploy (issue #4) and the video b
 
 ## 6. Evaluation
 
+*Measured 2026-10-19, final prompt, extraction only against real Nemotron, 8 runs each (synthetic, labelled test messages):*
+| Message | Linked | Right direction |
+|---|---|---|
+| "…Dr. Lim is writing my reference letter for it" | 7/8 | 7/7 |
+| "…I can only send it once Dr. Lim sends my reference letter" | 8/8 | 8/8 |
+| Same-topic control: NVIDIA application + NVIDIA hackathon | 0/8 (no false link) | — |
+
+*`tests/test_dependency_live.py` (story + delay email, link to an existing loop, same-topic control): 3/3 in each of 3 runs. Live acceptance + email tests: 11/11 twice.*
+
 Synthetic scenarios, clearly labelled. Numbers go here and in the README only after a run.
 
 | Measure | How |
@@ -163,9 +174,16 @@ Synthetic scenarios, clearly labelled. Numbers go here and in the README only af
 
 ## 7. Decisions for you
 
+*Settled 2026-10-19, all as recommended:*
+- *D1: a Phase 4 addendum (listed in AGENTS.md).*
+- *D2: students and job seekers, the §2 reference-letter story.*
+- *D3: built 2026-10-19.*
+- *D4: reuse `waiting_on` / `person_id` for commitments, labelled "Promised to". Known effect: email sync then also reads mail from people the user promised something to, since it reads every person linked to an open loop.*
+- *D5: in scope, scoped size: C1–C3 plus one "Needs: …" line in loop detail. The link editor and chain view (C4), loop editing, export and delete-everything (C5) wait.*
+
 - **D1 Where this plan lives.** *Recommended:* an addendum to Phase 4, like the personal AI plan, so the video can show it. A Phase 5 couldn't start until Phase 4's deploy and video boxes are checked (AGENTS.md), so it would land after submission.
 - **D2 Users and story.** *Recommended:* keep students and job seekers (PRODUCT.md) and §2's reference-letter story. It continues the Sarah/NVIDIA demo. The doc's freelancer release story would need new demo data and a new audience.
-- **D3 `Activity.source_id`.** *Recommended:* add it. The history then quotes the words that moved a date. Cost: delete your local `.db` once (the deploy starts fresh anyway). Without it, only email changes show their source (a Gmail link).
+- **D3 `Activity.source_id`.** *Built 2026-10-19 ([troth_audit_2026-10-19.md](troth_audit_2026-10-19.md) item 3).* *Recommended:* add it. The history then quotes the words that moved a date. Cost: delete your local `.db` once (the deploy starts fresh anyway). Without it, only email changes show their source (a Gmail link).
 - **D4 Promised-to person.** *Recommended:* reuse `waiting_on`/`person_id` for commitments, labelled "Promised to". A new column is cleaner, but it touches the UI, prompts and tests for no demo gain.
 - **D5 Out-list check.** Phase 1 deferred "knowledge graph" and "auto follow-ups". Phase 2 deferred "learned habits". Phase 4 rules out "Neo4j or any graph DB". This plan uses one SQLite table, sends nothing, and leaves learning to S1, so it stays inside those lines. Confirm.
 
@@ -191,13 +209,19 @@ Replace the 2:20 segment ("Sarah's email closes her loop; approve a calendar pro
 
 ## 10. Done checklist
 
-- [ ] §7 decisions settled and recorded here; plan added to AGENTS.md
-- [ ] A message with "once / after / needs" creates linked loops; unstated links aren't created; cycles are dropped
-- [ ] An upstream delay (chat or email) flags the dependent promise with a reason naming the cause and its date
+- [x] §7 decisions settled and recorded here; plan added to AGENTS.md
+  *Done 2026-10-19.*
+- [x] A message with "once / after / needs" creates linked loops; unstated links aren't created; cycles are dropped
+  *Done 2026-10-19: `tests/test_dependencies.py` (guards), `tests/test_dependency_live.py`; live link rates in §6.*
+- [x] An upstream delay (chat or email) flags the dependent promise with a reason naming the cause and its date
+  *Done 2026-10-19, offline and live (an email from Dr. Lim moving the letter to Oct 7 → the application at risk).*
 - [ ] The sync job posts "At risk" and "Ready" lines to Telegram unprompted
+  *Code done 2026-10-19 (`sync_email` adds `risk_lines`), tested offline. Not yet seen on Telegram: Hermes isn't installed on the dev machine.*
 - [ ] Recovery options come from code; a chosen option becomes a draft or proposal that waits for a yes
+  *Options from code: done (`_options`). Picking one goes through Hermes' existing draft/proposal tools via the SOUL rule; not checked live through Hermes yet.*
 - [ ] Dashboard shows the chain, lets you add/remove links and edit a loop (with undo)
-- [ ] History quotes the words that moved a date (D3)
+- [x] History quotes the words that moved a date (D3)
+  *Done 2026-10-19 (audit item 3).*
 - [ ] Export downloads all your data; Delete everything empties it
 - [ ] `pytest` passes; `pytest -m live` scenario numbers recorded in §6
 - [ ] §2 checked live through Hermes and Telegram on a scratch DB

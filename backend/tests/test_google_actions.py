@@ -130,7 +130,7 @@ def test_from_chat_and_dashboard(db_url: str, tmp_path: Path, monkeypatch: pytes
 
     google, llm = FakeGoogle(), FakeLLM()
     app = create_app(db_url, get_llm=lambda: llm, get_google=lambda: google)
-    with TestClient(app, base_url="http://127.0.0.1:8000") as http:
+    with TestClient(app, base_url="http://127.0.0.1:8000", headers={"X-Troth": "1"}) as http:
         mcp = MCP(http)
         mcp.rpc("initialize", {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "t", "version": "0"}})
         loops = remember_demo(mcp, llm)["new_loops"]
@@ -168,7 +168,7 @@ def test_google_settings_routes(db_url: str, tmp_path: Path, monkeypatch: pytest
     monkeypatch.setattr(settings, "google_client_secret_file", str(tmp_path / "client_secret.json"))
     disconnected: list[bool] = []
     monkeypatch.setattr(google, "disconnect", lambda s: (disconnected.append(True), Path(s.google_token_file).unlink()))
-    with TestClient(create_app(db_url), base_url="http://127.0.0.1:8000") as http:
+    with TestClient(create_app(db_url), base_url="http://127.0.0.1:8000", headers={"X-Troth": "1"}) as http:
         assert http.get("/api/google/status").json() == {"connected": True, "set_up": False, "last_sync": None}
         assert http.post("/api/google/connect").json()["message"].startswith("Google isn't set up: no OAuth client file")
         assert http.post("/api/google/disconnect").json()["connected"] is False and disconnected

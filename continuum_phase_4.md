@@ -383,8 +383,8 @@ POST /api/investigations/{id}/loop   → Track this (P1)
 
 Wording follows §2: no "scam" verdict label, just the level and its signals.
 
-**Deploy** (decision §0.2, revised 2026-10-13: Nebius VM dropped, no cost reason to keep it):
-- One VM (Oracle Cloud Free Tier — Always Free ARM instance) running `uvicorn` + the Hermes gateway.
+**Deploy** (decision §0.2, revised 2026-10-13: Nebius VM dropped, no cost reason to keep it; revised 2026-10-19: GCP Compute Engine instead of Oracle Cloud):
+- One GCP Compute Engine VM running `uvicorn` + the Hermes gateway as systemd services, with Caddy in front for HTTPS (`scripts/setup_server.sh`). CI deploys `main` over SSH after the tests pass (README: Deploy to GCP Compute Engine).
 - A **fresh demo DB**.
 - `APP_PASSWORD` set: a FastAPI dependency checks HTTP Basic auth on `/api/*` and the pages. Without it, anyone could see loops, press approve, and spend Nebius/Tavily credits.
 - Google stays off: the Desktop OAuth flow can't run on a server.
@@ -549,7 +549,7 @@ Every milestone ends at its gate. P1 starts only after the full P0 demo works.
    - Live scenario test.
    - Demo video, pitch, Devpost.
    **Gate:** the §1 demo runs end to end from the page **and** from Telegram, with no hand-edited data.
-   *In progress 2026-10-08. Deploy is held on issue #4; 2026-10-13 decision: host on Oracle Cloud Free Tier instead of a Nebius VM (§0.2).*
+   *In progress 2026-10-08. Deploy is held on issue #4; 2026-10-13 decision: host on Oracle Cloud Free Tier instead of a Nebius VM (§0.2); 2026-10-19: GCP Compute Engine instead, deployed by CI (§11).*
    *Page half checked 2026-10-10 with scenario A, nothing hand-edited: live steps, HIGH / confidence HIGH / score 70, 3 cited findings, graph with `bnm.gov.my` "warned by", claim explorer. Gap: "fully licensed by Bank Negara Malaysia" shows "No evidence" although BNM's alert list names the sender; §1 expects such a claim to be contradicted. Telegram half: see §15.*
    - *`graph()` (§7.6) in `investigation.py`, returned as `graph` by `GET /api/investigations/{id}`. Extra edges beyond §7.6: `claims` (message→claim), and `names` (message→a regulator the message names, so it isn't drawn as the sender's identity). A submitted domain equal to the official one shares its node. Domain nodes are flagged `verified`/`mismatch`.*
    - *`investigate.html`: form, live steps with counts, result (badge, confidence, identity, score, A/B source count, cited findings with source links or the message quote, next steps, the checked text), Cytoscape graph (cdnjs 3.34.3 with SRI, concentric layout: message → names and claims → sources), claim explorer with evidence cards. Clicking an edge or source opens its evidence card; a claim or name opens its section. All untrusted text goes in via `textContent`; only http(s) links are clickable.*

@@ -1,11 +1,11 @@
 from datetime import date
 
 import pytest
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from app import engine as eng
-from app.db import ActivityBy, GoalStatus, LoopStatus, OpenLoop
-from tests.test_process_message import DEMO_RESULT, process, result
+from app.db import ActivityBy, GoalStatus, LoopKind, LoopStatus, OpenLoop, Source
+from tests.test_process_message import DEMO, DEMO_RESULT, process, result
 
 
 def demo(session: Session) -> tuple[OpenLoop, OpenLoop]:
@@ -87,3 +87,31 @@ def test_resolving_twice_logs_once(session: Session) -> None:
     eng.resolve_loop(session, wait.id, by=ActivityBy.chat)  # Hermes resolving it again
     eng.reopen_loop(session, eng.reopen_loop(session, wait.id).id)  # reopening an open loop changes nothing
     assert history(session, wait) == [("created", "chat", False), ("reopened", "user", False), ("resolved", "chat", True)]
+
+
+def test_history_keeps_the_words_behind_each_change(session: Session) -> None:
+    """The message that resolved a loop is linked from its history, not stored where nothing reads it."""
+    wait, _ = demo(session)
+    process(session, result(resolved=[str(wait.id)]), "Sarah got back to me.")
+    said = {a.action.value: session.get(Source, a.source_id).text for a in eng.list_activity(session, wait.id)}  # type: ignore[union-attr]
+    assert said == {"created": DEMO, "resolved": "Sarah got back to me."}
+
+
+def test_delete_forgets_the_words_only_it_used(session: Session) -> None:
+    wait, portfolio = demo(session)
+    process(session, result(resolved=[str(wait.id)]), "Sarah got back to me.")
+    eng.delete_loop(session, wait.id)
+    assert [s.text for s in session.exec(select(Source)).all()] == [DEMO]  # still behind the portfolio loop
+    eng.delete_loop(session, portfolio.id)
+    assert session.exec(select(Source)).all() == []
+
+
+def test_delete_keeps_an_emails_id_but_not_its_text(session: Session) -> None:
+    """Sync skips emails it has a Gmail id for, so a deleted loop's email isn't read again."""
+    source = Source(kind="email", text="Hi, decision next week.", external_id="m1", sender="Sarah", url="https://x/t1")
+    session.add(source)
+    loop = eng.add_loop(session, source_id=source.id, title="Wait for Sarah", summary="s", kind=LoopKind.waiting)
+    session.commit()
+    eng.delete_loop(session, loop.id)
+    [kept] = session.exec(select(Source)).all()
+    assert (kept.external_id, kept.text, kept.sender, kept.url) == ("m1", "", None, None)

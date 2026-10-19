@@ -23,7 +23,7 @@ from app.config import settings, setup_logging
 from app.connectors import google
 from app.connectors.google import GoogleClient, GoogleError
 from app.connectors.tavily import TavilyClient
-from app.db import ActionStatus, Activity, Goal, LoopStatus, OpenLoop, PendingAction, Person, create_db_engine
+from app.db import ActionStatus, Activity, Goal, LoopStatus, OpenLoop, PendingAction, Person, Source, create_db_engine
 from app.extraction import Completer
 from app.hermes import HermesClient, HermesError, HermesReply
 from app.llm import LLMClient
@@ -86,8 +86,17 @@ def loop_out(session: Session, loop: OpenLoop) -> dict[str, Any]:
     }
 
 
-def activity_out(a: Activity) -> dict[str, Any]:
-    return {**a.model_dump(mode="json", exclude={"undo"}), "can_undo": a.undo is not None}
+def link_out(loop: OpenLoop) -> dict[str, Any]:
+    """A loop on the other end of a dependency, for the detail panel."""
+    return {"id": str(loop.id), "title": loop.title, "due": loop.due.isoformat() if loop.due else None,
+            "status": loop.status.value}
+
+
+def activity_out(session: Session, a: Activity) -> dict[str, Any]:
+    """`said`: the chat message behind the change, so the history shows why it happened."""
+    source = session.get(Source, a.source_id) if a.source_id else None
+    said = source.text if source and source.kind == "chat" and source.text else None
+    return {**a.model_dump(mode="json", exclude={"undo"}), "can_undo": a.undo is not None, "said": said}
 
 
 def investigation_out(session: Session, detail: inv.InvestigationDetail) -> dict[str, Any]:
@@ -142,6 +151,8 @@ def create_app(
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.db = create_db_engine(database_url or settings.database_url)
+        with Session(app.state.db) as session:
+            inv.fail_interrupted(session)
         async with mcp.session_manager.run():
             yield
         app.state.db.dispose()
@@ -169,6 +180,15 @@ def create_app(
         response = error(401, "unauthorized", "Password needed.")
         response.headers["WWW-Authenticate"] = 'Basic realm="Troth"'
         return response
+
+    @app.middleware("http")
+    async def own_pages_only(request: Request, call_next: Callable[[Request], Any]) -> Any:
+        """Changes through /api need the X-Troth header, which our pages send. Another website can't add it without
+        the browser asking us first (CORS, which we don't allow), so it can't change anything in the user's name."""
+        if (request.url.path.startswith("/api") and request.method not in ("GET", "HEAD", "OPTIONS")
+                and request.headers.get("x-troth") != "1"):
+            return error(403, "forbidden", "Changes need the header X-Troth: 1. The dashboard sends it.")
+        return await call_next(request)
     app.mount("/mcp", mcp_app)
 
     @app.exception_handler(eng.NotFound)
@@ -218,7 +238,8 @@ def create_app(
     @app.get("/api/attention")
     def attention(session: Session = Depends(get_session)) -> list[dict[str, Any]]:
         items = eng.needs_attention(session, eng.local_now().date())
-        return [{"loop": loop_out(session, a.loop), "reason": a.reason} for a in items]
+        return [{"loop": loop_out(session, a.loop), "reason": a.reason, "options": a.options,
+                 "cause": {"id": str(a.cause.id), "title": a.cause.title} if a.cause else None} for a in items]
 
     @app.get("/api/loops")
     def loops(
@@ -236,7 +257,9 @@ def create_app(
     @app.get("/api/loops/{loop_id}")
     def loop(loop_id: UUID, session: Session = Depends(get_session)) -> dict[str, Any]:
         detail = eng.get_loop(session, loop_id)
-        return {**loop_out(session, detail.loop), "source": detail.source.model_dump(mode="json")}
+        needs, needed_by = eng.loop_links(session, loop_id)
+        return {**loop_out(session, detail.loop), "source": detail.source.model_dump(mode="json"),
+                "needs": [link_out(l) for l in needs], "needed_by": [link_out(l) for l in needed_by]}
 
     @app.post("/api/loops/{loop_id}/resolve")
     def resolve(loop_id: UUID, session: Session = Depends(get_session)) -> dict[str, Any]:
@@ -282,7 +305,7 @@ def create_app(
 
     @app.get("/api/activity")
     def activity(loop_id: UUID | None = None, session: Session = Depends(get_session)) -> list[dict[str, Any]]:
-        return [activity_out(a) for a in eng.list_activity(session, loop_id)]
+        return [activity_out(session, a) for a in eng.list_activity(session, loop_id)]
 
     @app.post("/api/activity/{activity_id}/undo")
     def undo(activity_id: UUID, session: Session = Depends(get_session)) -> dict[str, Any]:
@@ -290,10 +313,13 @@ def create_app(
 
     @app.get("/api/actions")
     def actions(
-        status: Literal["proposed", "done", "rejected", "failed", "all"] = "proposed",
+        status: Literal["proposed", "done", "rejected", "failed", "waiting", "all"] = "proposed",
         session: Session = Depends(get_session),
     ) -> list[dict[str, Any]]:
-        found = eng.list_actions(session, None if status == "all" else ActionStatus(status))
+        """waiting = proposed + failed (can be approved again)."""
+        found = eng.list_actions(
+            session, None if status == "all" else eng.WAITING if status == "waiting" else ActionStatus(status)
+        )
         return [action_out(session, a) for a in found]
 
     @app.post("/api/actions/{action_id}/approve")
@@ -329,6 +355,11 @@ def create_app(
     @app.get("/api/investigations/{investigation_id}")
     def investigation(investigation_id: UUID, session: Session = Depends(get_session)) -> dict[str, Any]:
         return investigation_out(session, inv.get_investigation(session, investigation_id))
+
+    @app.delete("/api/investigations/{investigation_id}", status_code=204)
+    def delete_investigation(investigation_id: UUID, session: Session = Depends(get_session)) -> Response:
+        inv.delete_investigation(session, investigation_id)
+        return Response(status_code=204)
 
     @app.get("/api/google/status")
     def google_status(session: Session = Depends(get_session)) -> dict[str, Any]:

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { api, safeHref, startCheck, type Evidence, type Investigation, type RiskLevel } from "../api";
+import { api, safeHref, send, startCheck, type Evidence, type Investigation, type RiskLevel } from "../api";
 import { Band, Icon, Wordmark } from "../ui";
 import { Graph } from "./Graph";
 
@@ -139,7 +139,25 @@ function Result({ id }: { id: string }) {
         </>
       )}
       {d.status === "done" && <Steps d={d} />}
+      {d.status !== "running" && <DeleteCheck d={d} />}
     </>
+  );
+}
+
+/** Deletes the check, its evidence and screenshot. A loop it made stays, without the risk flag. */
+function DeleteCheck({ d }: { d: Investigation }) {
+  const [error, setError] = useState<string | null>(null);
+  async function remove() {
+    const loop = d.loop_title ? ` "${d.loop_title}" stays on your list, without its risk flag.` : "";
+    if (!confirm(`Delete this check, its evidence and screenshot?${loop} This can't be undone.`)) return;
+    try { await send(`/api/investigations/${encodeURIComponent(d.id)}`, "DELETE"); location.hash = ""; }
+    catch (e) { setError(`Couldn't delete it: ${(e as Error).message}`); }
+  }
+  return (
+    <p className="submit-row">
+      <button className="btn danger" type="button" onClick={remove}>Delete this check</button>
+      {error && <span className="error-line" role="alert">{error}</span>}
+    </p>
   );
 }
 

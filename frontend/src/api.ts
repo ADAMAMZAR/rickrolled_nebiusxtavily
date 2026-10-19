@@ -37,11 +37,21 @@ export interface Source {
   created_at: string;
 }
 
-export type LoopDetail = Loop & { source: Source };
+/** A loop on the other end of a dependency. */
+export interface LinkedLoop {
+  id: string;
+  title: string;
+  due: string | null;
+  status: "open" | "resolved";
+}
+
+export type LoopDetail = Loop & { source: Source; needs: LinkedLoop[]; needed_by: LinkedLoop[] };
 
 export interface Attention {
   loop: Loop;
   reason: string;
+  options: string[]; // recovery options built in code, when something it needs puts it at risk
+  cause: { id: string; title: string } | null;
 }
 
 export interface Activity {
@@ -51,11 +61,14 @@ export interface Activity {
   detail: string;
   created_at: string;
   can_undo: boolean;
+  said: string | null; // the chat message behind the change
 }
 
 export interface PendingAction {
   id: string;
   summary: string;
+  status: "proposed" | "failed"; // failed: approved but didn't work; approving again retries
+  error: string | null;
   payload: { source_url?: string };
 }
 
@@ -129,9 +142,12 @@ export interface Investigation {
   graph: { nodes: GraphNode[]; edges: GraphEdge[] };
 }
 
+// Changes through /api need it (backend/app/main.py: own_pages_only), so other websites can't make them.
+const OURS = { "X-Troth": "1" };
+
 /** JSON request to /api. Throws an Error carrying the API's own message. */
 export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const res = await fetch(path, { headers: { "Content-Type": "application/json" }, ...options });
+  const res = await fetch(path, { headers: { "Content-Type": "application/json", ...OURS }, ...options });
   if (res.status === 204) return null as T;
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(body.message || `Request failed (HTTP ${res.status}).`);
@@ -143,7 +159,7 @@ export const send = <T>(path: string, method: string, body?: unknown) =>
 
 /** Starts a message check (multipart, so a screenshot can ride along). Returns the new check's id. */
 export async function startCheck(form: FormData): Promise<string> {
-  const res = await fetch("/api/investigations", { method: "POST", body: form });
+  const res = await fetch("/api/investigations", { method: "POST", body: form, headers: OURS });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(body.message || "Couldn't start the check.");
   return body.id;

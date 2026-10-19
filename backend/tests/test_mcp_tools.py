@@ -74,7 +74,7 @@ def web() -> FakeTavily:
 @pytest.fixture
 def mcp(db_url: str, llm: FakeLLM, web: FakeTavily) -> Iterator[MCP]:
     app = create_app(db_url, get_llm=lambda: llm, get_web=web.client)
-    with TestClient(app, base_url="http://127.0.0.1:8000") as http:
+    with TestClient(app, base_url="http://127.0.0.1:8000", headers={"X-Troth": "1"}) as http:
         client = MCP(http)
         client.rpc("initialize", {
             "protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "test", "version": "0"},
@@ -164,8 +164,17 @@ def test_needs_attention_then_snooze(mcp: MCP, llm: FakeLLM) -> None:
 @pytest.mark.usefixtures("on_friday")
 def test_snooze_errors_are_readable(mcp: MCP, llm: FakeLLM) -> None:
     loop_id = remember_demo(mcp, llm)["new_loops"][0]["id"]
-    assert "must be a date" in mcp.call("snooze_loop", loop_id=loop_id, until="monday")["error"]
+    assert "Give a day like" in mcp.call("snooze_loop", loop_id=loop_id, until="someday")["error"]
     assert "after today" in mcp.call("snooze_loop", loop_id=loop_id, until="2026-10-02")["error"]
+
+
+@pytest.mark.usefixtures("on_friday")
+def test_snooze_takes_the_day_as_said(mcp: MCP, llm: FakeLLM) -> None:
+    """Weekdays are worked out in code: the model used to get them wrong."""
+    loop_id = remember_demo(mcp, llm)["new_loops"][0]["id"]
+    assert mcp.call("snooze_loop", loop_id=loop_id, until="Monday")["until"] == "Mon 2026-10-05"
+    assert mcp.call("snooze_loop", loop_id=loop_id, until="tomorrow")["until"] == "Sat 2026-10-03"
+    assert mcp.call("snooze_loop", loop_id=loop_id, until="fri")["until"] == "Fri 2026-10-09"  # today is Friday
 
 
 def test_bad_ids_give_readable_errors(mcp: MCP) -> None:
@@ -279,3 +288,33 @@ def test_investigate_reply_is_built_in_code() -> None:
     assert "scam" not in reply.lower()
     assert _reply({"risk_level": "INSUFFICIENT_EVIDENCE", "confidence": "LOW", "dashboard": "d"}).startswith(
         "Risk level: not enough evidence, confidence LOW")
+
+
+@pytest.mark.usefixtures("on_friday")
+def test_at_risk_reaches_the_tools_and_the_api(mcp: MCP, llm: FakeLLM) -> None:
+    """A delay to something a promise needs comes back from `remember`, needs_attention, inspect_loop and the API."""
+    from tests.test_dependencies import APP, LETTER, STORY
+
+    story = {**result(new=[loop(APP, "commitment", waiting_on="Sarah", due="2026-10-05"),
+                           loop(LETTER, "waiting", waiting_on="Dr. Lim", due="2026-10-03")]),  # today is Fri Oct 2
+             "links": [{"loop": APP, "needs": LETTER}]}
+    llm.replies.append(json.dumps(story))
+    saved = mcp.call("remember", text=STORY)
+    assert saved["linked"] == [f'"{APP}" needs "{LETTER}"'] and "at_risk" not in saved
+    app, letter = (l["id"] for l in saved["new_loops"])
+    assert saved["new_loops"][0]["promised_to"] == "Sarah" and "waiting_on" not in saved["new_loops"][0]
+
+    llm.replies.append(json.dumps(result(updated=[{"id": letter, "due": "2026-10-07"}])))
+    moved = mcp.call("remember", text="Dr. Lim can only send the letter next Wednesday.")
+    reason = f'at risk: "{LETTER}" is due Wed Oct 7, after this'
+    assert moved["at_risk"] == [{"title": APP, "reason": reason,
+                                 "options": ["Ask Dr. Lim if Sun Oct 4 works", "Tell Sarah early and offer Wed Oct 7", "Move your date"]}]
+    [item] = mcp.call("needs_attention")["items"]
+    assert (item["title"], item["reason"], len(item["options"])) == (APP, reason, 3)
+    assert mcp.call("inspect_loop", loop_id=app)["needs"] == [{"title": LETTER, "due": "Wed 2026-10-07", "status": "open"}]
+    assert mcp.call("inspect_loop", loop_id=letter)["needed_by"][0]["title"] == APP
+
+    detail = mcp.http.get(f"/api/loops/{app}").json()
+    assert [(n["title"], n["due"]) for n in detail["needs"]] == [(LETTER, "2026-10-07")] and detail["needed_by"] == []
+    [attention] = mcp.http.get("/api/attention").json()
+    assert (attention["cause"]["id"], attention["options"][-1]) == (letter, "Move your date")

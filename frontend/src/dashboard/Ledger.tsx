@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { api, startCheck, type Activity, type ActivityBy, type Loop, type LoopDetail } from "../api";
+import { api, startCheck, type Activity, type ActivityBy, type LinkedLoop, type Loop, type LoopDetail } from "../api";
 import { dueInfo, isSnoozed, localDate, shortDate, stamp } from "../dates";
 import { Icon, Strike } from "../ui";
 import { KIND } from "./Attention";
@@ -96,7 +96,7 @@ function LoopRow({ loop: l, fresh, version, webEnabled, act, refresh, goalOpen }
   const warning = risky ? riskReason(l.risk_level!) : unchecked ? "asks for money, not checked yet" : null;
   const meta = [
     l.goal_title,
-    l.waiting_on && `from ${l.waiting_on}`,
+    l.waiting_on && (l.kind === "commitment" ? `to ${l.waiting_on}` : `from ${l.waiting_on}`),
     resolved && (l.resolved_by === "email" ? "closed by email" : "resolved"),
     isSnoozed(l) && l.snoozed_until && `snoozed until ${shortDate(localDate(l.snoozed_until))}`,
     !resolved && l.watch_query && "watching the web",
@@ -156,10 +156,14 @@ function Detail({ id, version, webEnabled, act, resolve, resolveError, goalOpen 
 
   const resolved = d.status === "resolved";
   const said = new Date(d.source.created_at);
+  const linked = (loops: LinkedLoop[]) => loops.length > 0 && loops.map((n) =>
+    `${n.title}${n.status === "resolved" ? " (done)" : n.due ? ` (due ${shortDate(localDate(n.due))})` : " (no date)"}`).join(" · ");
   const fields: [string, string | null | false][] = [
     ["Kind", KIND[d.kind]],
-    ["Waiting on", d.waiting_on],
+    [d.kind === "commitment" ? "Promised to" : "Waiting on", d.waiting_on],
     ["Due", d.due && shortDate(localDate(d.due))],
+    ["Needs", linked(d.needs)],
+    ["Needed by", linked(d.needed_by)],
     ["Next action", d.next_action],
     ["Summary", d.summary],
     ["Snoozed until", isSnoozed(d) && d.snoozed_until && shortDate(localDate(d.snoozed_until))],
@@ -209,7 +213,8 @@ function Detail({ id, version, webEnabled, act, resolve, resolveError, goalOpen 
             {history.map((a) => (
               <li key={a.id}>
                 <span>{stamp(a.created_at)} · {a.action.replace("_", " ")} by {BY[a.by]}
-                  {a.detail && " · "}{/^https?:\/\//.test(a.detail) ? <a href={a.detail} target="_blank" rel="noopener noreferrer">source</a> : a.detail}</span>
+                  {a.detail && " · "}{/^https?:\/\//.test(a.detail) ? <a href={a.detail} target="_blank" rel="noopener noreferrer">source</a> : a.detail}
+                  {a.said && a.action !== "created" && <span className="said">You said: “{a.said}”</span>}</span>
                 {a.can_undo && <button className="btn small" type="button" onClick={() => act(`/api/activity/${a.id}/undo`, "POST")}>Undo</button>}
               </li>
             ))}
@@ -229,7 +234,7 @@ function Detail({ id, version, webEnabled, act, resolve, resolveError, goalOpen 
           <button className="btn" type="button" disabled={checking} onClick={check}><Icon name="search" />{checking ? "Starting the check…" : "Check who's asking"}</button>
         )}
         <button className="btn danger apart" type="button"
-          onClick={() => confirm(`Delete "${d.title}"? This can't be undone.`) && act(`/api/loops/${d.id}`, "DELETE")}>Delete</button>
+          onClick={() => confirm(`Delete "${d.title}" and the words it came from? This can't be undone.`) && act(`/api/loops/${d.id}`, "DELETE")}>Delete</button>
         {(resolveError || checkError) && <p className="error-line" role="alert">{resolveError || checkError}</p>}
       </div>
     </div>

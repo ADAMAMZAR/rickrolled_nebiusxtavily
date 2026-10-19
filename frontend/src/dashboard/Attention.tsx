@@ -27,7 +27,7 @@ export function Attention({ items, error, actions, actionsError, act, draft }: P
       {items && items.length === 0 && <p className="empty quiet">Nothing needs you today.</p>}
       {items && items.length > 0 && (
         <ul className="rows margined">
-          {items.map(({ loop: l, reason }) => (
+          {items.map(({ loop: l, reason, options }) => (
             <li key={l.id}>
               <div className="entry">
                 <span className={risky(reason) ? "flag" : "kind"} title={risky(reason) ? "Risk signals" : KIND[l.kind]}>
@@ -37,8 +37,9 @@ export function Attention({ items, error, actions, actionsError, act, draft }: P
                   <b>{l.title}</b>
                   <span className="meta">
                     {l.goal_title && <>{l.goal_title} · </>}
-                    <span className={reason.startsWith("overdue") || risky(reason) ? "late" : undefined}>{reason}</span>
+                    <span className={/^overdue|at risk|blocked/.test(reason) || risky(reason) ? "late" : undefined}>{reason}</span>
                   </span>
+                  {options.length > 0 && <span className="meta options">Options: {options.join(" · ")}</span>}
                 </span>
                 <span className="side">
                   {!risky(reason) && <button className="btn small" type="button" onClick={() => draft(l.id, l.title)}>Draft</button>}
@@ -64,16 +65,23 @@ function Proposal({ action, act }: { action: PendingAction; act: Props["act"] })
   const [deciding, setDeciding] = useState(false); // one click only
   const decide = (verb: "approve" | "reject") => { setDeciding(true); act(`/api/actions/${action.id}/${verb}`, "POST"); };
   const href = safeHref(action.payload.source_url);
+  const failed = action.status === "failed";
   return (
     <li>
       <div className="entry">
-        <span className="kind"><Icon name="done" /></span>
+        <span className={failed ? "flag" : "kind"}><Icon name={failed ? "risk" : "done"} /></span>
         <span className="title">
           <b>{action.summary}</b>
-          {href && <span className="meta"><a href={href} target="_blank" rel="noopener noreferrer">Open the page</a></span>}
+          {(failed || href) && (
+            <span className="meta">
+              {failed && <span className="late">Didn't work: {action.error}</span>}
+              {failed && href && " · "}
+              {href && <a href={href} target="_blank" rel="noopener noreferrer">Open the page</a>}
+            </span>
+          )}
         </span>
         <span className="side">
-          <button className="btn small primary" type="button" disabled={deciding} onClick={() => decide("approve")}>Approve</button>
+          <button className="btn small primary" type="button" disabled={deciding} onClick={() => decide("approve")}>{failed ? "Try again" : "Approve"}</button>
           <button className="btn small" type="button" disabled={deciding} onClick={() => decide("reject")}>Reject</button>
         </span>
       </div>

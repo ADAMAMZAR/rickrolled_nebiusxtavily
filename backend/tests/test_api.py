@@ -1,6 +1,6 @@
 import json
 from collections.abc import Iterator
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 from fastapi.testclient import TestClient
@@ -36,7 +36,7 @@ def hermes() -> FakeHermes:
 def client(db_url: str, hermes: FakeHermes) -> Iterator[TestClient]:
     llm = FakeLLM(DEMO_RESULT)
     app = create_app(db_url, get_llm=lambda: llm, get_hermes=lambda: hermes)
-    with TestClient(app, base_url="http://127.0.0.1:8000") as http:
+    with TestClient(app, base_url="http://127.0.0.1:8000", headers={"X-Troth": "1"}) as http:
         yield http
 
 
@@ -206,3 +206,17 @@ def test_people_and_contact_email(client: TestClient) -> None:
     assert client.patch(f"/api/people/{sarah['id']}", json={"email": "nope"}).status_code == 422
     assert client.patch(f"/api/people/{sarah['id']}", json={"email": None}).json()["email"] is None
     assert client.patch("/api/people/00000000-0000-0000-0000-000000000000", json={"email": None}).status_code == 404
+
+
+def test_changes_need_the_troth_header(client: TestClient) -> None:
+    """Another website can't add X-Troth without CORS, so it can't make changes in the user's name (CSRF)."""
+    for method, path in (("POST", "/api/google/forget"), ("POST", "/api/investigations"), ("DELETE", f"/api/loops/{uuid4()}")):
+        response = client.request(method, path, headers={"X-Troth": ""})
+        assert (response.status_code, response.json()["error"]) == (403, "forbidden")
+    assert client.get("/api/loops", headers={"X-Troth": ""}).status_code == 200  # reading needs no header
+
+
+def test_history_quotes_what_you_said(client: TestClient) -> None:
+    loop_id = seed(client)[0]["id"]
+    [created] = client.get(f"/api/activity?loop_id={loop_id}").json()
+    assert (created["action"], created["said"]) == ("created", DEMO)

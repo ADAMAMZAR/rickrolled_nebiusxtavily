@@ -107,3 +107,19 @@ def test_undoing_a_web_due_change_only_restores_the_due_date(session: Session) -
     web = next(a for a in eng.list_activity(session, wait.id) if a.by == "web")
     loop = eng.undo_activity(session, web.id)
     assert (loop.due, loop.status) == (date(2026, 10, 2), LoopStatus.resolved)
+
+
+def test_a_failed_action_still_waits_and_can_be_tried_again(session: Session) -> None:
+    wait, _ = demo(session)
+    action = eng.propose_loop_update(session, wait.id, eng.LoopUpdate(due=date(2026, 10, 9), source_url=PAGE))
+    eng.resolve_loop(session, wait.id)
+    with pytest.raises(eng.InvalidRequest, match="approve it to try again"):
+        eng.approve_action(session, action.id)
+    [failed] = eng.list_actions(session, eng.WAITING)
+    assert (failed.id, failed.status, failed.error) == (action.id, ActionStatus.failed, "That loop is already resolved.")
+
+    eng.reopen_loop(session, wait.id)
+    done = eng.approve_action(session, action.id)
+    assert (done.status, done.error) == (ActionStatus.done, None)
+    assert eng.get_loop(session, wait.id).loop.due == date(2026, 10, 9)
+    assert eng.list_actions(session, eng.WAITING) == []

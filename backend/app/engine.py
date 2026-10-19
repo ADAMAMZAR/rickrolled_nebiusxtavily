@@ -20,8 +20,8 @@ from sqlmodel import Session, col, delete, func, or_, select, update
 
 from app.config import settings
 from app.db import (
-    ActionKind, ActionStatus, Activity, ActivityAction, ActivityBy, Goal, GoalStatus, Investigation, LoopKind, LoopStatus,
-    OpenLoop, PendingAction, Person, RiskLevel, Setting, Source, utcnow,
+    ActionKind, ActionStatus, Activity, ActivityAction, ActivityBy, Dependency, Goal, GoalStatus, Investigation, LoopKind,
+    LoopStatus, OpenLoop, PendingAction, Person, RiskLevel, Setting, Source, utcnow,
 )
 from app.connectors import google
 from app.connectors.google import Email, GoogleClient, GoogleError
@@ -41,6 +41,16 @@ class InvalidRequest(Exception):
 
 
 @dataclass
+class Risk:
+    """An open loop that something it needs puts at risk. Worked out in code from dates and stated links only."""
+
+    loop: OpenLoop
+    cause: OpenLoop  # the upstream loop behind it
+    reason: str  # 'at risk: "Get reference letter" is due Wed Oct 21, after this', 'blocked: "…" is overdue'
+    options: list[str]  # built in code, e.g. "Ask Dr. Lim if Thu Oct 15 works"
+
+
+@dataclass
 class ChangeSet:
     source: Source | None  # None when the message changed nothing (then it isn't stored)
     created_goals: list[Goal] = field(default_factory=list)
@@ -48,6 +58,9 @@ class ChangeSet:
     updated_loops: list[OpenLoop] = field(default_factory=list)
     resolved_loops: list[OpenLoop] = field(default_factory=list)
     events: list[EventCandidate] = field(default_factory=list)  # from an email, to propose for the calendar
+    linked: list[tuple[OpenLoop, OpenLoop]] = field(default_factory=list)  # (loop, what it needs)
+    at_risk: list[Risk] = field(default_factory=list)  # new or changed since before this message
+    ready: list[OpenLoop] = field(default_factory=list)  # the last open thing they needed just closed
 
 
 @dataclass
@@ -67,6 +80,8 @@ class LoopDetail:
 class Attention:
     loop: OpenLoop
     reason: str  # "overdue by 2 days", "due today", "waiting 5 days, no reply", ...
+    cause: OpenLoop | None = None  # set when something it needs puts it at risk
+    options: list[str] = field(default_factory=list)
 
 
 # --- process a message ---
@@ -105,6 +120,8 @@ def process_message(
     known = {str(loop.id): loop for loop in in_scope}
     goal_by_name = {normalize(g.title): g for g in goals}
     seen = {_loop_key(loop.title, loop.waiting_on) for loop in open_loops}
+    in_scope_by_key = {_loop_key(loop.title, loop.waiting_on): loop for loop in in_scope}
+    risks_before, blocked_before = dependency_risks(session, now.date()), _blocked(session)
     try:
         if source is None:
             source = add_source(session, text)
@@ -115,10 +132,13 @@ def process_message(
         for candidate in result.goals:
             _find_or_add_goal(session, candidate.title, candidate.description, goal_by_name, changes)
 
+        new_by_title: dict[str, OpenLoop] = {}  # this reply's loops, for links that name one by title
         for candidate in result.new_loops:
             key = _loop_key(candidate.title, candidate.waiting_on)
             if key in seen:
                 log.info("loop_duplicate_skipped")
+                if (same := in_scope_by_key.get(key)) is not None:  # repeated, but a link may name it
+                    new_by_title.setdefault(normalize(candidate.title), same)
                 continue
             seen.add(key)
             goal = _find_or_add_goal(session, candidate.goal, None, goal_by_name, changes) if candidate.goal else None
@@ -133,10 +153,11 @@ def process_message(
                 due=candidate.due,
                 next_action=candidate.next_action,
             )
-            if created.kind == LoopKind.waiting and normalize(created.waiting_on or ""):
+            if created.kind in (LoopKind.waiting, LoopKind.commitment) and normalize(created.waiting_on or ""):
                 created.person_id = _find_or_add_person(session, created.waiting_on, people).id
+            in_scope_by_key[key] = new_by_title[normalize(candidate.title)] = created
             changes.created_loops.append(created)
-            _log(session, created, ActivityAction.created, by, link)
+            _log(session, created, ActivityAction.created, by, link, source_id=source.id)
 
         stamp = utcnow()
         for update in result.updated_loops:
@@ -152,7 +173,7 @@ def process_message(
                 setattr(loop, name, value)
             loop.updated_at = stamp
             changes.updated_loops.append(loop)
-            _log(session, loop, ActivityAction.updated, by, link or ", ".join(fields), undo)
+            _log(session, loop, ActivityAction.updated, by, link or ", ".join(fields), undo, source.id)
 
         for loop_id in dict.fromkeys(result.resolved_loop_ids):  # each id once
             loop = known.get(loop_id)
@@ -161,10 +182,22 @@ def process_message(
                 continue
             loop.status, loop.resolved_at, loop.updated_at = LoopStatus.resolved, stamp, stamp
             changes.resolved_loops.append(loop)
-            _log(session, loop, ActivityAction.resolved, by, link, {"status": LoopStatus.open.value, "resolved_at": None})
+            _log(session, loop, ActivityAction.resolved, by, link, {"status": LoopStatus.open.value, "resolved_at": None},
+                 source.id)
         changes.updated_loops = [l for l in changes.updated_loops if l not in changes.resolved_loops]
 
-        if not (changes.created_goals or changes.created_loops or changes.updated_loops or changes.resolved_loops):
+        edges = _edges(session)
+        known_by_title = {normalize(l.title): l for l in in_scope}  # the model sometimes names a loop instead of its id
+        for pair in result.links:  # each end: an existing loop the model was shown, or one made from this message
+            loop, needed = (known.get(ref) or new_by_title.get(normalize(ref)) or known_by_title.get(normalize(ref))
+                            for ref in (pair.loop, pair.needs))
+            if loop is not None and _link(session, loop, needed, edges, by, source.id):
+                changes.linked.append((loop, needed))  # type: ignore[arg-type]  # _link checked it
+            elif loop is None:
+                log.info("dependency_dropped reason=unknown")
+
+        if not (changes.created_goals or changes.created_loops or changes.updated_loops or changes.resolved_loops
+                or changes.linked):
             session.rollback()
             changes.source = None
             log.info("message_processed nothing_to_save")
@@ -173,10 +206,15 @@ def process_message(
     except Exception:
         session.rollback()
         raise
+    risks = dependency_risks(session, now.date())
+    changes.at_risk = [r for loop_id, r in risks.items()
+                       if loop_id not in risks_before or risks_before[loop_id].reason != r.reason]
+    blocked = _blocked(session)
+    changes.ready = [loop for loop in list_loops(session) if loop.id in blocked_before - blocked]
     log.info(
-        "message_processed goals=%d created=%d updated=%d resolved=%d",
-        len(changes.created_goals), len(changes.created_loops),
-        len(changes.updated_loops), len(changes.resolved_loops),
+        "message_processed goals=%d created=%d updated=%d resolved=%d linked=%d at_risk=%d ready=%d",
+        len(changes.created_goals), len(changes.created_loops), len(changes.updated_loops),
+        len(changes.resolved_loops), len(changes.linked), len(changes.at_risk), len(changes.ready),
     )
     for loop in changes.created_loops:
         log.info("loop_created id=%s", loop.id)
@@ -307,35 +345,189 @@ def list_loops(
 def needs_attention(session: Session, today: date, stale_days: int | None = None) -> list[Attention]:
     """Open, unsnoozed loops that need the user now. Plain rules, no LLM. `today` is the user's local date.
 
-    Order: loops whose latest message check found risk (oldest first), overdue (most overdue first),
-    due today/tomorrow, then undated loops with no update for at least `stale_days` days (longest first).
+    Order: loops whose latest message check found risk (oldest first), overdue (most overdue first), loops that
+    something they need puts at risk (soonest due first), due today/tomorrow, then undated loops with no update for
+    at least `stale_days` days (longest first). A dependency risk is added to an overdue or due-soon reason.
     """
     stale_days = settings.stale_days if stale_days is None else stale_days
     tz = ZoneInfo(settings.timezone)
     loops = list_loops(session, include_snoozed=False, today=today)
     risk = check_levels(session, [loop.id for loop in loops])
+    needs = dependency_risks(session, today)
     found: list[tuple[int, Any, Attention]] = []  # (rule, sort key, item)
     for loop in loops:
         if risk.get(loop.id) in RISKY:
             found.append((0, loop.created_at, Attention(loop, risk_reason(risk[loop.id]))))
             continue
-        if loop.due is not None:
-            late = (today - loop.due).days
-            if late > 0:
-                found.append((1, loop.due, Attention(loop, f"overdue by {_days(late)}")))
-            elif late >= -1:
-                found.append((2, loop.due, Attention(loop, "due today" if late == 0 else "due tomorrow")))
-            continue
-        idle = (today - loop.updated_at.astimezone(tz).date()).days
-        if idle >= stale_days:
-            reason = f"waiting {_days(idle)}, no reply" if loop.kind == LoopKind.waiting else f"no update in {_days(idle)}"
-            found.append((3, loop.updated_at, Attention(loop, reason)))
+        dep = needs.get(loop.id)
+        late = (today - loop.due).days if loop.due else None
+        when = None if late is None else f"overdue by {_days(late)}" if late > 0 \
+            else ("due today" if late == 0 else "due tomorrow") if late >= -1 else None
+        if dep is not None:
+            reason = f"{when}; {dep.reason}" if when else dep.reason
+            rule = 1 if late is not None and late > 0 else 2
+            found.append((rule, loop.due or date.max, Attention(loop, reason, dep.cause, dep.options)))
+        elif when is not None:
+            found.append((1 if late > 0 else 3, loop.due, Attention(loop, when)))  # type: ignore[operator]
+        elif loop.due is None:
+            idle = (today - loop.updated_at.astimezone(tz).date()).days
+            if idle >= stale_days:
+                reason = f"waiting {_days(idle)}, no reply" if loop.kind == LoopKind.waiting else f"no update in {_days(idle)}"
+                found.append((4, loop.updated_at, Attention(loop, reason)))
     found.sort(key=lambda f: (f[0], f[1]))  # stable: ties keep list_loops order
     return [item for _, _, item in found]
 
 
 def _days(n: int) -> str:
     return "1 day" if n == 1 else f"{n} days"
+
+
+# --- dependencies: what a loop needs first ---
+
+
+def _edges(session: Session) -> dict[UUID, set[UUID]]:
+    """Every link: loop id -> ids of what it needs."""
+    edges: dict[UUID, set[UUID]] = {}
+    for dep in session.exec(select(Dependency)).all():
+        edges.setdefault(dep.loop_id, set()).add(dep.needs_id)
+    return edges
+
+
+def _link(
+    session: Session, loop: OpenLoop, needed: OpenLoop | None, edges: dict[UUID, set[UUID]], by: ActivityBy,
+    source_id: UUID | None,
+) -> bool:
+    """Save "`loop` needs `needed`" (no commit). Dropped: an unknown ref, a self-link, a link that already exists, and
+    one that would close a cycle. `edges` gets the new link, so later links in the same message see it."""
+    if needed is None or needed.id == loop.id or needed.id in edges.get(loop.id, set()):
+        log.info("dependency_dropped reason=%s", "unknown" if needed is None else "self" if needed.id == loop.id else "duplicate")
+        return False
+    stack, seen = [needed.id], set()
+    while stack:  # does what's needed already need this loop, directly or further up?
+        current = stack.pop()
+        if current == loop.id:
+            log.info("dependency_dropped reason=cycle")
+            return False
+        if current not in seen:
+            seen.add(current)
+            stack += edges.get(current, set())
+    session.add(Dependency(loop_id=loop.id, needs_id=needed.id, source_id=source_id))
+    edges.setdefault(loop.id, set()).add(needed.id)
+    _log(session, loop, ActivityAction.updated, by, f'needs "{needed.title}"', source_id=source_id)
+    return True
+
+
+def loop_links(session: Session, loop_id: UUID) -> tuple[list[OpenLoop], list[OpenLoop]]:
+    """(what this loop needs, what needs this loop), open or resolved."""
+    def loops(ids: list[UUID]) -> list[OpenLoop]:
+        return list(session.exec(select(OpenLoop).where(col(OpenLoop.id).in_(ids)).order_by(col(OpenLoop.created_at))).all())
+
+    deps = session.exec(select(Dependency).where(or_(Dependency.loop_id == loop_id, Dependency.needs_id == loop_id))).all()
+    return loops([d.needs_id for d in deps if d.loop_id == loop_id]), loops([d.loop_id for d in deps if d.needs_id == loop_id])
+
+
+def _blocked(session: Session) -> set[UUID]:
+    """Open loops that need something still open."""
+    needs = session.exec(select(Dependency.loop_id, OpenLoop.status).join(OpenLoop, col(OpenLoop.id) == Dependency.needs_id)).all()
+    waiting = {loop_id for loop_id, status in needs if status == LoopStatus.open}
+    return {loop.id for loop in list_loops(session) if loop.id in waiting}
+
+
+def dependency_risks(session: Session, today: date) -> dict[UUID, Risk]:
+    """Open loops that something they need, directly or further up, puts at risk. Plain rules on dates and stated
+    links, no LLM. A resolved loop counts as done. Snoozed loops still count: snoozing doesn't get them done.
+
+    - blocked: something needed is overdue;
+    - at risk: something needed is due after this loop;
+    - at risk: something needed has no date, and this loop is due within 3 days.
+    Silence never means "not done": only dates and links decide.
+    """
+    edges = _edges(session)
+    if not edges:
+        return {}
+    ids = set(edges) | {i for needed in edges.values() for i in needed}
+    loops = {l.id: l for l in session.exec(select(OpenLoop).where(col(OpenLoop.id).in_(ids))).all()}
+    found = {}
+    for loop in loops.values():
+        if loop.status != LoopStatus.open or loop.id not in edges:
+            continue
+        if (risk := _risk(loop, _open_upstream(loop.id, edges, loops), today)) is not None:
+            found[loop.id] = risk
+    return found
+
+
+def _open_upstream(loop_id: UUID, edges: dict[UUID, set[UUID]], loops: dict[UUID, OpenLoop]) -> list[tuple[OpenLoop, OpenLoop]]:
+    """Every open loop up the chain, each with the direct need it's reached through. A resolved loop is done, so
+    what it needed doesn't matter anymore."""
+    out: list[tuple[OpenLoop, OpenLoop]] = []
+    seen = {loop_id}
+    stack = [(i, i) for i in edges.get(loop_id, set())]
+    while stack:
+        current, direct = stack.pop()
+        if current in seen or current not in loops or loops[current].status != LoopStatus.open:
+            continue
+        seen.add(current)
+        out.append((loops[current], loops[direct]))
+        stack += [(i, direct) for i in edges.get(current, set())]
+    return sorted(out, key=lambda pair: pair[0].created_at)  # same answer every time
+
+
+def _risk(loop: OpenLoop, upstream: list[tuple[OpenLoop, OpenLoop]], today: date) -> Risk | None:
+    """`upstream`: (open loop up the chain, the direct need it's reached through)."""
+    dated = [(u.due, u, direct) for u, direct in upstream if u.due is not None]
+    ready_by = max((due for due, _, _ in dated), default=None)
+    late = [d for d in dated if d[0] < today]
+    after = [d for d in dated if loop.due is not None and d[0] > loop.due]
+    undated = [(u, direct) for u, direct in upstream if u.due is None]
+    if late:
+        due, cause, direct = min(late, key=lambda d: d[0])
+        kind, what = "blocked", "is overdue"
+    elif after:
+        due, cause, direct = max(after, key=lambda d: d[0])
+        kind, what = "at risk", f"is due {_day(due)}, after this"
+    elif undated and loop.due is not None and (loop.due - today).days <= 3:
+        (cause, direct), kind, what = undated[0], "at risk", "has no date yet"
+    else:
+        return None
+    via = f' (via "{direct.title}")' if direct.id != cause.id else ""
+    return Risk(loop, cause, f'{kind}: "{cause.title}" {what}{via}', _options(loop, cause, kind, ready_by, today))
+
+
+def _options(loop: OpenLoop, cause: OpenLoop, kind: str, ready_by: date | None, today: date) -> list[str]:
+    """Fixed recovery options, so every date in them comes from code, never from the model."""
+    options = []
+    if cause.kind == LoopKind.waiting and cause.waiting_on:
+        day_before = loop.due - timedelta(days=1) if loop.due else None
+        if kind == "blocked":
+            options.append(f"Ask {cause.waiting_on} for an update")
+        elif cause.due and day_before and day_before >= today:
+            options.append(f"Ask {cause.waiting_on} if {_day(day_before)} works")
+        else:
+            options.append(f"Ask {cause.waiting_on} for a date")
+    if loop.kind == LoopKind.commitment and loop.waiting_on:
+        offer = f" and offer {_day(ready_by)}" if ready_by and ready_by >= today else ""
+        options.append(f"Tell {loop.waiting_on} early{offer}")
+    if loop.due:
+        options.append("Move your date")
+    return options
+
+
+def _day(day: date) -> str:
+    return f"{day:%a %b} {day.day}"
+
+
+def risk_lines(changes: ChangeSet) -> list[str]:
+    """Telegram lines for what a change put at risk or freed up, e.g.
+    'At risk: "Send NVIDIA application" (due Fri Oct 23): "Get reference letter" is due Wed Oct 28, after this.
+    Options: Ask Dr. Lim if Thu Oct 22 works · Tell Sarah early and offer Wed Oct 28 · Move your date'."""
+    lines = []
+    for risk in changes.at_risk:
+        kind, what = risk.reason.split(": ", 1)
+        due = f" (due {_day(risk.loop.due)})" if risk.loop.due else ""
+        options = f" Options: {' · '.join(risk.options)}" if risk.options else ""
+        lines.append(f'{kind.capitalize()}: "{risk.loop.title}"{due}: {what}.{options}')
+    lines += [f'Ready: "{loop.title}" (everything it needs is done).' for loop in changes.ready]
+    return lines
 
 
 # --- message checks (ScamGraph, app/investigation.py) on loops ---
@@ -380,7 +572,7 @@ def track_check(session: Session, title: str, summary: str, next_action: str | N
     source = add_source(session, text, kind="investigation")
     source.url = link
     loop = add_loop(session, source_id=source.id, title=title, summary=summary, kind=LoopKind.task, next_action=next_action)
-    _log(session, loop, ActivityAction.created, ActivityBy.check)
+    _log(session, loop, ActivityAction.created, ActivityBy.check, source_id=source.id)
     log.info("loop_created id=%s by=check", loop.id)
     return loop
 
@@ -446,6 +638,24 @@ def snooze_loop(
     return loop
 
 
+WEEKDAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
+
+
+def parse_day(text: str, today: date) -> date:
+    """A day as the user says it: YYYY-MM-DD, "tomorrow", or a weekday ("monday", "mon", "next monday"), which means
+    the next one after today. Worked out here, because the model sometimes gets the weekday wrong."""
+    word = " ".join(text.casefold().split()).removeprefix("next ")
+    if word == "tomorrow":
+        return today + timedelta(days=1)
+    day = next((i for i, name in enumerate(WEEKDAYS) if len(word) >= 3 and name.startswith(word)), None)
+    if day is not None:
+        return today + timedelta(days=(day - today.weekday() - 1) % 7 + 1)
+    try:
+        return date.fromisoformat(word)
+    except ValueError as e:
+        raise InvalidRequest(f"Give a day like 2026-10-05, tomorrow or monday, not {text!r}.") from e
+
+
 def unsnooze_loop(session: Session, loop_id: UUID) -> OpenLoop:
     loop = _get(session, loop_id)
     loop.snoozed_until, loop.updated_at = None, utcnow()
@@ -474,13 +684,31 @@ def complete_goal(session: Session, goal_id: UUID) -> Goal:
 
 
 def delete_loop(session: Session, loop_id: UUID) -> None:
-    """Delete a wrong loop with its history and proposals. Its source stays, since other loops may share it."""
+    """Delete a wrong loop with its history and proposals, and the words it came from unless another loop or
+    change still uses them. A message check of it stays, unlinked."""
     loop = _get(session, loop_id)
+    sources = {loop.source_id} | set(session.exec(select(Activity.source_id).where(Activity.loop_id == loop_id)).all())
+    session.exec(update(Investigation).where(col(Investigation.loop_id) == loop_id).values(loop_id=None))
+    session.exec(delete(Dependency).where(or_(col(Dependency.loop_id) == loop_id, col(Dependency.needs_id) == loop_id)))
     session.exec(delete(Activity).where(col(Activity.loop_id) == loop_id))
     session.exec(delete(PendingAction).where(col(PendingAction.loop_id) == loop_id))
     session.delete(loop)
+    session.flush()
+    for source_id in sources - {None}:
+        source = session.get(Source, source_id)
+        if source is None or _source_used(session, source_id):
+            continue
+        if source.external_id:  # an email: keep its Gmail id, so sync never reads it again
+            source.text, source.sender, source.url = "", None, None
+        else:
+            session.delete(source)
     session.commit()
     log.info("loop_deleted id=%s", loop_id)
+
+
+def _source_used(session: Session, source_id: UUID) -> bool:
+    return any(session.exec(select(model.id).where(model.source_id == source_id)).first() is not None
+               for model in (OpenLoop, Activity, Dependency))
 
 
 def _get(session: Session, loop_id: UUID) -> OpenLoop:
@@ -503,10 +731,11 @@ def _reactivate_goal(session: Session, loop: OpenLoop) -> None:
 
 def _log(
     session: Session, loop: OpenLoop, action: ActivityAction, by: ActivityBy,
-    detail: str = "", undo: dict[str, Any] | None = None,
+    detail: str = "", undo: dict[str, Any] | None = None, source_id: UUID | None = None,
 ) -> None:
-    """Record a change (no commit). User changes get no undo: the dashboard has Reopen/Unsnooze for them."""
-    session.add(Activity(loop_id=loop.id, action=action, by=by, detail=detail,
+    """Record a change (no commit). User changes get no undo: the dashboard has Reopen/Unsnooze for them.
+    `source_id`: the message or email that made the change, so its history can quote it."""
+    session.add(Activity(loop_id=loop.id, action=action, by=by, detail=detail, source_id=source_id,
                          undo=None if by == ActivityBy.user else undo))
 
 
@@ -639,11 +868,17 @@ def _add_action(session: Session, loop_id: UUID, kind: ActionKind, payload: dict
     return action
 
 
-def list_actions(session: Session, status: ActionStatus | None = ActionStatus.proposed) -> list[PendingAction]:
+# What still waits for the user: new proposals, and ones that failed and can be tried again.
+WAITING = (ActionStatus.proposed, ActionStatus.failed)
+
+
+def list_actions(
+    session: Session, status: ActionStatus | tuple[ActionStatus, ...] | None = ActionStatus.proposed
+) -> list[PendingAction]:
     """Oldest first. status=None means all."""
     query = select(PendingAction).order_by(col(PendingAction.created_at))
     if status is not None:
-        query = query.where(PendingAction.status == status)
+        query = query.where(col(PendingAction.status).in_(status if isinstance(status, tuple) else (status,)))
     return list(session.exec(query).all())
 
 
@@ -667,7 +902,7 @@ def describe_action(session: Session, action: PendingAction) -> str:
 def approve_action(
     session: Session, action_id: UUID, get_google: Callable[[], GoogleClient] | None = None
 ) -> PendingAction:
-    """Run a proposed action once. Only call this after the user said yes to it.
+    """Run a proposed action once, or a failed one again. Only call this after the user said yes to it.
     Calendar events and drafts use `get_google` (default: the saved Google token)."""
     action = _decide(session, action_id, ActionStatus.done)
     session.commit()  # claimed first, so a second approve fails even while Google is slow
@@ -676,13 +911,14 @@ def approve_action(
             _apply_loop_update(session, action)
         else:
             _run_google(session, action, (get_google or (lambda: GoogleClient.from_settings(settings)))())
+        action.error = None
         session.commit()
     except Exception as e:
         session.rollback()
-        action.status, action.updated_at = ActionStatus.failed, utcnow()
+        action.status, action.error, action.updated_at = ActionStatus.failed, str(e), utcnow()
         session.commit()
         log.warning("action_failed id=%s error=%s", action_id, type(e).__name__)
-        raise InvalidRequest(f"Couldn't do it: {e}") from e
+        raise InvalidRequest(f"Couldn't do it: {e} It still waits: approve it to try again, or reject it.") from e
     session.refresh(action)
     log.info("action_done id=%s", action_id)
     return action
@@ -697,12 +933,12 @@ def reject_action(session: Session, action_id: UUID) -> PendingAction:
 
 
 def _decide(session: Session, action_id: UUID, status: ActionStatus) -> PendingAction:
-    """Move a proposal out of "proposed" (no commit). The conditional UPDATE lets only one of two
+    """Move a waiting proposal (new or failed) to `status` (no commit). The conditional UPDATE lets only one of two
     racing requests (a double click, dashboard + Telegram) through."""
     action = _get_action(session, action_id)
     claimed = session.exec(
         update(PendingAction)
-        .where(col(PendingAction.id) == action_id, col(PendingAction.status) == ActionStatus.proposed)
+        .where(col(PendingAction.id) == action_id, col(PendingAction.status).in_(WAITING))
         .values(status=status, updated_at=utcnow())
         .execution_options(synchronize_session=False)
     ).rowcount
@@ -935,6 +1171,7 @@ def sync_email(
             continue
         if changes.source is not None:
             lines.append(describe_email(person, changes))
+        lines += risk_lines(changes)  # e.g. a delay that puts a promise that needs it at risk
         lines += [f"{describe_action(session, a)} (yes/no)" for a in _propose_events(session, person, changes, now)]
     if not errors:  # otherwise the same window is read again next run
         _set_setting(session, LAST_EMAIL_SYNC, started.isoformat())

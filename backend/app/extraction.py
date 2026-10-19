@@ -4,7 +4,7 @@ import base64
 import json
 import logging
 import re
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any, Literal, Protocol, TypeVar
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, ValidationError, ValidationInfo, field_validator, model_validator
@@ -19,17 +19,22 @@ Extract:
 - new_loops: concrete unresolved items:
   - kind "task": something the user needs to do.
   - kind "commitment": something the user promised someone.
-  - kind "waiting": something the user is waiting on from someone else. Set waiting_on to who they wait on, as a
-    short name (e.g. "Sarah", "NVIDIA"). If it's someone in the known people list, use that name exactly.
+  - kind "waiting": something the user is waiting on from someone else.
+  - waiting_on: for "waiting", who they wait on; for "commitment", who they promised. A short name (e.g. "Sarah",
+    "NVIDIA"). If it's someone in the known people list, use that name exactly.
 - updated_loops: changes to an EXISTING open loop (by id): a new due date, next action or summary.
 - resolved_loop_ids: ids of EXISTING open loops that the message clearly says are finished or received.
+- links: one thing that has to happen before another (see rule 9). Usually empty.
 
 Rules:
 1. Extract only what the message states. Never invent people, dates or commitments. Unknown = null.
 2. Ignore facts with no future action, e.g. "I like pizza" or "The meeting went well". Return empty lists.
-3. Dates: convert relative dates to YYYY-MM-DD using the current date given. "Friday", "next Friday",
-   "by Friday" and "before Friday" all mean the nearest upcoming Friday. A date with no year ("October 5") is its
-   next occurrence. If unsure, use null.
+3. Dates: convert relative dates to YYYY-MM-DD by looking the day up in the calendar given. Never work out a weekday
+   yourself. A weekday name, with or without "next", "by", "on" or "before" (e.g. "Thursday", "by Monday",
+   "before Friday"), is a due date: the first calendar entry after today that starts with that day's 3 letters
+   ("Thu", "Mon", "Fri"). Copy that entry's date. "Before Friday" is that Friday's date.
+   "Tomorrow" is the calendar's second entry. A date with no year ("October 5") is its next occurrence.
+   If unsure, use null.
 4. If the message is about an existing open loop, use updated_loops or resolved_loop_ids. Never add it again to new_loops.
 5. Resolve a loop only when the message clearly says it is done or has arrived.
 6. Set each new loop's "goal" to a goal's exact title (an existing goal or one in your goals list) only if the message
@@ -38,12 +43,20 @@ Rules:
 7. Don't repeat an existing goal in goals.
 8. Titles are short (about 2-6 words), e.g. "Wait for Sarah's response", "Finish portfolio". Summaries are one sentence.
    Goal titles start with a verb and name the outcome, e.g. "Secure NVIDIA internship", not "NVIDIA internship".
+9. links: only when the message says one thing has to happen before another ("once", "after", "first", "needs",
+   "depends on", "can't ... until", "is writing my reference letter for it"). One {"loop", "needs"} pair each:
+   "loop" is the one that waits, "needs" is what comes first. Each is an existing open loop's id, or the exact title
+   of a loop in your new_loops, copied character for character. Example: "I can send the application once Dr. Lim
+   sends the letter" gives {"loop": "Send application", "needs": "Get letter from Dr. Lim"}. Something the message
+   says is for another loop (a reference letter for the application, documents for the visa) is a link too: the
+   other loop needs it. Never link loops just because they share a topic, a goal or a person.
 
 Return exactly this JSON shape:
 {"goals": [{"title": "...", "description": "..."}],
  "new_loops": [{"title": "...", "summary": "...", "kind": "task", "waiting_on": null, "due": null, "next_action": null, "goal": null}],
  "updated_loops": [{"id": "...", "summary": null, "due": null, "next_action": null}],
- "resolved_loop_ids": []}
+ "resolved_loop_ids": [],
+ "links": []}
 """
 
 INVALID_MESSAGE = "The message could not be safely converted into structured continuity data."
@@ -87,7 +100,7 @@ class LoopCandidate(_Model):
     title: str
     summary: str
     kind: Literal["task", "commitment", "waiting"]
-    waiting_on: str | None = None
+    waiting_on: str | None = None  # waiting: who owes it; commitment: who it was promised to
     due: date | None = None
     next_action: str | None = None
     goal: str | None = None
@@ -98,6 +111,13 @@ class LoopUpdate(_Model):
     summary: str | None = None
     due: date | None = None
     next_action: str | None = None
+
+
+class Link(_Model):
+    """`loop` can't be done before `needs`. Each is an existing loop's id or a title from new_loops."""
+
+    loop: str
+    needs: str
 
 
 class EventCandidate(_Model):
@@ -111,7 +131,14 @@ class ExtractionResult(_Model):
     new_loops: list[LoopCandidate] = []
     updated_loops: list[LoopUpdate] = []
     resolved_loop_ids: list[str] = []
+    links: list[Link] = []
     events: list[EventCandidate] = []  # emails only (EMAIL_NOTE)
+
+    @field_validator("links", mode="before")
+    @classmethod
+    def _drop_bad_links(cls, links: Any) -> list[Any]:
+        """A malformed link is dropped, not a reason to fail the whole message."""
+        return _valid_items(links, Link)
 
     @field_validator("events", mode="before")
     @classmethod
@@ -139,7 +166,8 @@ def build_messages(
     """`note` says where text that isn't the user's own message came from, e.g. WEB_NOTE.
     `people` are names only: their emails never go to the model."""
     context = (
-        f"Current date: {now:%A %Y-%m-%d} ({now.tzinfo})\n\n"
+        f"Current date: {now:%A %Y-%m-%d} ({now.tzinfo})\n"
+        f"Calendar: {calendar(now.date())}\n\n"
         f"Existing active goals: {json.dumps(goals) if goals else 'none'}\n\n"
         f"Known people: {json.dumps(people) if people else 'none'}\n\n"
         f"Existing open loops: {json.dumps(loops) if loops else 'none'}\n\n"
@@ -147,6 +175,13 @@ def build_messages(
         + f':\n"""\n{text}\n"""'
     )
     return [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": context}]
+
+
+def calendar(today: date, days: int = 15) -> str:
+    """Today and the next two weeks, e.g. "Mon 2026-10-19 (today), Tue 2026-10-20, ...", so the model looks
+    weekdays up instead of counting (it used to get "Monday" wrong)."""
+    out = [f"{today + timedelta(days=i):%a %Y-%m-%d}" for i in range(days)]
+    return ", ".join([f"{out[0]} (today)", *out[1:]])
 
 
 def extract(
