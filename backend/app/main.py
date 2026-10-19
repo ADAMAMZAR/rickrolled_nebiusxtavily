@@ -23,7 +23,9 @@ from app.config import settings, setup_logging
 from app.connectors import google
 from app.connectors.google import GoogleClient, GoogleError
 from app.connectors.tavily import TavilyClient
-from app.db import ActionStatus, Activity, Goal, LoopStatus, OpenLoop, PendingAction, Person, Source, create_db_engine
+from app.db import (
+    ActionStatus, Activity, Goal, LoopKind, LoopStatus, OpenLoop, PendingAction, Person, Source, create_db_engine,
+)
 from app.extraction import Completer
 from app.hermes import HermesClient, HermesError, HermesReply
 from app.llm import LLMClient
@@ -48,6 +50,17 @@ class SnoozeIn(BaseModel):
 
 class PersonIn(BaseModel):
     email: str | None = None  # empty or null clears it
+
+
+class LoopEditIn(BaseModel):
+    """Only the fields sent change. A null due date or an empty next action clears it."""
+
+    title: str | None = Field(None, max_length=200)
+    summary: str | None = Field(None, max_length=1000)
+    kind: LoopKind | None = None
+    waiting_on: str | None = Field(None, max_length=100)  # who they wait on, or who it was promised to
+    due: date | None = None
+    next_action: str | None = Field(None, max_length=300)
 
 
 class WatchIn(BaseModel):
@@ -277,6 +290,10 @@ def create_app(
     @app.post("/api/loops/{loop_id}/unsnooze")
     def unsnooze(loop_id: UUID, session: Session = Depends(get_session)) -> dict[str, Any]:
         return loop_out(session, eng.unsnooze_loop(session, loop_id))
+
+    @app.patch("/api/loops/{loop_id}")
+    def edit(loop_id: UUID, body: LoopEditIn, session: Session = Depends(get_session)) -> dict[str, Any]:
+        return loop_out(session, eng.edit_loop(session, loop_id, body.model_dump(exclude_unset=True)))
 
     @app.delete("/api/loops/{loop_id}", status_code=204)
     def delete(loop_id: UUID, session: Session = Depends(get_session)) -> Response:

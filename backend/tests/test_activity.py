@@ -115,3 +115,43 @@ def test_delete_keeps_an_emails_id_but_not_its_text(session: Session) -> None:
     eng.delete_loop(session, loop.id)
     [kept] = session.exec(select(Source)).all()
     assert (kept.external_id, kept.text, kept.sender, kept.url) == ("m1", "", None, None)
+
+
+# --- editing a loop (audit item 6) ---
+
+
+def test_an_edit_can_be_undone(session: Session) -> None:
+    """Unlike the user's other changes: an edit overwrites what Troth had."""
+    wait, _ = demo(session)
+    loop = eng.edit_loop(session, wait.id, {"title": "  Hear back from Sarah ", "due": date(2026, 10, 9), "next_action": ""})
+    assert (loop.title, loop.due, loop.next_action) == ("Hear back from Sarah", date(2026, 10, 9), None)
+    [edit] = [a for a in eng.list_activity(session, wait.id) if a.by == "user"]
+    assert (edit.action, edit.detail, edit.undo is not None) == ("updated", "edited title, due", True)
+    back = eng.undo_activity(session, edit.id)
+    assert (back.title, back.due) == ("Wait for Sarah's response", date(2026, 10, 2))
+
+
+def test_an_edit_that_changes_nothing_isnt_logged(session: Session) -> None:
+    wait, _ = demo(session)
+    eng.edit_loop(session, wait.id, {"title": "Wait for Sarah's response", "due": date(2026, 10, 2)})
+    assert history(session, wait) == [("created", "chat", False)]
+
+
+@pytest.mark.parametrize("changes", [{"title": "   "}, {"summary": None}, {"status": "resolved"}])
+def test_bad_edits_are_refused(session: Session, changes: dict) -> None:
+    wait, _ = demo(session)
+    with pytest.raises(eng.InvalidRequest):
+        eng.edit_loop(session, wait.id, changes)
+    assert eng.get_loop(session, wait.id).loop.title == "Wait for Sarah's response"
+
+
+def test_an_edit_can_make_a_task_a_promise_to_someone(session: Session) -> None:
+    """Seen on Telegram: "I promised Sarah…" updated an existing task, which stayed a task."""
+    wait, portfolio = demo(session)
+    loop = eng.edit_loop(session, portfolio.id, {"kind": "commitment", "waiting_on": "sarah"})
+    assert (loop.kind, loop.person_id) == (LoopKind.commitment, wait.person_id)  # the same Sarah, so email covers it
+    [edit] = [a for a in eng.list_activity(session, portfolio.id) if a.by == "user"]
+    back = eng.undo_activity(session, edit.id)
+    assert (back.kind, back.waiting_on, back.person_id) == (LoopKind.task, None, None)
+    with pytest.raises(eng.InvalidRequest, match="Unknown kind"):
+        eng.edit_loop(session, portfolio.id, {"kind": "deadline"})

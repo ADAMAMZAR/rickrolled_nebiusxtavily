@@ -91,7 +91,7 @@ class Attention:
 
 def process_message(
     session: Session, llm: Completer, text: str, now: datetime | None = None, by: ActivityBy = ActivityBy.chat,
-    person: Person | None = None, source: Source | None = None,
+    person: Person | None = None, source: Source | None = None, chat_context: str | None = None,
 ) -> ChangeSet:
     """Extract goals and loops from one message, then save them in one transaction.
 
@@ -100,6 +100,7 @@ def process_message(
     `person` + `source`: an email from that person. It may only update or resolve their loops.
     Each change keeps the model's quote only if those words are in the text. An email's changes apply without
     the user, so there a change without a real quote is dropped: Troth never acts on words nobody wrote.
+    `chat_context`: from Hermes, what "it" or "she" refers to ("push it to Monday"). Quotes still come from `text`.
     """
     now = now or local_now()
     goals = [s.goal for s in list_goals(session)]
@@ -116,6 +117,7 @@ def process_message(
             loops=[_loop_context(loop, goal_titles) for loop in in_scope],
             note=EMAIL_NOTE.format(name=person.name) if person else None,
             people=[p.name for p in people.values()],
+            chat_context=chat_context,
         )
     except Exception as e:
         log.warning("extraction_failed error=%s", type(e).__name__)
@@ -264,6 +266,8 @@ def _loop_context(loop: OpenLoop, goal_titles: dict[UUID, str]) -> dict[str, Any
         "waiting_on": loop.waiting_on,
         "due": loop.due.isoformat() if loop.due else None,
         "goal": goal_titles.get(loop.goal_id) if loop.goal_id else None,
+        "summary": loop.summary,
+        "updated": f"{loop.updated_at:%Y-%m-%d}",  # which loop "it" most likely is
     }
 
 
@@ -703,6 +707,44 @@ def complete_goal(session: Session, goal_id: UUID) -> Goal:
     session.refresh(goal)
     log.info("goal_completed id=%s", goal_id)
     return goal
+
+
+EDITABLE = ("title", "summary", "kind", "waiting_on", "due", "next_action")
+
+
+def edit_loop(session: Session, loop_id: UUID, changes: dict[str, Any]) -> OpenLoop:
+    """The user's own correction from the dashboard. Only the fields given change; a blank next action, person or a
+    null due date clears it. A new kind or person relinks the loop's Person (for email). Unlike the user's other
+    changes it can be undone: an edit overwrites what was there."""
+    if unknown := set(changes) - set(EDITABLE):
+        raise InvalidRequest(f"Can't edit {', '.join(sorted(unknown))}.")
+    values = {name: (value.strip() or None) if isinstance(value, str) else value for name, value in changes.items()}
+    if any(name in values and values[name] is None for name in ("title", "summary")):
+        raise InvalidRequest("A loop needs a title and a summary.")
+    if "kind" in values:
+        try:
+            values["kind"] = LoopKind(values["kind"])
+        except ValueError as e:
+            raise InvalidRequest(f"Unknown kind {values['kind']!r}.") from e
+    loop = _get(session, loop_id)
+    fields = {name: value for name, value in values.items() if getattr(loop, name) != value}
+    if not fields:
+        return loop
+    undo = loop.model_dump(mode="json", include=set(fields) | {"person_id"})
+    for name, value in fields.items():
+        setattr(loop, name, value)
+    if {"kind", "waiting_on"} & set(fields):  # the same rule as a new loop from chat
+        people = {normalize(p.name): p for p in list_people(session)}
+        named = loop.kind != LoopKind.task and normalize(loop.waiting_on or "")
+        loop.person_id = _find_or_add_person(session, loop.waiting_on, people).id if named else None  # type: ignore[arg-type]
+    loop.updated_at = utcnow()
+    # Not _log: it drops undo for the user's changes.
+    session.add(Activity(loop_id=loop.id, action=ActivityAction.updated, by=ActivityBy.user,
+                         detail=f"edited {', '.join(fields).replace('_', ' ')}", undo=undo))
+    session.commit()
+    session.refresh(loop)
+    log.info("loop_edited id=%s fields=%s", loop_id, ",".join(fields))
+    return loop
 
 
 def delete_loop(session: Session, loop_id: UUID) -> None:

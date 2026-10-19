@@ -128,12 +128,12 @@ p { margin: 0; }
   text-decoration: underline; text-underline-offset: 3px; cursor: pointer;
 }
 
-input[type="text"], input[type="email"], input[type="url"], input[type="date"], textarea {
+input[type="text"], input[type="email"], input[type="url"], input[type="date"], textarea, select {
   width: 100%; min-height: 38px; padding: 8px 10px; border: 1px solid var(--rule-strong); border-radius: var(--radius);
   background: var(--paper); line-height: 1.4;
 }
-input:hover, textarea:hover { border-color: var(--muted); }
-input:focus-visible, textarea:focus-visible { outline: 2px solid var(--blue); outline-offset: 0; border-color: var(--blue); }
+input:hover, textarea:hover, select:hover { border-color: var(--muted); }
+input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 2px solid var(--blue); outline-offset: 0; border-color: var(--blue); }
 ::placeholder { color: var(--muted); opacity: 1; }
 label.check { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-small); color: var(--muted); cursor: pointer; }
 input[type="checkbox"] { width: 16px; height: 16px; margin: 0; accent-color: var(--blue); }

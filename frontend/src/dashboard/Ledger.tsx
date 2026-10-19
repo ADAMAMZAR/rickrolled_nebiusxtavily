@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { api, startCheck, type Activity, type ActivityBy, type LinkedLoop, type Loop, type LoopDetail } from "../api";
+import { api, startCheck, type Activity, type ActivityBy, type LinkedLoop, type Loop, type LoopDetail, type LoopKind } from "../api";
 import { dueInfo, isSnoozed, localDate, shortDate, stamp } from "../dates";
 import { Icon, Strike } from "../ui";
 import { KIND } from "./Attention";
@@ -144,6 +144,7 @@ function Detail({ id, version, webEnabled, act, resolve, resolveError, goalOpen 
   const [error, setError] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
   const [checkError, setCheckError] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
 
   useEffect(() => {
     Promise.all([api<LoopDetail>(`/api/loops/${id}`), api<Activity[]>(`/api/activity?loop_id=${id}`)])
@@ -188,12 +189,14 @@ function Detail({ id, version, webEnabled, act, resolve, resolveError, goalOpen 
 
   return (
     <div className="detail">
-      <dl>
-        {fields.filter(([, v]) => v).map(([k, v]) => (<div key={k}><dt>{k}</dt><dd>{v}</dd></div>))}
-        {d.goal_title && (
-          <div><dt>Goal</dt><dd>{d.goal_title}{d.goal_status === "active" && <> · <button className="link-btn" type="button" onClick={completeGoal}>Mark goal done</button></>}{d.goal_status === "done" && " · done"}</dd></div>
-        )}
-      </dl>
+      {editing ? <EditForm d={d} act={act} done={() => setEditing(false)} /> : (
+        <dl>
+          {fields.filter(([, v]) => v).map(([k, v]) => (<div key={k}><dt>{k}</dt><dd>{v}</dd></div>))}
+          {d.goal_title && (
+            <div><dt>Goal</dt><dd>{d.goal_title}{d.goal_status === "active" && <> · <button className="link-btn" type="button" onClick={completeGoal}>Mark goal done</button></>}{d.goal_status === "done" && " · done"}</dd></div>
+          )}
+        </dl>
+      )}
       <figure className="why">
         <h4>Why Troth knows this</h4>
         {d.quote ? <blockquote className="ruled">“{d.quote}”</blockquote>
@@ -236,6 +239,7 @@ function Detail({ id, version, webEnabled, act, resolve, resolveError, goalOpen 
         {!resolved && (isSnoozed(d)
           ? <button className="btn" type="button" onClick={() => act(`/api/loops/${d.id}/unsnooze`, "POST")}>Unsnooze</button>
           : <SnoozeMenu onPick={(until) => act(`/api/loops/${d.id}/snooze`, "POST", { until })} />)}
+        {!editing && <button className="btn" type="button" onClick={() => setEditing(true)}>Edit</button>}
         {!resolved && d.source.kind !== "investigation" && MONEY.test(d.source.text || "") && (
           <button className="btn" type="button" disabled={checking} onClick={check}><Icon name="search" />{checking ? "Starting the check…" : "Check who's asking"}</button>
         )}
@@ -244,6 +248,53 @@ function Detail({ id, version, webEnabled, act, resolve, resolveError, goalOpen 
         {(resolveError || checkError) && <p className="error-line" role="alert">{resolveError || checkError}</p>}
       </div>
     </div>
+  );
+}
+
+/** Fix what Troth got wrong. Only changed fields are sent; History keeps the old values, with Undo. */
+function EditForm({ d, act, done }: { d: LoopDetail; act: Act; done: () => void }) {
+  const [title, setTitle] = useState(d.title);
+  const [kind, setKind] = useState<LoopKind>(d.kind);
+  const [who, setWho] = useState(d.waiting_on ?? "");
+  const [due, setDue] = useState(d.due ?? "");
+  const [next, setNext] = useState(d.next_action ?? "");
+  const [summary, setSummary] = useState(d.summary);
+
+  async function save(e: FormEvent) {
+    e.preventDefault();
+    const body: Record<string, string | null> = {};
+    if (title.trim() !== d.title) body.title = title.trim();
+    if (kind !== d.kind) body.kind = kind;
+    if ((who.trim() || null) !== d.waiting_on) body.waiting_on = who.trim() || null;
+    if ((due || null) !== d.due) body.due = due || null;
+    if ((next.trim() || null) !== d.next_action) body.next_action = next.trim() || null;
+    if (summary.trim() !== d.summary) body.summary = summary.trim();
+    if (Object.keys(body).length) await act(`/api/loops/${d.id}`, "PATCH", body);
+    done();
+  }
+
+  return (
+    <form className="field edit" onSubmit={save}>
+      <label>Title<input type="text" required maxLength={200} value={title} onChange={(e) => setTitle(e.target.value)} /></label>
+      <label>Kind
+        <select value={kind} onChange={(e) => setKind(e.target.value as LoopKind)}>
+          {(Object.keys(KIND) as LoopKind[]).map((k) => <option key={k} value={k}>{KIND[k]}</option>)}
+        </select>
+      </label>
+      {kind !== "task" && (
+        <label>{kind === "commitment" ? "Promised to" : "Waiting on"}
+          <input type="text" maxLength={100} value={who} onChange={(e) => setWho(e.target.value)} />
+        </label>
+      )}
+      <label>Due<input type="date" value={due} onChange={(e) => setDue(e.target.value)} /></label>
+      <label>Next action<input type="text" maxLength={300} value={next} onChange={(e) => setNext(e.target.value)} /></label>
+      <label>Summary<textarea required maxLength={1000} rows={2} value={summary} onChange={(e) => setSummary(e.target.value)} /></label>
+      <div className="row">
+        <button className="btn small primary" type="submit">Save</button>
+        <button className="btn small" type="button" onClick={done}>Cancel</button>
+      </div>
+      <p className="muted">History keeps the old values, with Undo.</p>
+    </form>
   );
 }
 

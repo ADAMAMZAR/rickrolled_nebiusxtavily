@@ -55,6 +55,8 @@ Rules:
    sends the letter" gives {"loop": "Send application", "needs": "Get letter from Dr. Lim"}. Something the message
    says is for another loop (a reference letter for the application, documents for the visa) is a link too: the
    other loop needs it. Never link loops just because they share a topic, a goal or a person.
+10. Words like "it", "she" or "that" mean what the "Earlier in the chat" line says. Without that line, change an
+   existing loop only if exactly one open loop fits; otherwise change nothing.
 
 Return exactly this JSON shape:
 {"goals": [{"title": "...", "description": "..."}],
@@ -184,15 +186,19 @@ def build_messages(
     loops: list[dict[str, Any]],
     note: str | None = None,
     people: list[str] | None = None,
+    chat_context: str | None = None,
 ) -> list[dict[str, str]]:
     """`note` says where text that isn't the user's own message came from, e.g. WEB_NOTE.
-    `people` are names only: their emails never go to the model."""
+    `people` are names only: their emails never go to the model.
+    `chat_context`: what "it" or "she" in the message refers to, from Hermes, e.g. "it = Finish portfolio"."""
     context = (
         f"Current date: {now:%A %Y-%m-%d} ({now.tzinfo})\n"
         f"Calendar: {calendar(now.date())}\n\n"
         f"Existing active goals: {json.dumps(goals) if goals else 'none'}\n\n"
         f"Known people: {json.dumps(people) if people else 'none'}\n\n"
         f"Existing open loops: {json.dumps(loops) if loops else 'none'}\n\n"
+        + (f"Earlier in the chat (only to tell what words like \"it\" or \"she\" refer to): {chat_context}\n\n"
+           if chat_context else "")
         + (f"{note}\n\nText" if note else "User message")
         + f':\n"""\n{text}\n"""'
     )
@@ -214,9 +220,11 @@ def extract(
     loops: list[dict[str, Any]],
     note: str | None = None,
     people: list[str] | None = None,
+    chat_context: str | None = None,
 ) -> ExtractionResult:
     """Call the LLM and validate its JSON. One retry with the error attached, then fail."""
-    result = ask_json(llm, build_messages(text, now, goals, loops, note, people), ExtractionResult, INVALID_MESSAGE)
+    messages = build_messages(text, now, goals, loops, note, people, chat_context)
+    result = ask_json(llm, messages, ExtractionResult, INVALID_MESSAGE)
     log.info(
         "extraction_ok goals=%d new=%d updated=%d resolved=%d",
         len(result.goals), len(result.new_loops), len(result.updated_loops), len(result.resolved),

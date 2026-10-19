@@ -45,10 +45,12 @@ def build_mcp(
                 raise ToolError(str(e)) from e
 
     @mcp.tool()
-    def remember(text: str) -> dict[str, Any]:
+    def remember(text: str, context: str | None = None) -> dict[str, Any]:
         """Save what the user said about their goals, tasks, promises, deadlines or things they're
         waiting on. Also updates or closes existing loops the message is about (e.g. "Sarah replied").
-        Pass the user's message word for word.
+        Pass the user's message word for word. `context`: only when it points back to earlier chat ("push it to
+        Monday", "she said yes"), what those words mean, e.g. "it = Finish portfolio; she = Sarah". Never add
+        anything the user didn't say.
         If the result has `ask_user`, end your reply with that question. On yes, call `investigate` with the
         user's message and `check_loop_id` as loop_id.
         `at_risk`: loops that something they need now puts at risk, each with its reason and options. Tell the user
@@ -56,7 +58,7 @@ def build_mcp(
         thing just closed."""
         with session() as s:
             try:
-                changes = eng.process_message(s, get_llm(), text)
+                changes = eng.process_message(s, get_llm(), text, chat_context=context)
             except (ExtractionError, LLMError) as e:
                 raise ToolError(f"Couldn't save that: {e}") from e
             money = next((loop for loop in changes.created_loops if eng.asks_for_money(loop)), None)
