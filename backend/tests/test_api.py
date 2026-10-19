@@ -4,9 +4,11 @@ from uuid import UUID, uuid4
 
 import pytest
 from fastapi.testclient import TestClient
+from pydantic import SecretStr
 from sqlmodel import Session
 
 from app import engine as eng
+from app.config import settings
 from app.db import create_db_engine
 from app.hermes import HermesError, HermesReply
 from app.main import create_app
@@ -85,6 +87,7 @@ def test_detail_resolve_reopen_delete(client: TestClient) -> None:
 
     detail = client.get(f"/api/loops/{loop_id}").json()
     assert detail["source"]["text"] == DEMO and detail["source"]["created_at"]
+    assert detail["quote"] is None  # the demo reply quotes nothing
 
     resolved = client.post(f"/api/loops/{loop_id}/resolve").json()
     assert resolved["status"] == "resolved" and resolved["resolved_at"]
@@ -220,3 +223,14 @@ def test_history_quotes_what_you_said(client: TestClient) -> None:
     loop_id = seed(client)[0]["id"]
     [created] = client.get(f"/api/activity?loop_id={loop_id}").json()
     assert (created["action"], created["said"]) == ("created", DEMO)
+
+
+def test_mcp_answers_this_machine_but_not_its_proxy(db_url: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """On the server, Caddy connects from 127.0.0.1 too; the X-Forwarded-For it adds gives it away (audit C9)."""
+    monkeypatch.setattr(settings, "app_password", SecretStr("s3cret"))
+    app = create_app(db_url, get_llm=lambda: FakeLLM())
+    call = {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}
+    with TestClient(app, base_url="http://127.0.0.1:8000", client=("127.0.0.1", 50000)) as local:
+        assert local.post("/mcp/", json=call, headers=HEADERS).status_code == 200
+        proxied = {**HEADERS, "X-Forwarded-For": "203.0.113.9"}
+        assert local.post("/mcp/", json=call, headers=proxied).status_code == 403

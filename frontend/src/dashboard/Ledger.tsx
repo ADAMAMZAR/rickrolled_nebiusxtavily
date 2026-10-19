@@ -196,7 +196,11 @@ function Detail({ id, version, webEnabled, act, resolve, resolveError, goalOpen 
       </dl>
       <figure className="why">
         <h4>Why Troth knows this</h4>
-        {d.source.text ? <blockquote className="ruled">{d.source.text}</blockquote> : <p className="muted">Source deleted.</p>}
+        {d.quote ? <blockquote className="ruled">“{d.quote}”</blockquote>
+          : d.source.text ? <blockquote className="ruled">{d.source.text}</blockquote> : <p className="muted">Source deleted.</p>}
+        {d.quote && d.source.text && d.source.text !== d.quote && (
+          <details><summary>{d.source.kind === "email" ? "The whole email" : "The whole message"}</summary><p>{d.source.text}</p></details>
+        )}
         <figcaption>
           {d.source.kind === "email" ? (
             <>Email{d.source.sender ? ` from ${d.source.sender}` : ""} · {shortDate(said)}
@@ -214,7 +218,9 @@ function Detail({ id, version, webEnabled, act, resolve, resolveError, goalOpen 
               <li key={a.id}>
                 <span>{stamp(a.created_at)} · {a.action.replace("_", " ")} by {BY[a.by]}
                   {a.detail && " · "}{/^https?:\/\//.test(a.detail) ? <a href={a.detail} target="_blank" rel="noopener noreferrer">source</a> : a.detail}
-                  {a.said && a.action !== "created" && <span className="said">You said: “{a.said}”</span>}</span>
+                  {a.action !== "created" && (a.quote || a.said) && (
+                    <span className="said">{a.by === "email" ? "The email said" : "You said"}: “{a.quote || a.said}”</span>
+                  )}</span>
                 {a.can_undo && <button className="btn small" type="button" onClick={() => act(`/api/activity/${a.id}/undo`, "POST")}>Undo</button>}
               </li>
             ))}

@@ -12,7 +12,7 @@ from app.config import settings
 from app.connectors.google import Event, GoogleError
 from app.db import ActionStatus
 from tests.test_activity import demo
-from tests.test_email import SARAH, FakeMailbox, email, linked
+from tests.test_email import SARAH, YES, FakeMailbox, email, linked
 from tests.conftest import FakeLLM
 from tests.test_process_message import result
 
@@ -82,7 +82,7 @@ def test_a_google_failure_marks_it_failed(session: Session) -> None:
 
 def test_a_draft_to_the_sender_replies_in_their_thread(session: Session) -> None:
     wait, _ = linked(session)
-    eng.sync_email(session, FakeLLM(result(resolved=[str(wait.id)])), FakeMailbox({SARAH: [email()]}))
+    eng.sync_email(session, FakeLLM(result(resolved=[{"id": str(wait.id), "quote": YES}])), FakeMailbox({SARAH: [email()]}))
     action = eng.propose_google(session, wait.id, DRAFT)  # resolved loops still get drafts
     assert eng.describe_action(session, action) == f'Save a Gmail draft to {SARAH}: "Thank you"? It won\'t be sent.'
     google = FakeGoogle()

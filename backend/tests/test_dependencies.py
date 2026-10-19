@@ -56,7 +56,7 @@ def test_a_stated_link_is_saved_with_who_was_promised(session: Session) -> None:
 
 def test_a_delay_by_email_puts_the_promise_at_risk(session: Session) -> None:
     app, letter = story(session)
-    changes = email(session, "Dr. Lim", result(updated=[{"id": str(letter.id), "due": "2026-10-07"}]))
+    changes = email(session, "Dr. Lim", result(updated=[{"id": str(letter.id), "due": "2026-10-07", "quote": "next Wednesday"}]))
     [risk] = changes.at_risk
     assert (risk.loop.id, risk.cause.id) == (app.id, letter.id)
     assert risk.reason == f'at risk: "{LETTER}" is due Wed Oct 7, after this'
@@ -68,7 +68,7 @@ def test_a_delay_by_email_puts_the_promise_at_risk(session: Session) -> None:
     [item] = eng.needs_attention(session, TODAY)
     assert (item.loop.id, item.reason, item.cause.id, item.options) == (app.id, risk.reason, letter.id, risk.options)  # type: ignore[union-attr]
 
-    again = email(session, "Dr. Lim", result(updated=[{"id": str(letter.id), "summary": "Still Wednesday."}]), "Still Wed.")
+    again = email(session, "Dr. Lim", result(updated=[{"id": str(letter.id), "summary": "Still Wednesday.", "quote": "Still Wed"}]), "Still Wed.")
     assert again.at_risk == []  # only new or changed risks are reported
 
 
@@ -77,7 +77,8 @@ def test_the_promise_is_ready_when_the_letter_arrives(session: Session) -> None:
     portfolio = process(session, linked(result(new=[loop("Finish portfolio", due="2026-09-30")]),
                                         (str(app.id), "Finish portfolio")), "Portfolio first.")
     assert portfolio.linked and needs(session) == {(APP, LETTER), (APP, "Finish portfolio")}
-    first = email(session, "Dr. Lim", result(resolved=[str(letter.id)]), "Here is your letter.")
+    first = email(session, "Dr. Lim", result(resolved=[{"id": str(letter.id), "quote": "Here is your letter"}]),
+                  "Here is your letter.")
     assert first.ready == []  # the portfolio is still open
     done = process(session, result(resolved=[str(portfolio.created_loops[0].id)]), "Portfolio done.")
     assert [l.id for l in done.ready] == [app.id]

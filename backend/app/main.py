@@ -162,12 +162,13 @@ def create_app(
     @app.middleware("http")
     async def password(request: Request, call_next: Callable[[Request], Any]) -> Any:
         """With APP_PASSWORD set (a public server), everything needs HTTP Basic auth, any username.
-        /mcp has no password for Hermes, so it only answers this machine."""
+        /mcp has no password for Hermes, so it only answers this machine, and not through a proxy on it
+        (Caddy connects from 127.0.0.1 too, but adds X-Forwarded-For)."""
         expected = settings.app_password.get_secret_value()
         if not expected:
             return await call_next(request)
         if request.url.path.startswith("/mcp"):
-            if request.client and request.client.host in ("127.0.0.1", "::1"):
+            if request.client and request.client.host in ("127.0.0.1", "::1") and "x-forwarded-for" not in request.headers:
                 return await call_next(request)
             return error(403, "forbidden", "MCP only answers this machine.")
         scheme, _, encoded = request.headers.get("authorization", "").partition(" ")
@@ -258,7 +259,7 @@ def create_app(
     def loop(loop_id: UUID, session: Session = Depends(get_session)) -> dict[str, Any]:
         detail = eng.get_loop(session, loop_id)
         needs, needed_by = eng.loop_links(session, loop_id)
-        return {**loop_out(session, detail.loop), "source": detail.source.model_dump(mode="json"),
+        return {**loop_out(session, detail.loop), "source": detail.source.model_dump(mode="json"), "quote": detail.quote,
                 "needs": [link_out(l) for l in needs], "needed_by": [link_out(l) for l in needed_by]}
 
     @app.post("/api/loops/{loop_id}/resolve")
