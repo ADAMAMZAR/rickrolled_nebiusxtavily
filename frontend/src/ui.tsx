@@ -53,9 +53,17 @@ export function Strike({ draw = false }: { draw?: boolean }) {
 }
 
 const URL = /(https?:\/\/[^\s<>"]+)/g;
+const BOLD = /\*\*([^*\n]+)\*\*/g; // the model writes **bold** despite SOUL.md; Telegram shows it as bold too
 
-/** Untrusted text with its http(s) links made clickable. React escapes the rest. */
+/** `**bold**` → bold, for text copied out of a reply (e.g. a draft to paste). */
+export const unbold = (text: string) => text.replace(BOLD, "$1");
+
+/** Untrusted text with **bold** shown as bold and http(s) links made clickable. React escapes the rest. */
 export function Linked({ text }: { text: string }) {
+  return <>{text.split(BOLD).map((part, i) => (i % 2 ? <b key={i}><Links text={part} /></b> : <Links key={i} text={part} />))}</>;
+}
+
+function Links({ text }: { text: string }) {
   return (
     <>
       {text.split(URL).map((part, i) => {

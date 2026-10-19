@@ -225,4 +225,5 @@ Replace the 2:20 segment ("Sarah's email closes her loop; approve a calendar pro
 - [ ] Export downloads all your data; Delete everything empties it
 - [ ] `pytest` passes; `pytest -m live` scenario numbers recorded in §6
 - [ ] §2 checked live through Hermes and Telegram on a scratch DB
+  *Hermes done 2026-10-19 on the deployed VM (2c54414), dashboard-chat endpoint, own conversation: the link was saved; "the letter will only be ready on October 28" got at risk with the three options from code; "what's blocking", "what's urgent" and "snooze till Monday" (Mon Oct 26) all right. The two test loops were deleted after. Still to see: Telegram (`/briefing`) and the email step (needs Google, so local only).*
 - [ ] README, demo script and Devpost text updated

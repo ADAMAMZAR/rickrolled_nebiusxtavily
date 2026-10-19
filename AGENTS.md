@@ -11,7 +11,7 @@ Hackathon: Nebius x NVIDIA, Personal AI track. **Hermes Agent + NVIDIA Nemotron 
 - [continuum_phase_3.md](continuum_phase_3.md): Connected: web watch + lookup (Tavily), Gmail/Calendar, auto-resolve from email, approval-gated actions *(done 2026-10-09)*
 - [continuum_phase_4.md](continuum_phase_4.md): ScamGraph: investigate a suspicious message/URL/screenshot with Tavily evidence, fixed-rule risk score, evidence graph **← current phase** *(code done 2026-10-08; Telegram check, deploy and demo boxes run separately under issue #4)*
   - Addendum [continuum_personal_ai_plan.md](continuum_personal_ai_plan.md): one Personal AI, not two apps. Risky checks become loops, loops can be checked, `/check` and `/briefing` skills. *(P0–P2 built 2026-10-10; P3 deploy is issue #4, P4 after the video)*
-  - Addendum [troth_improvements.md](troth_improvements.md): loops that depend on other loops; an upstream slip flags the promise "at risk" with options built in code. *(C1–C3 + a "Needs" line built 2026-10-19; Telegram/Hermes live check pending)*
+  - Addendum [troth_improvements.md](troth_improvements.md): loops that depend on other loops; an upstream slip flags the promise "at risk" with options built in code. *(C1–C3 + a "Needs" line built and deployed 2026-10-19, checked live through Hermes; Telegram check pending)*
   - Audit [troth_audit_2026-10-19.md](troth_audit_2026-10-19.md): findings and ranked fixes. *(items 1, 2, 3, 7, 8 built 2026-10-19)*
 
 Start a phase only after every box in the previous phase's Done Checklist is checked. When a phase is finished, move the "current phase" marker.
