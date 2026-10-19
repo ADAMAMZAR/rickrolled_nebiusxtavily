@@ -1,0 +1,103 @@
+# Offline checks (the LLM is mocked; `pytest -m live` stays a manual step), then a deploy of main to the
+# GCP Compute Engine VM. Server setup and the DEPLOY_* secrets: README, "Deploy to GCP Compute Engine".
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:  # redeploy main by hand
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}  # never stop a deploy halfway
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ["3.11", "3.14"]  # declared minimum and the dev machine's version
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - run: pip install -r requirements.txt -e .
+      - run: pytest
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run build  # type-checks, then writes backend/app/static
+      - name: Committed build matches the source
+        run: |
+          if [ -n "$(git status --porcelain ../backend/app/static)" ]; then
+            git status --short ../backend/app/static
+            echo "::error::backend/app/static is stale. Run 'npm run build' in frontend/ and commit the result."
+            exit 1
+          fi
+
+  deploy:
+    needs: [backend, frontend]
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+    concurrency:
+      group: deploy
+      cancel-in-progress: false
+    env:
+      TARGET: ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}
+    steps:
+      - name: SSH key
+        env:
+          KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$KEY" > ~/.ssh/id_ed25519
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/id_ed25519
+      # Runs on the VM: check out the commit CI just tested, install, refresh the Hermes profile, restart.
+      - name: Deploy
+        run: |
+          ssh "$TARGET" bash -s -- "$GITHUB_SHA" <<'EOF'
+          set -euo pipefail
+          cd ~/troth
+          git fetch --quiet origin main
+          git reset --hard --quiet "$1"
+          cd backend
+          .venv/bin/pip install --quiet -r requirements.txt -e .
+          .venv/bin/python scripts/setup_hermes.py
+          # Troth first: Hermes only picks up Troth's tools if Troth answers when Hermes starts.
+          sudo systemctl restart troth
+          up=""
+          for _ in $(seq 15); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8000/health || true)
+            case $code in 200|401) up=1; break ;; esac
+            sleep 2
+          done
+          [ -n "$up" ] || { echo "Troth didn't start. On the VM: journalctl -u troth -n 50"; exit 1; }
+          sudo systemctl restart hermes
+          sleep 5
+          systemctl is-active --quiet hermes || { echo "Hermes didn't start. On the VM: journalctl -u hermes -n 50"; exit 1; }
+          echo "Troth and Hermes are up at $(git rev-parse --short HEAD)"
+          EOF

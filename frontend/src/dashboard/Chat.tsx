@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { api } from "../api";
-import { Icon, Linked } from "../ui";
+import { Icon, Linked, unbold } from "../ui";
 
 interface Message {
   role: "user" | "bot" | "error";
@@ -95,7 +95,7 @@ export function Chat({ chat }: { chat: ReturnType<typeof useChat> }) {
 function CopyButton({ text }: { text: string }) {
   const [label, setLabel] = useState("Copy");
   async function copy() {
-    try { await navigator.clipboard.writeText(text); setLabel("Copied"); }
+    try { await navigator.clipboard.writeText(unbold(text)); setLabel("Copied"); }
     catch (e) { setLabel(`Copy failed: ${(e as Error).message}`); }
   }
   return <button className="btn small copy" type="button" onClick={copy}>{label}</button>;
