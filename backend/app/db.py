@@ -124,6 +124,7 @@ class Activity(SQLModel, table=True):
     detail: str = ""
     undo: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))  # previous values; None = can't undo
     source_id: UUID | None = Field(default=None, foreign_key="source.id", index=True)  # the words behind the change
+    quote: str | None = None  # the part of those words that states the change, checked to be in them
     created_at: datetime = Field(default_factory=utcnow)
 
 

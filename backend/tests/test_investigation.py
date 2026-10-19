@@ -16,9 +16,10 @@ from app.config import settings
 from app.connectors.tavily import ExtractedPage, TavilyError, WebResult, WebSearch
 from app.db import Entity, EntityType, Investigation, LoopKind, RiskLevel
 from app.extraction import SCAM_INVALID, ScamExtraction
-from app.investigation import appears, canonical
+from app.investigation import canonical
 from app.llm import LLMError
 from app.main import create_app
+from app.quotes import appears
 
 PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 32
 MESSAGE = (

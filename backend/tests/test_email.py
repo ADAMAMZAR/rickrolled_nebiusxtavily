@@ -16,6 +16,7 @@ from tests.test_activity import demo, history
 from tests.test_process_message import loop, process, result
 
 SARAH = "sarah@nvidia.com"
+YES, OCT8 = "we'd like to interview you", "interview you on Oct 8"  # quotes from the default email
 
 
 def email(id: str = "m1", body: str = "Great news, we'd like to interview you on Oct 8.", minutes: int = 0) -> Email:
@@ -50,7 +51,8 @@ def sync(session: Session, llm: FakeLLM, mailbox: FakeMailbox, now: datetime = N
 
 def test_an_email_closes_its_loop_with_undo(session: Session) -> None:
     wait, _ = linked(session)
-    llm = FakeLLM(result(resolved=[str(wait.id)], new=[loop("Prepare for NVIDIA interview", due="2026-10-08")]))
+    llm = FakeLLM(result(resolved=[{"id": str(wait.id), "quote": YES}],
+                         new=[loop("Prepare for NVIDIA interview", due="2026-10-08", quote=OCT8)]))
     lines, errors = sync(session, llm, FakeMailbox({SARAH: [email()]}))
     assert lines == ['Email from Sarah: closed "Wait for Sarah\'s response"; new "Prepare for NVIDIA interview" (due Thu Oct 8).']
     assert errors == []
@@ -96,7 +98,7 @@ def test_an_email_can_only_touch_its_senders_loops(session: Session) -> None:
 def test_each_email_is_processed_once_and_last_sync_advances(session: Session) -> None:
     wait, _ = linked(session)
     mailbox = FakeMailbox({SARAH: [email()]})
-    sync(session, FakeLLM(result(updated=[{"id": str(wait.id), "due": "2026-10-09"}])), mailbox)
+    sync(session, FakeLLM(result(updated=[{"id": str(wait.id), "due": "2026-10-09", "quote": OCT8}])), mailbox)
     assert mailbox.queries[0][1] == NOW.astimezone(UTC) - timedelta(days=7)  # first run: SYNC_LOOKBACK_DAYS
     later = NOW + timedelta(minutes=10)
     llm = FakeLLM()  # no replies queued: any LLM call would fail the test
@@ -127,15 +129,15 @@ def test_an_unreadable_email_is_read_again_next_run(session: Session) -> None:
     lines, errors = sync(session, FakeLLM("nope", "still nope"), mailbox)
     assert lines == [] and errors[0].startswith("Couldn't read an email from Sarah")
     assert eng.get_setting(session, eng.LAST_EMAIL_SYNC) is None
-    lines, _ = sync(session, FakeLLM(result(resolved=[str(wait.id)])), mailbox)
+    lines, _ = sync(session, FakeLLM(result(resolved=[{"id": str(wait.id), "quote": YES}])), mailbox)
     assert len(lines) == 1
 
 
 def test_later_emails_win(session: Session) -> None:
     wait, _ = linked(session)
     newest_first = [email("m2", "Actually, Oct 12.", minutes=5), email("m1", "Interview Oct 9.")]
-    llm = FakeLLM(result(updated=[{"id": str(wait.id), "due": "2026-10-09"}]),
-                  result(updated=[{"id": str(wait.id), "due": "2026-10-12"}]))
+    llm = FakeLLM(result(updated=[{"id": str(wait.id), "due": "2026-10-09", "quote": "Interview Oct 9"}]),
+                  result(updated=[{"id": str(wait.id), "due": "2026-10-12", "quote": "Actually, Oct 12"}]))
     sync(session, llm, FakeMailbox({SARAH: newest_first}))
     assert str(eng.get_loop(session, wait.id).loop.due) == "2026-10-12"
     assert "Oct 9" in llm.calls[0][1]["content"]
@@ -143,12 +145,13 @@ def test_later_emails_win(session: Session) -> None:
 
 def test_forget_email_data(session: Session) -> None:
     wait, _ = linked(session)
-    sync(session, FakeLLM(result(resolved=[str(wait.id)], new=[loop("Prepare for interview")])), FakeMailbox({SARAH: [email()]}))
+    reply = result(resolved=[{"id": str(wait.id), "quote": YES}], new=[loop("Prepare for interview", quote=OCT8)])
+    sync(session, FakeLLM(reply), FakeMailbox({SARAH: [email()]}))
     assert eng.forget_email_data(session) == 1
     new = next(l for l in eng.list_loops(session) if l.title == "Prepare for interview")
     source = eng.get_loop(session, new.id).source
     assert (source.text, source.sender, source.url, source.external_id) == ("", None, None, "m1")
-    assert all(a.detail == "" for a in eng.list_activity(session) if a.by == "email")
+    assert all(a.detail == "" and a.quote is None for a in eng.list_activity(session) if a.by == "email")
     assert ("resolved", "email", True) in history(session, wait)
     eng.reopen_loop(session, wait.id)  # so Sarah is read again
     llm, mailbox = FakeLLM(), FakeMailbox({SARAH: [email()]})
@@ -169,7 +172,8 @@ def google_on(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.mark.usefixtures("google_on")
 def test_an_event_in_an_email_becomes_a_calendar_proposal(session: Session) -> None:
     wait, _ = linked(session)
-    reply = result(resolved=[str(wait.id)], new=[loop("Prepare for NVIDIA interview", due="2026-10-08")])
+    reply = result(resolved=[{"id": str(wait.id), "quote": YES}],
+                   new=[loop("Prepare for NVIDIA interview", due="2026-10-08", quote=OCT8)])
     reply["events"] = [{"title": "NVIDIA interview", "start": "2026-10-08T10:00", "end": None}]
     llm = FakeLLM(reply)
     lines, _ = sync(session, llm, FakeMailbox({SARAH: [email()]}))
@@ -197,3 +201,15 @@ def test_chat_messages_never_propose_events(session: Session) -> None:
     reply = result(new=[loop("Interview", due="2026-10-08")])
     reply["events"] = [{"title": "Interview", "start": "2026-10-08T10:00"}]
     assert process(session, reply, "Interview on Oct 8 at 10.").events == []
+
+
+def test_an_email_change_needs_words_from_the_email(session: Session) -> None:
+    """Email changes apply without the user, so one the model can't quote from the email isn't made (audit item 4)."""
+    wait, _ = linked(session)
+    reply = result(resolved=[{"id": str(wait.id), "quote": "We are pleased to offer you the role"}],  # not in the email
+                   new=[loop("Wire the deposit"), loop("Prepare for NVIDIA interview", quote=OCT8)])  # no quote; real
+    lines, _ = sync(session, FakeLLM(reply), FakeMailbox({SARAH: [email()]}))
+    assert lines == ['Email from Sarah: new "Prepare for NVIDIA interview".']
+    assert eng.get_loop(session, wait.id).loop.status == LoopStatus.open
+    [made] = [a for a in eng.list_activity(session) if a.by == "email"]
+    assert made.quote == OCT8 and eng.get_loop(session, made.loop_id).quote == OCT8

@@ -31,6 +31,7 @@ from app.extraction import (
     summarize,
 )
 from app.llm import LLMError
+from app.quotes import alnum, appears
 
 log = logging.getLogger("continuum.investigation")
 
@@ -851,7 +852,7 @@ def relevant_text(text: str, needles: list[str]) -> str:
         if ch.isalnum():
             flat += ch
             where.append(i)
-    forms = {_alnum(n) for n in needles} | {_alnum(SUFFIXES.sub("", n)) for n in needles}
+    forms = {alnum(n) for n in needles} | {alnum(SUFFIXES.sub("", n)) for n in needles}
     for form in {f for f in forms if len(f) >= 5}:
         start = flat.find(form)
         while start != -1 and len(keep) < 40:
@@ -891,17 +892,6 @@ def _squash(text: str) -> str:
     return " ".join(text.split()).casefold()
 
 
-def appears(needle: str, text: str, phone: bool = False) -> bool:
-    """Is `needle` in `text`, comparing letters and digits only? Pages write the same name differently
-    ("Sdn. Bhd." vs "Sdn.Bhd", table pipes). Phones compare their last 9 digits (at least 6), so
-    "+60 12-000 5678" matches "012-000 5678"."""
-    if phone:
-        # ponytail: last-9-digits match covers +60 vs 0 prefixes; use a phone library if other formats appear.
-        digits = re.sub(r"\D", "", needle)[-9:]
-        return len(digits) >= 6 and digits in re.sub(r"\D", "", text)
-    return bool(_alnum(needle)) and _alnum(needle) in _alnum(text)
-
-
 def is_regulator(entity: Entity) -> bool:
     return any(name in entity.canonical for name in REGULATOR_NAMES)
 
@@ -917,15 +907,11 @@ def names_any(quote: str, entities: list[Entity]) -> bool:
             if appears(e.value, quote, phone=True):
                 return True
             continue
-        forms = {_alnum(e.value), _alnum(SUFFIXES.sub("", e.value))} if e.type in (EntityType.org, EntityType.person) \
-            else {_alnum(e.canonical)}
-        if any(len(f) >= 4 and f in _alnum(quote) for f in forms):
+        forms = {alnum(e.value), alnum(SUFFIXES.sub("", e.value))} if e.type in (EntityType.org, EntityType.person) \
+            else {alnum(e.canonical)}
+        if any(len(f) >= 4 and f in alnum(quote) for f in forms):
             return True
     return False
-
-
-def _alnum(text: str) -> str:
-    return "".join(ch for ch in text.casefold() if ch.isalnum())
 
 
 def canonical(kind: EntityType, value: str) -> str:

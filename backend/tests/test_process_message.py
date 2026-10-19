@@ -17,9 +17,9 @@ def result(
     goals: list[dict[str, Any]] | None = None,
     new: list[dict[str, Any]] | None = None,
     updated: list[dict[str, Any]] | None = None,
-    resolved: list[str] | None = None,
+    resolved: list[str] | list[dict[str, str]] | None = None,  # ids, or {"id", "quote"}
 ) -> dict[str, Any]:
-    return {"goals": goals or [], "new_loops": new or [], "updated_loops": updated or [], "resolved_loop_ids": resolved or []}
+    return {"goals": goals or [], "new_loops": new or [], "updated_loops": updated or [], "resolved": resolved or []}
 
 
 def loop(title: str, kind: str = "task", **extra: Any) -> dict[str, Any]:
@@ -140,3 +140,22 @@ def test_logs_events_and_ids_not_content(session: Session, caplog: pytest.LogCap
     assert f"loop_resolved id={wait.id}" in caplog.text
     assert "extraction_failed" in caplog.text
     assert "Sarah" not in caplog.text
+
+
+def test_a_chat_change_keeps_its_quote_only_if_the_words_are_there(session: Session) -> None:
+    """The user sees the reply, so a chat change with a wrong quote is still made, just without a quote."""
+    text = "I need to finish my portfolio. And email Sarah."
+    reply = result(new=[loop("Finish portfolio", quote="finish my portfolio"),
+                        loop("Email Sarah", quote="I promised to email Sarah")])  # not what the user wrote
+    finish, email = process(session, reply, text).created_loops
+    assert eng.get_loop(session, finish.id).quote == "finish my portfolio"
+    assert eng.get_loop(session, email.id).quote is None
+    done = process(session, result(resolved=[{"id": str(finish.id), "quote": "portfolio is DONE"}]), "Portfolio is done!")
+    assert done.resolved_loops == [finish]
+    assert eng.list_activity(session, finish.id)[0].quote == "portfolio is DONE"  # letters and digits are compared
+
+
+def test_a_loop_without_a_summary_uses_its_title(session: Session) -> None:
+    """Seen live: "summary": null used to fail the whole message twice."""
+    [made] = process(session, result(new=[loop("Send Google application", summary=None)]), "Send the Google application.").created_loops
+    assert made.summary == "Send Google application"

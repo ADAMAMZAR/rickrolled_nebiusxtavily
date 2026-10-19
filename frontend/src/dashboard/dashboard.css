@@ -51,6 +51,8 @@ li.fresh > .row-btn .title b::after {
 .detail h4 { font-size: var(--fs-small); font-weight: 750; margin-bottom: var(--s2); }
 .why { margin: 0; }
 .why blockquote { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.why details { margin-top: var(--s2); font-size: var(--fs-small); color: var(--muted); }
+.why details p { margin: var(--s1) 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .why figcaption { margin-top: var(--s2); font-size: var(--fs-small); color: var(--muted); }
 .history ul { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s1); font-size: var(--fs-small); color: var(--muted); }
 .history li { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); }

@@ -28,6 +28,7 @@ from app.connectors.google import Email, GoogleClient, GoogleError
 from app.connectors.tavily import NOT_SET_UP, TavilyError, WebResult
 from app.extraction import EMAIL_NOTE, WEB_NOTE, Completer, EventCandidate, ExtractionError, extract
 from app.llm import LLMError
+from app.quotes import appears
 
 log = logging.getLogger("continuum.engine")
 
@@ -74,6 +75,7 @@ class LoopDetail:
     loop: OpenLoop
     goal: Goal | None
     source: Source
+    quote: str | None = None  # the words in the source that made it
 
 
 @dataclass
@@ -96,6 +98,8 @@ def process_message(
     The LLM runs before any write, so a failed extraction writes nothing. A message that
     changes nothing isn't stored either (privacy: keep only what the system needs).
     `person` + `source`: an email from that person. It may only update or resolve their loops.
+    Each change keeps the model's quote only if those words are in the text. An email's changes apply without
+    the user, so there a change without a real quote is dropped: Troth never acts on words nobody wrote.
     """
     now = now or local_now()
     goals = [s.goal for s in list_goals(session)]
@@ -122,6 +126,7 @@ def process_message(
     seen = {_loop_key(loop.title, loop.waiting_on) for loop in open_loops}
     in_scope_by_key = {_loop_key(loop.title, loop.waiting_on): loop for loop in in_scope}
     risks_before, blocked_before = dependency_risks(session, now.date()), _blocked(session)
+    strict = person is not None  # an email's changes apply without the user: no real quote, no change
     try:
         if source is None:
             source = add_source(session, text)
@@ -140,6 +145,9 @@ def process_message(
                 if (same := in_scope_by_key.get(key)) is not None:  # repeated, but a link may name it
                     new_by_title.setdefault(normalize(candidate.title), same)
                 continue
+            if (quote := _quote(candidate.quote, text)) is None and strict:
+                log.info("change_dropped change=new reason=no_quote")
+                continue
             seen.add(key)
             goal = _find_or_add_goal(session, candidate.goal, None, goal_by_name, changes) if candidate.goal else None
             created = add_loop(
@@ -147,7 +155,7 @@ def process_message(
                 source_id=source.id,
                 goal_id=goal.id if goal else None,
                 title=candidate.title,
-                summary=candidate.summary,
+                summary=candidate.summary or candidate.title,
                 kind=LoopKind(candidate.kind),
                 waiting_on=candidate.waiting_on,
                 due=candidate.due,
@@ -157,33 +165,39 @@ def process_message(
                 created.person_id = _find_or_add_person(session, created.waiting_on, people).id
             in_scope_by_key[key] = new_by_title[normalize(candidate.title)] = created
             changes.created_loops.append(created)
-            _log(session, created, ActivityAction.created, by, link, source_id=source.id)
+            _log(session, created, ActivityAction.created, by, link, source_id=source.id, quote=quote)
 
         stamp = utcnow()
         for update in result.updated_loops:
             loop = known.get(update.id)
-            fields = update.model_dump(exclude={"id"}, exclude_none=True)
+            fields = update.model_dump(exclude={"id", "quote"}, exclude_none=True)
             if loop is not None:  # the model often repeats current values; those aren't changes
                 fields = {name: value for name, value in fields.items() if getattr(loop, name) != value}
             if loop is None or not fields:
                 log.info("loop_update_dropped known=%s", loop is not None)
+                continue
+            if (quote := _quote(update.quote, text)) is None and strict:
+                log.info("change_dropped change=update reason=no_quote")
                 continue
             undo = loop.model_dump(mode="json", include=set(fields))
             for name, value in fields.items():
                 setattr(loop, name, value)
             loop.updated_at = stamp
             changes.updated_loops.append(loop)
-            _log(session, loop, ActivityAction.updated, by, link or ", ".join(fields), undo, source.id)
+            _log(session, loop, ActivityAction.updated, by, link or ", ".join(fields), undo, source.id, quote)
 
-        for loop_id in dict.fromkeys(result.resolved_loop_ids):  # each id once
-            loop = known.get(loop_id)
-            if loop is None:  # the LLM may only resolve loops we showed it
+        for resolution in result.resolved:
+            loop = known.get(resolution.id)
+            if loop is None or loop in changes.resolved_loops:  # only loops we showed it, each once
                 log.info("loop_resolve_dropped")
+                continue
+            if (quote := _quote(resolution.quote, text)) is None and strict:
+                log.info("change_dropped change=resolve reason=no_quote")
                 continue
             loop.status, loop.resolved_at, loop.updated_at = LoopStatus.resolved, stamp, stamp
             changes.resolved_loops.append(loop)
             _log(session, loop, ActivityAction.resolved, by, link, {"status": LoopStatus.open.value, "resolved_at": None},
-                 source.id)
+                 source.id, quote)
         changes.updated_loops = [l for l in changes.updated_loops if l not in changes.resolved_loops]
 
         edges = _edges(session)
@@ -221,6 +235,11 @@ def process_message(
     for loop in changes.resolved_loops:
         log.info("loop_resolved id=%s", loop.id)
     return changes
+
+
+def _quote(quote: str | None, text: str) -> str | None:
+    """The model's quote, if those words really are in the text."""
+    return quote if quote and appears(quote, text) else None
 
 
 def local_now() -> datetime:
@@ -583,7 +602,10 @@ def get_loop(session: Session, loop_id: UUID) -> LoopDetail:
     if source is None:  # source_id is required; missing means a corrupt DB
         raise RuntimeError(f"Loop {loop_id} points to missing source {loop.source_id}")
     goal = session.get(Goal, loop.goal_id) if loop.goal_id else None
-    return LoopDetail(loop=loop, goal=goal, source=source)
+    created = session.exec(
+        select(Activity).where(Activity.loop_id == loop.id, Activity.action == ActivityAction.created)
+    ).first()
+    return LoopDetail(loop=loop, goal=goal, source=source, quote=created.quote if created else None)
 
 
 # --- user actions (commit) ---
@@ -731,11 +753,12 @@ def _reactivate_goal(session: Session, loop: OpenLoop) -> None:
 
 def _log(
     session: Session, loop: OpenLoop, action: ActivityAction, by: ActivityBy,
-    detail: str = "", undo: dict[str, Any] | None = None, source_id: UUID | None = None,
+    detail: str = "", undo: dict[str, Any] | None = None, source_id: UUID | None = None, quote: str | None = None,
 ) -> None:
     """Record a change (no commit). User changes get no undo: the dashboard has Reopen/Unsnooze for them.
-    `source_id`: the message or email that made the change, so its history can quote it."""
-    session.add(Activity(loop_id=loop.id, action=action, by=by, detail=detail, source_id=source_id,
+    `source_id`: the message or email that made the change, so its history can quote it; `quote`: its words
+    that state the change, checked to be in it."""
+    session.add(Activity(loop_id=loop.id, action=action, by=by, detail=detail, source_id=source_id, quote=quote,
                          undo=None if by == ActivityBy.user else undo))
 
 
@@ -1059,7 +1082,7 @@ def _review_web_results(session: Session, llm: Completer, loop: OpenLoop, result
             log.warning("web_result_unreadable id=%s error=%s", loop.id, type(e).__name__)
             continue
         due = next((u.due for u in found.updated_loops if u.id == str(loop.id) and u.due and u.due != loop.due), None)
-        if str(loop.id) in found.resolved_loop_ids:
+        if str(loop.id) in {r.id for r in found.resolved}:
             change = LoopUpdate(resolve=True, source_url=page.url, source_title=page.title or None)
         elif due:
             change = LoopUpdate(due=due, source_url=page.url, source_title=page.title or None)
@@ -1248,7 +1271,7 @@ def forget_email_data(session: Session) -> int:
     for source in sources:
         source.text, source.sender, source.url = "", None, None
     for activity in session.exec(select(Activity).where(Activity.by == ActivityBy.email)).all():
-        activity.detail = ""
+        activity.detail, activity.quote = "", None
     session.commit()
     log.info("email_data_forgotten sources=%d", len(sources))
     return len(sources)

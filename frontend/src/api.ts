@@ -45,7 +45,8 @@ export interface LinkedLoop {
   status: "open" | "resolved";
 }
 
-export type LoopDetail = Loop & { source: Source; needs: LinkedLoop[]; needed_by: LinkedLoop[] };
+/** `quote`: the words in the source that made the loop, checked to be in it. */
+export type LoopDetail = Loop & { source: Source; quote: string | null; needs: LinkedLoop[]; needed_by: LinkedLoop[] };
 
 export interface Attention {
   loop: Loop;
@@ -62,6 +63,7 @@ export interface Activity {
   created_at: string;
   can_undo: boolean;
   said: string | null; // the chat message behind the change
+  quote: string | null; // the words in that message or email that state the change
 }
 
 export interface PendingAction {

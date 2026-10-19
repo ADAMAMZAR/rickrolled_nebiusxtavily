@@ -71,7 +71,8 @@ Every loop goes through five steps:
 - **Email.** Give Troth someone's address (*"Sarah's email is sarah@nvidia.com"*) and it reads new mail from them, and only them, every 10 minutes. A reply that answers your loop closes it, a new deadline becomes a task, and a meeting time becomes a calendar proposal. [Setup](#google-setup-optional).
 - **Web.** Say *"keep an eye on the hackathon results"* and Troth searches for it once a day with Tavily. Ask *"when does the Google STEP application close?"* and it looks it up, with the link. What the web says is only ever a proposal.
 - **Your yes first.** Calendar events, Gmail drafts (*"draft a thank-you reply to Sarah"*) and web findings wait under **Pending actions**, or on Telegram, until you approve. Nothing is ever sent. If one fails (say Google was disconnected), it stays there with **Try again**.
-- **Undo.** Each loop's History shows what changed it (you, chat, email or the web) and the words you said, with Undo on automatic changes.
+- **Undo.** Each loop's History shows what changed it (you, chat, email or the web) and the words behind it, with Undo on automatic changes.
+- **Only what was written.** Each loop and change keeps the words that state it, checked to really be in your message or the email. An email change Troth can't quote from the email isn't made. Emails and web pages reach the model marked as someone else's words, never instructions.
 
 ### Check before you pay (ScamGraph)
 
@@ -288,7 +289,7 @@ The live suite runs the acceptance inputs against real Nemotron, e.g. "Alex said
 ## Privacy
 
 - Everything stays local in `backend/data/continuum.db` (SQLite). What leaves your machine: text sent to Nebius for Nemotron to do its job; your Telegram messages if you turn Telegram on (they pass through Telegram's servers); with a Tavily key, only your watch searches and lookup questions go to Tavily, never your messages. Only the names of people you wait on go to the model, not their email addresses.
-- **Email** (if you connect Google): only mail *from* people you gave an address for, and only while they have an open loop. Troth never lists or searches the rest of your inbox. Each email's subject and new text (quotes and signature removed, at most 4,000 characters) go to Nemotron. The text is stored only if it changed a loop. Attachments are never downloaded. **Forget email data** in Settings deletes all stored email text; loops made from it stay, marked "source deleted".
+- **Email** (if you connect Google): only mail *from* people you gave an address for, and only while they have an open loop. Troth never lists or searches the rest of your inbox. Each email's subject and new text (quotes and signature removed, at most 4,000 characters) go to Nemotron. The text is stored only if it changed a loop. Attachments are never downloaded. **Forget email data** in Settings deletes all stored email text, quotes included; loops made from it stay, marked "source deleted".
 - **ScamGraph**: the message, screenshot and page text go to Nebius. Names, websites, phone numbers and the submitted link go to Tavily as searches. Screenshots are saved in `backend/data/uploads/` (gitignored, never served). A risky check's message is also kept as its loop's source. Logs hold ids, counts and step names, never the message, quotes or searches.
 - Every loop links to the message it came from. Deleting a loop deletes those words too, unless another loop still uses them (an email keeps only its Gmail id, so sync doesn't read it again). A message check can be deleted on its page, with its screenshot.
 - Troth never sends anything on your behalf. Drafts are text for you to copy, or Gmail drafts you send yourself.
@@ -299,7 +300,7 @@ The live suite runs the acceptance inputs against real Nemotron, e.g. "Alex said
 
 - **One user.** Without `APP_PASSWORD`, run it on your own machine only.
 - **ScamGraph is a heuristic.** Signal weights are plain rules, not probabilities. Finding a company's official website depends on Nemotron reading the right page, about 2 runs in 3 for a clone of a foreign company; without it the identity stays "not verified". Malaysian regulators only (SC, Bank Negara). A check takes 1-2 minutes.
-- **Extraction is an LLM's judgment.** It can miss an item or misread a date. The prompt lists the next two weeks, so the model looks weekdays up instead of counting (10 of 10 weekday phrases right in a live run, 2026-10-19), and snooze days like "monday" are worked out in code. Every loop shows its source text so you can check it, and wrong loops can be deleted.
+- **Extraction is an LLM's judgment.** It can miss an item or misread a date. The prompt lists the next two weeks, so the model looks weekdays up instead of counting (10 of 10 weekday phrases right in a live run, 2026-10-19), and snooze days like "monday" are worked out in code. Every loop shows the words it came from so you can check it, and wrong loops can be deleted.
 - **`next_action` is usually empty**, because the model is told never to invent anything the message doesn't state.
 - **Dedup is exact-match** on normalized title + person, plus giving the model the existing loops. Reworded duplicates can slip through.
 - **Hermes' standalone gateway** (`gateway.standalone: true`) is a shim Hermes marks as temporary. `hermes/config.example.yaml` describes the fallback.
