@@ -428,9 +428,11 @@ def test_research_finds_checks_and_tiers_evidence(client: TestClient, researched
     got = investigate(client, text=MESSAGE)
     assert got["status"] == "done"
     # Fixed searches for the company (not for the Securities Commission, a regulator), then the model's.
-    assert researched.searched == [
-        (ORG, ["sc.com.my"]), (ORG, ["bnm.gov.my"]), (f"{ORG} official website", None),
-        ("T Rowe Price Malaysia licence", ["sc.com.my"]),
+    # They run in parallel, so in any order.
+    first = [(ORG, ["sc.com.my"]), (ORG, ["bnm.gov.my"]), (f"{ORG} official website", None),
+             ("T Rowe Price Malaysia licence", ["sc.com.my"])]
+    assert sorted(researched.searched[:4], key=repr) == sorted(first, key=repr)
+    assert researched.searched[4:] == [
         ("T Rowe Price Malaysia licence", ["sc.com.my"]),  # follow-up: the regulatory claim had no evidence
         ("troweprice-my-invest.com", ["troweprice.com"]),  # the submitted domain, asked on the official site
     ]
