@@ -136,6 +136,13 @@ def test_data_survives_restart(db_url: str) -> None:
     second.dispose()
 
 
+def test_pooled_connections_are_checked_before_use(db_url: str) -> None:
+    """Neon drops idle connections; without a ping the 8:00 briefing hit a dead one (2026-10-17 and 10-19)."""
+    engine = create_db_engine(db_url)
+    assert engine.pool._pre_ping
+    engine.dispose()
+
+
 def test_outdated_database_fails_with_clear_message(tmp_path: Path) -> None:
     """create_all doesn't add new columns, so a pre-snooze DB used to give a bare HTTP 500 on every list."""
     path = tmp_path / "old.db"

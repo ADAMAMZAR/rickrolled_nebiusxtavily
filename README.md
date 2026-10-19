@@ -288,7 +288,7 @@ The live suite runs the acceptance inputs against real Nemotron, e.g. "Alex said
 
 ## Privacy
 
-- Everything stays local in `backend/data/continuum.db` (SQLite). What leaves your machine: text sent to Nebius for Nemotron to do its job; your Telegram messages if you turn Telegram on (they pass through Telegram's servers); with a Tavily key, only your watch searches and lookup questions go to Tavily, never your messages. Only the names of people you wait on go to the model, not their email addresses.
+- Everything is in one database: `backend/data/continuum.db` (SQLite) on your machine, or the Postgres in `DATABASE_URL` (the GCP deploy uses Neon). What leaves it: text sent to Nebius for Nemotron to do its job; your Telegram messages if you turn Telegram on (they pass through Telegram's servers); with a Tavily key, only your watch searches and lookup questions go to Tavily, never your messages. Only the names of people you wait on go to the model, not their email addresses.
 - **Email** (if you connect Google): only mail *from* people you gave an address for, and only while they have an open loop. Troth never lists or searches the rest of your inbox. Each email's subject and new text (quotes and signature removed, at most 4,000 characters) go to Nemotron. The text is stored only if it changed a loop. Attachments are never downloaded. **Forget email data** in Settings deletes all stored email text, quotes included; loops made from it stay, marked "source deleted".
 - **ScamGraph**: the message, screenshot and page text go to Nebius. Names, websites, phone numbers and the submitted link go to Tavily as searches. Screenshots are saved in `backend/data/uploads/` (gitignored, never served). A risky check's message is also kept as its loop's source. Logs hold ids, counts and step names, never the message, quotes or searches.
 - Every loop links to the message it came from. Deleting a loop deletes those words too, unless another loop still uses them (an email keeps only its Gmail id, so sync doesn't read it again). A message check can be deleted on its page, with its screenshot.
@@ -306,7 +306,7 @@ The live suite runs the acceptance inputs against real Nemotron, e.g. "Alex said
 - **Hermes' standalone gateway** (`gateway.standalone: true`) is a shim Hermes marks as temporary. `hermes/config.example.yaml` describes the fallback.
 - Goals are marked done from the dashboard only, not by chat.
 - Chat replies take a few seconds (one Nemotron tool call plus the reply, ~3–9 s in testing).
-- Telegram and the daily briefing only work while Hermes' gateway is running on your machine.
+- Run on your own computer, Telegram and the daily briefing only work while it's on. The [GCP deploy](#deploy-to-gcp-compute-engine) keeps them running.
 - Scheduled jobs (the daily briefing, web watch) only run while the gateway is running. A briefing missed while it was off is sent once when the gateway starts again, so it can arrive late.
 - **Check who's asking** shows on loops whose words mention money, a link or an account (a keyword test). Any message can still be checked on **Check a message**.
 

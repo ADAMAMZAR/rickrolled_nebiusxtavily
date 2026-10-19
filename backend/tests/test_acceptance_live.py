@@ -82,6 +82,16 @@ def test_unrelated_loop_gets_no_goal(session: Session, llm: LLMClient) -> None:
     assert len(eng.list_goals(session)) == 1
 
 
+def test_a_side_errand_in_the_same_message_gets_no_goal(session: Session, llm: LLMClient) -> None:
+    """The old goal rule got this wrong in 6 of 8 runs, filing the passport under the internship (2026-10-19)."""
+    changes = say(session, llm, "I'm applying for an NVIDIA internship and need to finish my portfolio. "
+                                "I also need to renew my passport.")
+    by_title = {l.title.lower(): l for l in changes.created_loops}
+    passport = [l for t, l in by_title.items() if "passport" in t]
+    portfolio = [l for t, l in by_title.items() if "portfolio" in t]
+    assert len(passport) == 1 and passport[0].goal_id is None, list(by_title)
+    assert len(portfolio) == 1 and portfolio[0].goal_id is not None, list(by_title)
+
 def test_a_known_person_keeps_their_name(session: Session, llm: LLMClient) -> None:
     """Spec §5: the model reuses a known person's name, so the loop links to that Person."""
     sarah = eng.set_person_email(session, "Sarah Chen", "sarah@nvidia.com")
