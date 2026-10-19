@@ -98,3 +98,14 @@ def test_a_known_person_keeps_their_name(session: Session, llm: LLMClient) -> No
     changes = say(session, llm, "Sarah said she'll send the offer letter next week.")
     [loop] = changes.created_loops
     assert (loop.kind, loop.person_id) == (LoopKind.waiting, sarah.id), loop.waiting_on
+
+
+def test_it_lands_on_the_loop_the_chat_names(session: Session, llm: LLMClient) -> None:
+    """Audit item 9: with three loops open, "push it to Monday" moves the one Hermes says "it" is.
+    Measured 2026-10-19 (extraction only, 6 runs each): 6/6 with context; without it, 5/6 changed nothing."""
+    say(session, llm, "I need to finish my portfolio by October 23.")
+    say(session, llm, "Sarah said she'll get back to me Friday.")
+    say(session, llm, "I promised Ali I'd send him the sales report by October 21.")
+    portfolio = next(l for l in eng.list_loops(session) if "portfolio" in l.title.lower())
+    changes = eng.process_message(session, llm, "Push it to Monday.", NOW, chat_context=f"it = {portfolio.title}")
+    assert [(l.id, l.due) for l in changes.updated_loops] == [(portfolio.id, date(2026, 10, 5))]

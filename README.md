@@ -71,6 +71,7 @@ Every loop goes through five steps:
 - **Email.** Give Troth someone's address (*"Sarah's email is sarah@nvidia.com"*) and it reads new mail from them, and only them, every 10 minutes. A reply that answers your loop closes it, a new deadline becomes a task, and a meeting time becomes a calendar proposal. [Setup](#google-setup-optional).
 - **Web.** Say *"keep an eye on the hackathon results"* and Troth searches for it once a day with Tavily. Ask *"when does the Google STEP application close?"* and it looks it up, with the link. What the web says is only ever a proposal.
 - **Your yes first.** Calendar events, Gmail drafts (*"draft a thank-you reply to Sarah"*) and web findings wait under **Pending actions**, or on Telegram, until you approve. Nothing is ever sent. If one fails (say Google was disconnected), it stays there with **Try again**.
+- **Edit.** Fix a loop's title, kind, person, date or next action from its panel. The old values stay in History, with Undo.
 - **Undo.** Each loop's History shows what changed it (you, chat, email or the web) and the words behind it, with Undo on automatic changes.
 - **Only what was written.** Each loop and change keeps the words that state it, checked to really be in your message or the email. An email change Troth can't quote from the email isn't made. Emails and web pages reach the model marked as someone else's words, never instructions.
 
@@ -218,7 +219,7 @@ CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) tests every push. When
 4. On the VM, create the cron jobs from **Daily briefing** and **Email and web sync** below. They stay in the Hermes profile across deploys.
 
 **Once, for CI** (on your own computer; `whoami` on the VM gives `<vm-user>`):
-1. `ssh-keygen -t ed25519 -f troth-deploy -N "" -C <vm-user>` makes a key just for deploys.
+1. `ssh-keygen -t ed25519 -f troth-deploy -N "" -C <vm-user>` makes a key just for deploys. In Windows PowerShell, leave out `-N ""` and press Enter twice instead.
 2. In the console, open the VM → Edit → SSH Keys → Add item, and paste the contents of `troth-deploy.pub`.
 3. `ssh-keyscan -t ed25519 <vm-ip>` prints the VM's host key.
 4. On GitHub, go to Settings → Secrets and variables → Actions and add `DEPLOY_HOST` (the VM's IP), `DEPLOY_USER` (`<vm-user>`), `DEPLOY_SSH_KEY` (the contents of `troth-deploy`) and `DEPLOY_KNOWN_HOSTS` (the output of step 3). Then delete the local key files.

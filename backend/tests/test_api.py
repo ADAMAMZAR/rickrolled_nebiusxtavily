@@ -234,3 +234,13 @@ def test_mcp_answers_this_machine_but_not_its_proxy(db_url: str, monkeypatch: py
         assert local.post("/mcp/", json=call, headers=HEADERS).status_code == 200
         proxied = {**HEADERS, "X-Forwarded-For": "203.0.113.9"}
         assert local.post("/mcp/", json=call, headers=proxied).status_code == 403
+
+
+def test_edit_a_loop_then_undo(client: TestClient) -> None:
+    loop_id = seed(client)[0]["id"]
+    edited = client.patch(f"/api/loops/{loop_id}", json={"title": "Hear back from Sarah", "due": None})
+    assert edited.status_code == 200 and (edited.json()["title"], edited.json()["due"]) == ("Hear back from Sarah", None)
+    [edit] = [a for a in client.get(f"/api/activity?loop_id={loop_id}").json() if a["by"] == "user"]
+    assert (edit["detail"], edit["can_undo"]) == ("edited title, due", True)
+    assert client.post(f"/api/activity/{edit['id']}/undo").json()["title"] == "Wait for Sarah's response"
+    assert client.patch(f"/api/loops/{loop_id}", json={"title": ""}).status_code == 422  # a loop needs a title

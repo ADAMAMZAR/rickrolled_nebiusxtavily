@@ -59,6 +59,8 @@ li.fresh > .row-btn .title b::after {
 .history .said { display: block; font-style: italic; overflow-wrap: anywhere; }
 .field { display: grid; gap: var(--s2); }
 .field .row { display: flex; gap: var(--s2); }
+.edit label { display: grid; gap: var(--s1); font-size: var(--fs-small); color: var(--muted); }
+.edit label :is(input, textarea, select) { color: var(--ink); font-size: var(--fs-body); }
 .actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); padding-top: var(--s4); border-top: 1px solid var(--rule); }
 .actions .apart { margin-left: auto; } /* Delete stands alone, away from Resolve */
 .actions .error-line { width: 100%; }

@@ -336,3 +336,11 @@ def test_inspect_marks_someone_elses_words_untrusted(mcp: MCP, llm: FakeLLM, db_
     engine.dispose()
     assert got["untrusted"] is True and got["quote"] == "Please send your transcript"
     assert got["text"].endswith("… (cut)") and len(got["text"]) < 1100
+
+
+def test_remember_passes_what_it_refers_to(mcp: MCP, llm: FakeLLM) -> None:
+    remember_demo(mcp, llm)
+    llm.replies.append(json.dumps(result()))
+    mcp.call("remember", text="Push it to Monday.", context="it = Finish portfolio")
+    prompt = llm.calls[-1][1]["content"]
+    assert "it = Finish portfolio" in prompt and '"summary": "Finish portfolio."' in prompt  # loops carry their summary

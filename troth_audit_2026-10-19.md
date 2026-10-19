@@ -1,6 +1,6 @@
 # Troth — Technical audit (2026-10-19)
 
-**Status:** items 1, 2, 3, 4, 7, 8 and 10 built 2026-10-19, plus the C9 proxy check (notes under each item). The rest is for review: approve items before work starts.
+**Status:** all 10 items built 2026-10-19 (item 5 as scoped in [troth_improvements.md](troth_improvements.md)), plus the C9 proxy check. Notes under each item.
 
 **How it was checked:** every backend module, the MCP tools, the Hermes config, `SOUL.md`, both skills, the scripts, the frontend and the specs and plans were read. Offline `pytest`: **263 passed**, 24 live tests skipped. Two probes ran on throwaway databases (results in §4, C1 and C2). **Not run:** the live tests (they cost money), Hermes and Telegram, and the UI in a browser.
 
@@ -229,6 +229,7 @@ Two limits:
 - **Fix:** `PATCH /api/loops/{id}` (title, due, kind, person, goal), logged with undo, plus an edit form in the loop detail.
 - **Files:** engine, main, Ledger.
 - **Verify:** API tests, then a check in the browser.
+- *Done 2026-10-19: `engine.edit_loop` + `PATCH /api/loops/{id}` for title, summary, kind, person (`waiting_on`, which relinks the Person), due and next action; only the fields sent change. It's the one user change logged with undo ("edited title, due"). The loop panel has **Edit**. Goal isn't editable yet. Tests: `test_an_edit_can_be_undone`, `test_an_edit_can_make_a_task_a_promise_to_someone`, `test_edit_a_loop_then_undo`. Not checked in a browser (no browser on the dev PC this session): the form type-checks and builds.*
 
 **7. CSRF guard**
 - **Problem:** C5.
@@ -251,6 +252,7 @@ Two limits:
   - Add `summary` and the last-update date to each loop the model sees.
 - **Files:** mcp_tools, engine, SOUL.
 - **Verify:** a live 3-turn coreference test.
+- *Done 2026-10-19: `remember(text, context)`; `context` reaches the prompt as an "Earlier in the chat" line, and quotes still come from the message only. Each loop shown to the model carries its summary and last-update day. Rule 10: without context, change a loop only if exactly one fits. Live, three open loops, extraction only, 6 runs each: "push it to Monday" with context 6/6 on the right loop, "she said yes" 6/6, "move that to Friday" 6/6, a context that slips in "also buy milk" 6/6 with no new loop; "push it to Monday" without context changed nothing 5/6 (once it moved Sarah's loop). `test_it_lands_on_the_loop_the_chat_names` 3/3. Full live suite 41 of 42 in 3 runs (the known story flake). Hermes passing `context` isn't checked live yet (Hermes runs only on the VM).*
 
 **10. Untrusted-text hygiene**
 - **Problem:** C7.
