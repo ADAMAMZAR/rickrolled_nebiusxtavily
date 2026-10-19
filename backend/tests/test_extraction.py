@@ -2,7 +2,7 @@ from datetime import date
 
 import pytest
 
-from app.extraction import ExtractionError, extract
+from app.extraction import ExtractionError, build_messages, extract
 from tests.conftest import NOW, FakeLLM
 
 VALID = {
@@ -52,3 +52,15 @@ def test_bad_kind_twice_fails() -> None:
     bad = {**VALID, "new_loops": [{**VALID["new_loops"][0], "kind": "deadline"}]}
     with pytest.raises(ExtractionError):
         extract(FakeLLM(bad, bad), "msg", NOW, goals=[], loops=[])
+
+
+def test_prompt_has_a_calendar_so_weekdays_are_looked_up() -> None:
+    """The model used to get "Monday" wrong when it counted days itself."""
+    prompt = build_messages("Call Sarah on Friday.", NOW, [], [])[1]["content"]
+    assert "Calendar: Tue 2026-09-29 (today), Wed 2026-09-30, Thu 2026-10-01, Fri 2026-10-02, Sat 2026-10-03," in prompt
+    assert prompt.count("2026-") == 15 + 1  # two weeks ahead, plus the current date line
+
+
+def test_a_bad_link_is_dropped_not_fatal() -> None:
+    reply = {**VALID, "links": [{"loop": "Send application", "needs": "Get letter"}, {"loop": "only one end"}, "x"]}
+    assert [(l.loop, l.needs) for l in extract(FakeLLM(reply), "msg", NOW, [], []).links] == [("Send application", "Get letter")]

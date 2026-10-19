@@ -53,13 +53,14 @@ Every loop goes through five steps:
 
 1. Tell it: *"I'm applying for an NVIDIA internship. Sarah said she'll get back to me next Friday. I also need to finish my portfolio."*
 2. It saves the goal **Secure NVIDIA internship** with 2 loops: **Wait for Sarah's response** (due Fri) and **Finish portfolio**.
-3. The dashboard groups loops under goals and shows due dates, with overdue items in red. Click a loop to see **the exact sentence it came from**.
+3. The dashboard splits loops into **Owed to you** and **You owe**, each with its goal and due date, overdue items in red. Click a loop to see **the exact sentence it came from**.
 4. Restart everything, then ask *"What am I waiting on?"* and it answers from its database.
 5. Say *"Sarah got back to me!"* or click **Resolve**, and the loop closes. When the whole goal is finished, click **Mark goal done**.
 
 ### Before things slip
 
 - **Needs attention.** The top of the dashboard lists what's overdue, due today or tomorrow, or hasn't been touched for 4 days (`STALE_DAYS`). Plain rules, no LLM, so it's instant and predictable. Ask *"What's urgent?"* in chat for the same list.
+- **What it depends on.** Say *"I promised Sarah my NVIDIA application by Friday, but I can only send it once Dr. Lim sends my reference letter"* and Troth links the two. If Dr. Lim's letter slips past Friday (say his email moves it to next week), the application moves to the top of Needs attention with the reason and options worked out in code: *at risk: "Get reference letter from Dr. Lim" is due Wed Oct 28, after this. Options: Ask Dr. Lim if Thu Oct 22 works · Tell Sarah early and offer Wed Oct 28 · Move your date.* The sync job posts the same line to Telegram, and *Ready* once the letter arrives. Links come only from what you say, never from a shared topic. Ask *"what's blocking the application?"* to see them.
 - **Snooze.** Hide a loop until Tomorrow, In 3 days, Next Monday or any date, from the dashboard or in chat (*"snooze the portfolio till Monday"*). It comes back on that day.
 - **Drafts.** Click **Draft** (or ask *"draft a follow-up to Sarah"*) and Troth writes a short message for you to copy. It never sends anything.
 - **Telegram.** The same assistant on your phone: capture loops on the go, ask what's urgent. [Setup](#telegram-optional).
@@ -69,8 +70,8 @@ Every loop goes through five steps:
 
 - **Email.** Give Troth someone's address (*"Sarah's email is sarah@nvidia.com"*) and it reads new mail from them, and only them, every 10 minutes. A reply that answers your loop closes it, a new deadline becomes a task, and a meeting time becomes a calendar proposal. [Setup](#google-setup-optional).
 - **Web.** Say *"keep an eye on the hackathon results"* and Troth searches for it once a day with Tavily. Ask *"when does the Google STEP application close?"* and it looks it up, with the link. What the web says is only ever a proposal.
-- **Your yes first.** Calendar events, Gmail drafts (*"draft a thank-you reply to Sarah"*) and web findings wait under **Pending actions**, or on Telegram, until you approve. Nothing is ever sent.
-- **Undo.** Each loop's History shows what changed it (you, chat, email or the web), with Undo on automatic changes.
+- **Your yes first.** Calendar events, Gmail drafts (*"draft a thank-you reply to Sarah"*) and web findings wait under **Pending actions**, or on Telegram, until you approve. Nothing is ever sent. If one fails (say Google was disconnected), it stays there with **Try again**.
+- **Undo.** Each loop's History shows what changed it (you, chat, email or the web) and the words you said, with Undo on automatic changes.
 
 ### Check before you pay (ScamGraph)
 
@@ -199,7 +200,29 @@ To try the UI without an LLM, fill a scratch database with sample data: set `DAT
 
 ### Running on a server
 
-Set `APP_PASSWORD` in `.env`: every page and `/api` then asks for it (any username), and `/mcp` only answers the same machine, where Hermes runs. Set `PUBLIC_URL` to the address people open, so chat links point there. Use a fresh `DATABASE_URL`, and leave Google off: its sign-in only works on your own computer.
+Set `APP_PASSWORD` in `.env`: every page and `/api` then asks for it (any username), and `/mcp` only answers the same machine, where Hermes runs. Changes through `/api` also need the header `X-Troth: 1`, which Troth's pages send, so another website can't make changes in your name. Set `PUBLIC_URL` to the address people open, so chat links point there. Use a fresh `DATABASE_URL`, and leave Google off: its sign-in only works on your own computer.
+
+### Deploy to GCP Compute Engine
+
+CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) tests every push. When `main` passes, it deploys that commit to the VM over SSH: it updates the code, installs the dependencies, re-runs `setup_hermes.py`, then restarts Troth and Hermes. Your `.env` and database on the VM stay as they are. To redeploy by hand: Actions → CI → Run workflow.
+
+**Once, on the VM:**
+1. Create a VM: Debian 12, e2-small or larger, with **Allow HTTP traffic** and **Allow HTTPS traffic** ticked. Make its external IP static (VPC network → IP addresses → Promote to static).
+2. Use **SSH** in the console, then:
+   ```bash
+   git clone https://github.com/ADAMAMZAR/rickrolled_nebiusxtavily.git ~/troth
+   cd ~/troth/backend && cp .env.example .env   # set NEBIUS_API_KEY, APP_PASSWORD, Telegram, Tavily
+   ```
+3. Install [Hermes](https://hermes-agent.nousresearch.com), then run `bash ~/troth/backend/scripts/setup_server.sh`. It installs Troth, sets up Hermes, starts both as services and puts Caddy in front for HTTPS. The address is `https://<ip-with-dashes>.sslip.io`, or your own domain if you run it with `TROTH_DOMAIN=troth.example.com` and point the domain at the VM. It sets `PUBLIC_URL` in `.env` to match.
+4. On the VM, create the cron jobs from **Daily briefing** and **Email and web sync** below. They stay in the Hermes profile across deploys.
+
+**Once, for CI** (on your own computer; `whoami` on the VM gives `<vm-user>`):
+1. `ssh-keygen -t ed25519 -f troth-deploy -N "" -C <vm-user>` makes a key just for deploys.
+2. In the console, open the VM → Edit → SSH Keys → Add item, and paste the contents of `troth-deploy.pub`.
+3. `ssh-keyscan -t ed25519 <vm-ip>` prints the VM's host key.
+4. On GitHub, go to Settings → Secrets and variables → Actions and add `DEPLOY_HOST` (the VM's IP), `DEPLOY_USER` (`<vm-user>`), `DEPLOY_SSH_KEY` (the contents of `troth-deploy`) and `DEPLOY_KNOWN_HOSTS` (the output of step 3). Then delete the local key files.
+
+A deploy doesn't change the database schema. If a change needs a new one, delete the `.db` file on the VM (or reset the Postgres database), then redeploy.
 
 ### Telegram (optional)
 
@@ -267,7 +290,7 @@ The live suite runs the acceptance inputs against real Nemotron, e.g. "Alex said
 - Everything stays local in `backend/data/continuum.db` (SQLite). What leaves your machine: text sent to Nebius for Nemotron to do its job; your Telegram messages if you turn Telegram on (they pass through Telegram's servers); with a Tavily key, only your watch searches and lookup questions go to Tavily, never your messages. Only the names of people you wait on go to the model, not their email addresses.
 - **Email** (if you connect Google): only mail *from* people you gave an address for, and only while they have an open loop. Troth never lists or searches the rest of your inbox. Each email's subject and new text (quotes and signature removed, at most 4,000 characters) go to Nemotron. The text is stored only if it changed a loop. Attachments are never downloaded. **Forget email data** in Settings deletes all stored email text; loops made from it stay, marked "source deleted".
 - **ScamGraph**: the message, screenshot and page text go to Nebius. Names, websites, phone numbers and the submitted link go to Tavily as searches. Screenshots are saved in `backend/data/uploads/` (gitignored, never served). A risky check's message is also kept as its loop's source. Logs hold ids, counts and step names, never the message, quotes or searches.
-- Every loop links to the message it came from, and you can delete any loop.
+- Every loop links to the message it came from. Deleting a loop deletes those words too, unless another loop still uses them (an email keeps only its Gmail id, so sync doesn't read it again). A message check can be deleted on its page, with its screenshot.
 - Troth never sends anything on your behalf. Drafts are text for you to copy, or Gmail drafts you send yourself.
 - Messages that change nothing (questions, small talk) aren't stored by Troth. Hermes keeps its own chat history in its `continuum` profile folder.
 - Logs record event names, counts and ids (`extraction_ok`, `loop_created`, `loop_resolved`, `email_synced`), never message content, email subjects or API keys.
@@ -276,7 +299,7 @@ The live suite runs the acceptance inputs against real Nemotron, e.g. "Alex said
 
 - **One user.** Without `APP_PASSWORD`, run it on your own machine only.
 - **ScamGraph is a heuristic.** Signal weights are plain rules, not probabilities. Finding a company's official website depends on Nemotron reading the right page, about 2 runs in 3 for a clone of a foreign company; without it the identity stays "not verified". Malaysian regulators only (SC, Bank Negara). A check takes 1-2 minutes.
-- **Extraction is an LLM's judgment.** It can miss an item or misread a date. "Before Friday" may come back as Thursday or Friday. Every loop shows its source text so you can check it, and wrong loops can be deleted.
+- **Extraction is an LLM's judgment.** It can miss an item or misread a date. The prompt lists the next two weeks, so the model looks weekdays up instead of counting (10 of 10 weekday phrases right in a live run, 2026-10-19), and snooze days like "monday" are worked out in code. Every loop shows its source text so you can check it, and wrong loops can be deleted.
 - **`next_action` is usually empty**, because the model is told never to invent anything the message doesn't state.
 - **Dedup is exact-match** on normalized title + person, plus giving the model the existing loops. Reworded duplicates can slip through.
 - **Hermes' standalone gateway** (`gateway.standalone: true`) is a shim Hermes marks as temporary. `hermes/config.example.yaml` describes the fallback.

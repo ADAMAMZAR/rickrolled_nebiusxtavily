@@ -33,7 +33,7 @@ export function App() {
         setLoops(found); setLoopsError(null);
       }, (e) => setLoopsError(failed(e))),
       api<Item[]>("/api/attention").then((a) => { setAttention(a); setAttentionError(null); }, (e) => setAttentionError(failed(e))),
-      api<PendingAction[]>("/api/actions").then((a) => { setActions(a); setActionsError(null); }, (e) => setActionsError(failed(e))),
+      api<PendingAction[]>("/api/actions?status=waiting").then((a) => { setActions(a); setActionsError(null); }, (e) => setActionsError(failed(e))),
     ]);
     setVersion((v) => v + 1);
   }, [showResolved, showSnoozed]);

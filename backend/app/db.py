@@ -104,6 +104,16 @@ class OpenLoop(SQLModel, table=True):
     resolved_at: datetime | None = None
 
 
+class Dependency(SQLModel, table=True):
+    """`loop_id` can't be finished before `needs_id`. Only links someone stated, in a message or an email."""
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    loop_id: UUID = Field(foreign_key="openloop.id", index=True)
+    needs_id: UUID = Field(foreign_key="openloop.id", index=True)
+    source_id: UUID | None = Field(default=None, foreign_key="source.id")
+    created_at: datetime = Field(default_factory=utcnow)
+
+
 class Activity(SQLModel, table=True):
     """What changed a loop, and how to undo it."""
 
@@ -113,6 +123,7 @@ class Activity(SQLModel, table=True):
     by: ActivityBy
     detail: str = ""
     undo: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))  # previous values; None = can't undo
+    source_id: UUID | None = Field(default=None, foreign_key="source.id", index=True)  # the words behind the change
     created_at: datetime = Field(default_factory=utcnow)
 
 
@@ -125,6 +136,7 @@ class PendingAction(SQLModel, table=True):
     payload: dict[str, Any] = Field(sa_column=Column(JSON, nullable=False))
     status: ActionStatus = Field(default=ActionStatus.proposed, index=True)
     external_id: str | None = None  # created draft/event id
+    error: str | None = None  # why the last try failed; approving again retries
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
 

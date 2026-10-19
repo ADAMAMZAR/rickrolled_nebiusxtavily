@@ -11,6 +11,8 @@ Hackathon: Nebius x NVIDIA, Personal AI track. **Hermes Agent + NVIDIA Nemotron 
 - [continuum_phase_3.md](continuum_phase_3.md): Connected: web watch + lookup (Tavily), Gmail/Calendar, auto-resolve from email, approval-gated actions *(done 2026-10-09)*
 - [continuum_phase_4.md](continuum_phase_4.md): ScamGraph: investigate a suspicious message/URL/screenshot with Tavily evidence, fixed-rule risk score, evidence graph **← current phase** *(code done 2026-10-08; Telegram check, deploy and demo boxes run separately under issue #4)*
   - Addendum [continuum_personal_ai_plan.md](continuum_personal_ai_plan.md): one Personal AI, not two apps. Risky checks become loops, loops can be checked, `/check` and `/briefing` skills. *(P0–P2 built 2026-10-10; P3 deploy is issue #4, P4 after the video)*
+  - Addendum [troth_improvements.md](troth_improvements.md): loops that depend on other loops; an upstream slip flags the promise "at risk" with options built in code. *(C1–C3 + a "Needs" line built 2026-10-19; Telegram/Hermes live check pending)*
+  - Audit [troth_audit_2026-10-19.md](troth_audit_2026-10-19.md): findings and ranked fixes. *(items 1, 2, 3, 7, 8 built 2026-10-19)*
 
 Start a phase only after every box in the previous phase's Done Checklist is checked. When a phase is finished, move the "current phase" marker.
 
@@ -22,6 +24,7 @@ Start a phase only after every box in the previous phase's Done Checklist is che
 ## Architecture (short)
 - Layout: `backend/` holds the Python app (`app/`, `scripts/`, `tests/`, `hermes/`, `data/`, `.env`); `frontend/` holds the UI; the docs stay at the root. Paths below are relative to `backend/` unless they start with `frontend/`. Run every Python, pytest and setup command from `backend/`.
 - `app/engine.py` owns all domain logic. FastAPI routes and MCP tools are thin wrappers around it.
+- `/api` requests that change something need the header `X-Troth: 1` (CSRF guard in `app/main.py`). The frontend's `api()` and `startCheck` send it; test clients set it.
 - UI: React + Vite in `frontend/` (dashboard and message check), built into `backend/app/static/`. That folder is committed build output: never edit it by hand, rebuild it. Visual rules: PRODUCT.md, DESIGN.md, `.impeccable/surfaces/`. Untrusted text renders as React text; only http(s) links become clickable (`safeHref`).
 - Hermes = chat brain. It calls Troth through MCP tools at `/mcp`. The UI chat proxies to the Hermes API server.
 - All LLM prompts live in `app/extraction.py`. All LLM calls go through `app/llm.py`.
@@ -58,3 +61,4 @@ cd ../frontend && npm install && npm run build   # after any UI change: type-che
 - No DB migrations: `create_all` builds the schema. After a schema change, delete the old `.db` file.
 - Windows dev machine: keep commands cross-platform or give both variants.
 - Before saying something is done: run `pytest` and, for LLM/Hermes changes, check the real path.
+- CI (`.github/workflows/ci.yml`) runs on every PR and push to `main`: offline `pytest` on Python 3.11 and 3.14, and the UI build, which fails if the committed `backend/app/static` is stale. When both pass on `main`, it deploys to the GCP Compute Engine VM over SSH (`scripts/setup_server.sh` sets the VM up once; README has the steps).

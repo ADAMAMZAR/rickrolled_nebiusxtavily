@@ -17,13 +17,13 @@ from urllib.parse import urlparse
 from uuid import UUID
 
 from sqlalchemy import Engine
-from sqlmodel import Session, col, select
+from sqlmodel import Session, col, delete, select
 
 from app.config import settings
 from app.connectors.tavily import TavilyClient, TavilyError, WebResult
 from app.db import (
     Claim, ClaimCategory, Confidence, Direction, Entity, EntityType, Evidence, Identity, Investigation,
-    InvestigationStatus, OpenLoop, RiskLevel, RiskSignal, Tier, Verdict, utcnow,
+    InvestigationStatus, OpenLoop, RiskLevel, RiskSignal, Source, Tier, Verdict, utcnow,
 )
 from app.engine import RISKY, InvalidRequest, NotFound, track_check
 from app.extraction import (
@@ -158,6 +158,39 @@ def get_investigation(session: Session, investigation_id: UUID) -> Investigation
 def list_investigations(session: Session, limit: int = 50) -> list[Investigation]:
     query = select(Investigation).order_by(col(Investigation.created_at).desc()).limit(limit)
     return list(session.exec(query).all())
+
+
+def delete_investigation(session: Session, investigation_id: UUID) -> None:
+    """Delete a check with everything it found and its screenshot. A loop it made stays, with its own copy of the
+    message, but loses the risk flag."""
+    investigation = session.get(Investigation, investigation_id)
+    if investigation is None:
+        raise NotFound(f"Investigation {investigation_id} not found.")
+    if investigation.status == InvestigationStatus.running:
+        raise InvalidRequest("Wait for the check to finish, then delete it.")
+    for model in (RiskSignal, Evidence, Claim, Entity):  # signals point to evidence, evidence to claims and entities
+        session.exec(delete(model).where(col(model.investigation_id) == investigation_id))
+    page = f"/investigate.html#{investigation_id}"
+    for source in session.exec(select(Source).where(Source.url == page)).all():  # its loop's "See the check" link
+        source.url = None
+    session.delete(investigation)
+    session.commit()
+    if investigation.screenshot_path:
+        Path(investigation.screenshot_path).unlink(missing_ok=True)
+    log.info("investigation_deleted id=%s", investigation_id)
+
+
+def fail_interrupted(session: Session) -> int:
+    """Checks still running when Troth starts were cut off by a restart: mark them failed, so their page and
+    chat stop waiting. Returns how many."""
+    stuck = session.exec(select(Investigation).where(Investigation.status == InvestigationStatus.running)).all()
+    for investigation in stuck:
+        investigation.status, investigation.error = InvestigationStatus.failed, "Troth restarted during the check."
+        add_step(investigation, f"Stopped: {investigation.error}")
+    session.commit()
+    if stuck:
+        log.warning("investigations_interrupted count=%d", len(stuck))
+    return len(stuck)
 
 
 # --- pipeline (spec §6) ---

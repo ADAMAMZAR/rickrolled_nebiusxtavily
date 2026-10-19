@@ -22,7 +22,7 @@ from app import investigation as inv
 from app.config import settings
 from app.connectors.google import GoogleClient
 from app.connectors.tavily import TavilyClient, TavilyError
-from app.db import ActivityBy, Goal, InvestigationStatus, LoopStatus, OpenLoop, Person
+from app.db import ActivityBy, Goal, InvestigationStatus, LoopKind, LoopStatus, OpenLoop, Person
 from app.extraction import Completer, ExtractionError
 from app.llm import LLMError
 
@@ -50,7 +50,10 @@ def build_mcp(
         waiting on. Also updates or closes existing loops the message is about (e.g. "Sarah replied").
         Pass the user's message word for word.
         If the result has `ask_user`, end your reply with that question. On yes, call `investigate` with the
-        user's message and `check_loop_id` as loop_id."""
+        user's message and `check_loop_id` as loop_id.
+        `at_risk`: loops that something they need now puts at risk, each with its reason and options. Tell the user
+        each one and its options; draft or propose only after they pick one. `ready`: loops whose last needed
+        thing just closed."""
         with session() as s:
             try:
                 changes = eng.process_message(s, get_llm(), text)
@@ -62,6 +65,9 @@ def build_mcp(
                 "new_loops": [_loop(s, loop) for loop in changes.created_loops],
                 "updated_loops": [_loop(s, loop) for loop in changes.updated_loops],
                 "resolved_loops": [loop.title for loop in changes.resolved_loops],
+                **({"linked": [f'"{a.title}" needs "{b.title}"' for a, b in changes.linked]} if changes.linked else {}),
+                **({"at_risk": [_risk(r) for r in changes.at_risk]} if changes.at_risk else {}),
+                **({"ready": [loop.title for loop in changes.ready]} if changes.ready else {}),
                 **({"ask_user": "Want me to check who's asking first?", "check_loop_id": str(money.id)} if money else {}),
             }
 
@@ -86,26 +92,25 @@ def build_mcp(
 
     @mcp.tool()
     def needs_attention() -> dict[str, Any]:
-        """What needs the user today: overdue, due today or tomorrow, or no update for days, most urgent first.
-        Use for "what's urgent?", "what should I do today?" and the daily briefing.
+        """What needs the user today: overdue, at risk because something it needs slipped, due today or tomorrow,
+        or no update for days, most urgent first. Items at risk carry `options`: offer them, act only on the one
+        the user picks. Use for "what's urgent?", "what should I do today?" and the daily briefing.
         For "what am I waiting on?" or "show everything", use list_open_loops."""
         with session() as s:
             today = eng.local_now().date()
             return {
                 "today": f"{today:%a %Y-%m-%d}",
-                "items": [{**_loop(s, a.loop), "reason": a.reason} for a in eng.needs_attention(s, today)],
+                "items": [_clean({**_loop(s, a.loop), "reason": a.reason, "options": a.options or None})
+                          for a in eng.needs_attention(s, today)],
             }
 
     @mcp.tool()
     def snooze_loop(loop_id: str, until: str) -> dict[str, Any]:
-        """Hide one open loop until a date; it comes back on that date. `until` is YYYY-MM-DD and must be
-        after today. Work out dates like "Monday" from `today` in list_open_loops or needs_attention.
-        Get the id from those tools."""
-        try:
-            day = date.fromisoformat(until)
-        except ValueError as e:
-            raise ToolError(f"`until` must be a date like 2026-10-05, not {until!r}.") from e
+        """Hide one open loop until a day; it comes back on that day. `until` is the day as the user said it:
+        "tomorrow", a weekday like "monday" (the next one after today), or YYYY-MM-DD. Don't work out weekday
+        dates yourself: pass the weekday. Get the id from list_open_loops or needs_attention."""
         with session() as s:
+            day = eng.parse_day(until, eng.local_now().date())
             loop = eng.snooze_loop(s, _uuid(loop_id), day, by=ActivityBy.chat)
             return {"snoozed": loop.title, "until": f"{day:%a %Y-%m-%d}"}
 
@@ -122,13 +127,17 @@ def build_mcp(
 
     @mcp.tool()
     def inspect_loop(loop_id: str) -> dict[str, Any]:
-        """Everything about one loop, including the user's original words it came from.
-        Use for details or "why do you know this?". Get the id from list_open_loops."""
+        """Everything about one loop, including the user's original words it came from, what it needs first
+        (`needs`) and what needs it (`needed_by`). Use for details, "why do you know this?" or "what's blocking X?".
+        Get the id from list_open_loops."""
         with session() as s:
             detail = eng.get_loop(s, _uuid(loop_id))
             loop = detail.loop
             person = s.get(Person, loop.person_id) if loop.person_id else None
+            needs, needed_by = eng.loop_links(s, loop.id)
             return {
+                **({"needs": [_link(l) for l in needs]} if needs else {}),
+                **({"needed_by": [_link(l) for l in needed_by]} if needed_by else {}),
                 **_loop(s, loop),
                 **_clean({"contact_email": person.email if person else None}),
                 "summary": loop.summary,
@@ -151,14 +160,18 @@ def build_mcp(
     @mcp.tool()
     def list_pending_actions() -> dict[str, Any]:
         """Things Troth proposed that wait for the user's yes or no, e.g. "Resolve X? Found on the web".
-        Use it to find the one the user is answering before approve_action or reject_action."""
+        Use it to find the one the user is answering before approve_action or reject_action.
+        One with `failed` was approved but didn't work (the reason is given): approving it again retries."""
         with session() as s:
-            return {"actions": [{"id": str(a.id), "summary": eng.describe_action(s, a)} for a in eng.list_actions(s)]}
+            return {"actions": [
+                _clean({"id": str(a.id), "summary": eng.describe_action(s, a), "failed": a.error})
+                for a in eng.list_actions(s, eng.WAITING)
+            ]}
 
     @mcp.tool()
     def approve_action(action_id: str) -> dict[str, Any]:
-        """Do one proposed action. Only after the user clearly said yes to that specific action.
-        Get the id from list_pending_actions."""
+        """Do one proposed action, or try a failed one again. Only after the user clearly said yes to that specific
+        action. Get the id from list_pending_actions."""
         with session() as s:
             action = eng.approve_action(s, _uuid(action_id, "action", "list_pending_actions"), get_google)
             return {"done": eng.describe_action(s, action)}
@@ -338,15 +351,26 @@ def _goal_title(session: Session, loop: OpenLoop) -> str | None:
     return goal.title if goal else None
 
 
+def _risk(risk: eng.Risk) -> dict[str, Any]:
+    return {"title": risk.loop.title, "reason": risk.reason, "options": risk.options}
+
+
+def _link(loop: OpenLoop) -> dict[str, Any]:
+    return _clean({"title": loop.title, "due": f"{loop.due:%a %Y-%m-%d}" if loop.due else None,
+                   "status": loop.status.value})
+
+
 def _loop(session: Session, loop: OpenLoop, with_goal: bool = True) -> dict[str, Any]:
     snoozed = loop.snoozed_until and loop.snoozed_until > eng.local_now().date()
+    promise = loop.kind == LoopKind.commitment
     return _clean(
         {
             "id": str(loop.id),
             "title": loop.title,
             "status": loop.status.value if loop.status != LoopStatus.open else None,
             "kind": loop.kind.value,
-            "waiting_on": loop.waiting_on,
+            "waiting_on": None if promise else loop.waiting_on,
+            "promised_to": loop.waiting_on if promise else None,
             "due": f"{loop.due:%a %Y-%m-%d}" if loop.due else None,
             "next_action": loop.next_action,
             "goal": _goal_title(session, loop) if with_goal else None,

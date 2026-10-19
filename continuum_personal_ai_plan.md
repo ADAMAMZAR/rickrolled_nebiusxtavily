@@ -144,7 +144,7 @@ Each tier works on its own, so you can stop at any tier. No schema change: `Inve
 
 ### P3 Always on ([issue #4](https://github.com/ADAMAMZAR/rickrolled_nebiusxtavily/issues/4), Phase 4 §11)
 
-11. Run Troth on an Oracle Cloud Free Tier VM (decision 2026-10-13: dropped the Nebius VM, no cost reason to keep it): uvicorn and `hermes -p continuum gateway run` as services, Telegram on, the briefing and sync cron jobs, `APP_PASSWORD`, `PUBLIC_URL`, a fresh DB (Neon Postgres) and Google off. Then remove the README limit "only work while Hermes' gateway is running on your machine".
+11. Run Troth on a GCP Compute Engine VM (decision 2026-10-13: dropped the Nebius VM; 2026-10-19: GCP instead of Oracle Cloud, deployed by CI, see README): uvicorn and `hermes -p continuum gateway run` as services, Telegram on, the briefing and sync cron jobs, `APP_PASSWORD`, `PUBLIC_URL`, a fresh DB (Neon Postgres) and Google off. Then remove the README limit "only work while Hermes' gateway is running on your machine".
 
 ### P4 Stretch: Hermes inside OpenShell (only after the video)
 

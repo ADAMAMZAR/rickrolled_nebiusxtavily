@@ -135,7 +135,7 @@ def web() -> FakeWeb:
 @pytest.fixture
 def client(db_url: str, uploads: Path, llm: ScamLLM, web: FakeWeb) -> Iterator[TestClient]:
     app = create_app(db_url, get_llm=lambda: llm, get_web=lambda: web)  # type: ignore[arg-type, return-value]
-    with TestClient(app, base_url="http://127.0.0.1:8000") as http:
+    with TestClient(app, base_url="http://127.0.0.1:8000", headers={"X-Troth": "1"}) as http:
         yield http
 
 
@@ -159,9 +159,9 @@ def test_list_newest_first(client: TestClient) -> None:
 def test_persists_across_restart(db_url: str, uploads: Path) -> None:
     """H0 gate: an investigation survives an app restart."""
     app = lambda: create_app(db_url, get_llm=lambda: ScamLLM(EMPTY), get_web=FakeWeb)  # type: ignore[arg-type, return-value]
-    with TestClient(app()) as http:
+    with TestClient(app(), headers={"X-Troth": "1"}) as http:
         made = http.post("/api/investigations", data={"text": MESSAGE}).json()["id"]
-    with TestClient(app()) as http:
+    with TestClient(app(), headers={"X-Troth": "1"}) as http:
         assert http.get(f"/api/investigations/{made}").json()["input_text"] == MESSAGE
 
 
@@ -306,7 +306,7 @@ def test_nebius_error_fails_clearly(client: TestClient, llm: ScamLLM) -> None:
 
 def test_missing_key_fails_clearly(db_url: str, uploads: Path) -> None:
     """The real factory with no NEBIUS_API_KEY (blanked for offline tests)."""
-    with TestClient(create_app(db_url)) as http:
+    with TestClient(create_app(db_url), headers={"X-Troth": "1"}) as http:
         made = http.post("/api/investigations", data={"text": MESSAGE}).json()["id"]
         got = http.get(f"/api/investigations/{made}").json()
     assert got["status"] == "failed" and "NEBIUS_API_KEY" in got["error"]
@@ -572,7 +572,7 @@ def test_no_web_key_skips_research(db_url: str, uploads: Path) -> None:
         raise TavilyError("Web lookup isn't set up. Add TAVILY_API_KEY to .env (free key at tavily.com).")
 
     app = create_app(db_url, get_llm=lambda: ScamLLM(EXTRACTION), get_web=no_web)  # type: ignore[arg-type, return-value]
-    with TestClient(app) as http:
+    with TestClient(app, headers={"X-Troth": "1"}) as http:
         made = http.post("/api/investigations", data={"text": MESSAGE}).json()["id"]
         got = http.get(f"/api/investigations/{made}").json()
     assert got["status"] == "done" and got["evidence"] == []
@@ -724,7 +724,7 @@ def test_investigate_tool_answers_with_findings_and_links(
     from tests.test_mcp_tools import MCP
 
     app = create_app(db_url, get_llm=lambda: llm, get_web=lambda: researched)  # type: ignore[arg-type, return-value]
-    with TestClient(app, base_url="http://127.0.0.1:8000") as http:
+    with TestClient(app, base_url="http://127.0.0.1:8000", headers={"X-Troth": "1"}) as http:
         mcp = MCP(http)
         mcp.rpc("initialize", {"protocolVersion": "2025-06-18", "capabilities": {},
                                "clientInfo": {"name": "test", "version": "0"}})
@@ -745,7 +745,7 @@ def test_investigate_tool_still_running_gives_the_link(
 
     monkeypatch.setattr(mcp_tools, "INVESTIGATE_WAIT", 0)
     app = create_app(db_url, get_llm=lambda: llm, get_web=lambda: researched)  # type: ignore[arg-type, return-value]
-    with TestClient(app, base_url="http://127.0.0.1:8000") as http:
+    with TestClient(app, base_url="http://127.0.0.1:8000", headers={"X-Troth": "1"}) as http:
         mcp = MCP(http)
         mcp.rpc("initialize", {"protocolVersion": "2025-06-18", "capabilities": {},
                                "clientInfo": {"name": "test", "version": "0"}})
@@ -765,3 +765,41 @@ def test_app_password(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> No
     assert client.get("/api/investigations", auth=("anyone", "wrong")).status_code == 401
     assert client.get("/api/investigations", auth=("anyone", "s3cret")).status_code == 200
     assert client.post("/mcp/", json={}).status_code == 403  # TestClient isn't this machine's loopback
+
+
+# --- deleting checks, restarts ---
+
+
+def test_deleting_a_checked_loop_keeps_the_check(client: TestClient, researched: FakeWeb) -> None:
+    """Foreign keys are on in tests, as on Postgres, where this delete used to fail."""
+    got = investigate(client, text=MESSAGE)
+    assert client.delete(f"/api/loops/{got['loop_id']}").status_code == 204
+    after = client.get(f"/api/investigations/{got['id']}").json()
+    assert (after["loop_id"], after["risk_level"]) == (None, "CRITICAL")
+
+
+def test_deleting_a_check_keeps_its_loop(client: TestClient, researched: FakeWeb) -> None:
+    got = investigate(client, text=MESSAGE)
+    assert client.delete(f"/api/investigations/{got['id']}").status_code == 204
+    assert client.get(f"/api/investigations/{got['id']}").status_code == 404
+    loop = client.get(f"/api/loops/{got['loop_id']}").json()
+    assert (loop["source"]["text"], loop["source"]["url"]) == (MESSAGE, None)  # no link to a deleted check
+    assert client.get("/api/loops").json()[0]["risk_level"] is None and client.get("/api/attention").json() == []
+
+
+def test_deleting_a_check_deletes_its_screenshot(client: TestClient, uploads: Path) -> None:
+    got = investigate(client, files={"screenshot": ("shot.png", PNG, "image/png")})
+    assert client.delete(f"/api/investigations/{got['id']}").status_code == 204
+    assert not (uploads / f"{got['id']}.png").exists()
+
+
+def test_a_restart_stops_checks_left_running(session: Session, db_url: str, uploads: Path) -> None:
+    stuck = Investigation(input_text=MESSAGE)
+    session.add(stuck)
+    session.commit()
+    with pytest.raises(eng.InvalidRequest, match="Wait for the check"):
+        inv.delete_investigation(session, stuck.id)
+    with TestClient(create_app(db_url), headers={"X-Troth": "1"}) as http:
+        got = http.get(f"/api/investigations/{stuck.id}").json()
+    assert (got["status"], got["error"]) == ("failed", "Troth restarted during the check.")
+    assert got["steps"][-1]["text"] == "Stopped: Troth restarted during the check."
