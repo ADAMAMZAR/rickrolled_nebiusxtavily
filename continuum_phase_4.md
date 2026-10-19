@@ -593,7 +593,8 @@ Every milestone ends at its gate. P1 starts only after the full P0 demo works.
 - [x] Scenarios A–E land in their expected bands (`pytest -m live`)
   *Done 2026-10-08: `pytest -m live -k scam_live` 7 passed (A–E, screenshot, Hermes), incl. B's impersonation path in the graph.*
 - [ ] Real Nemotron (Nebius) and Tavily calls shown in the demo
-- [ ] Deployed URL works behind `APP_PASSWORD`, fresh DB, no personal data
+- [x] Deployed URL works behind `APP_PASSWORD`, fresh DB, no personal data
+  *2026-10-19: https://136-116-161-34.sslip.io asks for the password (401 without it), `/mcp` is blocked from outside (403), a fresh Neon Postgres DB holding one test loop. Deployed by CI (§11).*
 - [x] `pytest` passes offline
   *256 passed, 2026-10-10.*
 - [x] README + architecture diagram done; no keys, `.db`, uploads or tokens in git

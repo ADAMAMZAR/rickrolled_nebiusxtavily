@@ -40,9 +40,11 @@ Rules:
    If unsure, use null.
 4. If the message is about an existing open loop, use updated_loops or resolved. Never add it again to new_loops.
 5. Resolve a loop only when the message clearly says it is done or has arrived.
-6. Set each new loop's "goal" to a goal's exact title (an existing goal or one in your goals list) only if the message
-   mentions what that goal is about (e.g. the same company, project or event), anywhere in it, not only in the
-   loop's quote. Otherwise null, even if the user has only one goal.
+6. Set each new loop's "goal" to a goal's exact title (an existing goal or one in your goals list) when the loop
+   serves it: the message names what the goal is about (the same company, project or event) anywhere in it, or the
+   loop is a step toward a goal this same message sets (e.g. a portfolio or interview prep for the internship being
+   applied for). Otherwise null, even if the user has only one goal: something that would happen anyway (a dataset
+   from a friend, a passport renewal) has no goal.
 7. Don't repeat an existing goal in goals.
 8. Titles are short (about 2-6 words), e.g. "Wait for Sarah's response", "Finish portfolio". Summaries are one sentence.
    Goal titles start with a verb and name the outcome, e.g. "Secure NVIDIA internship", not "NVIDIA internship".
