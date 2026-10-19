@@ -76,6 +76,8 @@ jobs:
           printf '%s\n' "$KEY" > ~/.ssh/id_ed25519
           printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
           chmod 600 ~/.ssh/id_ed25519
+          # Fails on a badly pasted key. The fingerprint must match the VM's key for DEPLOY_USER.
+          ssh-keygen -lf ~/.ssh/id_ed25519
       # Runs on the VM: check out the commit CI just tested, install, refresh the Hermes profile, restart.
       - name: Deploy
         run: |
