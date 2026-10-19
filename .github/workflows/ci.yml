@@ -92,7 +92,7 @@ jobs:
           # Troth first: Hermes only picks up Troth's tools if Troth answers when Hermes starts.
           sudo systemctl restart troth
           up=""
-          for _ in $(seq 15); do
+          for _ in $(seq 60); do  # up to 2 minutes: on the small VM, Troth took ~30 s to answer
             code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8000/health || true)
             case $code in 200|401) up=1; break ;; esac
             sleep 2
