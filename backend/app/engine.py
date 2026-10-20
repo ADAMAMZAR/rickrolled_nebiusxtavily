@@ -152,10 +152,11 @@ def process_message(
                 log.info("change_dropped change=new reason=no_quote")
                 continue
             seen.add(key)
+            due = on_its_weekday(candidate.due, quote, now.date())
             words = " ".join(filter(None, (candidate.title, candidate.summary, candidate.next_action, quote)))
             if person is not None and (why := hold_reason(words)):
                 held = HeldLoop(title=candidate.title, summary=candidate.summary or candidate.title,
-                                kind=LoopKind(candidate.kind), waiting_on=candidate.waiting_on, due=candidate.due,
+                                kind=LoopKind(candidate.kind), waiting_on=candidate.waiting_on, due=due,
                                 next_action=candidate.next_action, goal=candidate.goal, quote=quote or "",
                                 source_id=source.id, source_url=link or None, sender=person.name, why=why)
                 action = PendingAction(kind=ActionKind.loop_update, payload=held.model_dump(mode="json"))
@@ -171,7 +172,7 @@ def process_message(
                 summary=candidate.summary or candidate.title,
                 kind=LoopKind(candidate.kind),
                 waiting_on=candidate.waiting_on,
-                due=candidate.due,
+                due=due,
                 next_action=candidate.next_action,
             )
             if created.kind in (LoopKind.waiting, LoopKind.commitment) and normalize(created.waiting_on or ""):
@@ -184,6 +185,8 @@ def process_message(
         for update in result.updated_loops:
             loop = known.get(update.id)
             fields = update.model_dump(exclude={"id", "quote"}, exclude_none=True)
+            if "due" in fields:
+                fields["due"] = on_its_weekday(fields["due"], _quote(update.quote, text), now.date())
             if loop is not None:  # the model often repeats current values; those aren't changes
                 fields = {name: value for name, value in fields.items() if getattr(loop, name) != value}
             if loop is None or not fields:
@@ -255,6 +258,23 @@ def process_message(
 def _quote(quote: str | None, text: str) -> str | None:
     """The model's quote, if those words really are in the text."""
     return quote if quote and appears(quote, text) else None
+
+
+DAY_NAMES = {"monday": 0, "isnin": 0, "tuesday": 1, "selasa": 1, "wednesday": 2, "rabu": 2, "thursday": 3, "khamis": 3,
+              "friday": 4, "jumaat": 4, "saturday": 5, "sabtu": 5, "sunday": 6, "ahad": 6}
+DAY_NAME = re.compile(r"\b(" + "|".join(DAY_NAMES) + r")\b", re.IGNORECASE)
+
+
+def on_its_weekday(due: date | None, quote: str | None, today: date) -> date | None:
+    """A due date on the one weekday its quote names. Nemotron sometimes lands a day late ("by Thursday" as Friday,
+    troth_eval.md §14): then the nearest day that is that weekday, after today like any weekday (prompt rule 3).
+    A date on the named weekday, a quote naming two weekdays or none, and no date at all stay as they are."""
+    named = {DAY_NAMES[w.casefold()] for w in DAY_NAME.findall(quote or "")}
+    if due is None or len(named) != 1 or due.weekday() in named:
+        return due
+    fixed = due + timedelta(days=(named.pop() - due.weekday() + 3) % 7 - 3)
+    log.info("due_moved reason=weekday")
+    return fixed if fixed > today else fixed + timedelta(days=7)
 
 
 def local_now() -> datetime:
@@ -382,14 +402,16 @@ def needs_attention(session: Session, today: date, stale_days: int | None = None
     """Open, unsnoozed loops that need the user now. Plain rules, no LLM. `today` is the user's local date.
 
     Order: loops whose latest message check found risk (oldest first), overdue (most overdue first), loops that
-    something they need puts at risk (soonest due first), due today/tomorrow, then undated loops with no update for
-    at least `stale_days` days (longest first). A dependency risk is added to an overdue or due-soon reason.
+    something they need puts at risk or that just became ready (soonest due first), due today/tomorrow, then undated
+    loops with no update for at least `stale_days` days (longest first). A dependency risk or "ready" is added to an
+    overdue or due-soon reason.
     """
     stale_days = settings.stale_days if stale_days is None else stale_days
     tz = ZoneInfo(settings.timezone)
     loops = list_loops(session, include_snoozed=False, today=today)
     risk = check_levels(session, [loop.id for loop in loops])
     needs = dependency_risks(session, today)
+    ready = ready_loops(session, today)
     found: list[tuple[int, Any, Attention]] = []  # (rule, sort key, item)
     for loop in loops:
         if risk.get(loop.id) in RISKY:
@@ -403,6 +425,9 @@ def needs_attention(session: Session, today: date, stale_days: int | None = None
             reason = f"{when}; {dep.reason}" if when else dep.reason
             rule = 1 if late is not None and late > 0 else 2
             found.append((rule, loop.due or date.max, Attention(loop, reason, dep.cause, dep.options)))
+        elif loop.id in ready:
+            reason = f"{when}; {ready[loop.id]}" if when else ready[loop.id]
+            found.append((1 if late is not None and late > 0 else 2, loop.due or date.max, Attention(loop, reason)))
         elif when is not None:
             found.append((1 if late > 0 else 3, loop.due, Attention(loop, when)))  # type: ignore[operator]
         elif loop.due is None:
@@ -490,6 +515,26 @@ def dependency_risks(session: Session, today: date) -> dict[UUID, Risk]:
         if (risk := _risk(loop, _open_upstream(loop.id, edges, loops), today)) is not None:
             found[loop.id] = risk
     return found
+
+
+READY_DAYS = 3  # how long Needs attention says a loop is ready after the last thing it needed was done
+
+
+def ready_loops(session: Session, today: date) -> dict[UUID, str]:
+    """Loops whose every need is done, the last one in the past READY_DAYS days, with the reason Needs attention
+    shows, e.g. 'ready: "Get reference letter" is done'. Chat and Telegram say it when it happens; the dashboard
+    keeps it for a few days."""
+    tz = ZoneInfo(settings.timezone)
+    out = {}
+    for loop_id, needed in _edges(session).items():
+        needs = [session.get(OpenLoop, i) for i in needed]
+        done = [n for n in needs if n is not None and n.status == LoopStatus.resolved and n.resolved_at is not None]
+        if not done or len(done) < len(needs):
+            continue
+        last = max(done, key=lambda n: n.resolved_at)  # type: ignore[arg-type, return-value]
+        if (today - last.resolved_at.astimezone(tz).date()).days <= READY_DAYS:  # type: ignore[union-attr]
+            out[loop_id] = f'ready: "{last.title}" is done'
+    return out
 
 
 def _open_upstream(loop_id: UUID, edges: dict[UUID, set[UUID]], loops: dict[UUID, OpenLoop]) -> list[tuple[OpenLoop, OpenLoop]]:
@@ -1248,7 +1293,11 @@ def set_person_email(session: Session, name: str, email: str | None) -> Person:
     email = (email or "").strip().lower() or None
     if email and not re.fullmatch(EMAIL, email):
         raise InvalidRequest(f"{email} isn't an email address.")
-    person = _find_or_add_person(session, name, {normalize(p.name): p for p in list_people(session)})
+    people = list_people(session)
+    # One address, one person: sync gives each email to one sender, so a second owner would never get it.
+    if email and (owner := next((p for p in people if p.email == email and normalize(p.name) != normalize(name)), None)):
+        raise InvalidRequest(f"{email} is already {owner.name}'s email. Clear it there first.")
+    person = _find_or_add_person(session, name, {normalize(p.name): p for p in people})
     person.email = email
     for loop in list_loops(session):
         if loop.person_id is None and loop.kind == LoopKind.waiting and normalize(loop.waiting_on or "") == normalize(name):
@@ -1352,6 +1401,25 @@ def _propose_events(session: Session, person: Person, changes: ChangeSet, now: d
         except (ValueError, InvalidRequest) as e:  # pydantic's ValidationError is a ValueError
             log.info("event_not_proposed error=%s", type(e).__name__)
     return proposed
+
+
+def run_sync(
+    session: Session, llm: Completer, get_google: Callable[[], GoogleClient] | None,
+    search: Callable[[str], list[WebResult]] | None,
+) -> list[str]:
+    """One email and web check (scripts/sync.py, AUTO_SYNC_MINUTES): what changed and what waits for a yes.
+    None skips that part (Google not connected, no Tavily key)."""
+    lines: list[str] = []
+    if get_google is not None:
+        try:
+            changed, errors = sync_email(session, llm, get_google())
+        except GoogleError as e:  # expired or revoked token
+            changed, errors = [], report_sync_errors(session, [str(e)])
+        lines += changed + errors
+    if search is not None:
+        proposals, errors = watch_the_web(session, llm, search)
+        lines += [f"{describe_action(session, a)} (yes/no)" for a in proposals] + errors
+    return lines
 
 
 def describe_email(person: Person, changes: ChangeSet) -> str:

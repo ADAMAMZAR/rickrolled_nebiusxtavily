@@ -348,3 +348,26 @@ It's `hold_reason` in `engine.py`. Everything else in the email still applies ri
 - **Not measured:** how often a real email task with a link or a payment now waits for a yes. That's the guard's cost, one tap each, and it's for E6 on labelled emails.
 - **Live email tests:** 9 of 9 over 3 runs.
 - **Files:** `data/eval/injection_train.jsonl`, `injection_test2.jsonl`; `results/20261020-1050*` and `-1104*` (train), `-1119*` and `-1126*` (test2). Sources (sha256, first 12): `bipia_text_attack_train.json` 63f95d3e67ea, `agentdojo_banking_injection_tasks.py` fa2dedf8e66c, `agentdojo_slack_injection_tasks.py` d5775da1689e, `agentdojo_travel_injection_tasks.py` 9252be834b0a.
+
+## 14. Weekday due dates (2026-10-20)
+
+**What we saw:** on a real Gmail test, "pay the RM50 deposit by Thursday" got Friday's date. Rule 3 and the 2-week calendar were already in the prompt.
+
+**The measure:** `tests/scenarios/dates.jsonl`, 30 made-up items, run 5 times each with `EVAL_ONLY=dates pytest -m eval`.
+- 21 chat and 9 email; 21 English and 9 Malay.
+- Each has a due date given as a weekday, mostly next to another day ("venue is Friday, pay by Thursday").
+- Today is a Tuesday, Thursday or Saturday, so some days wrap into next week, and "by Thursday" on a Thursday means the next one.
+- Scored by `eval_report.py dates`: the item's task, found by keyword, has the right date.
+
+| Version (30 items × 5 runs) | Right due date | Wrong runs |
+|---|---|---|
+| Before | 96% (82–99%) | 6 of 150, each one day late |
+| **Code check (kept)** | **100% (89–100%)** | 0 of 150 |
+
+- **The misses:** all 6 were a day *late*, the risky way: 3 English and 3 Malay, 3 chat and 3 email. In 5 of them, the loop's quote named exactly one weekday.
+- **The fix: `on_its_weekday` in `engine.py`.** When a new loop's or an update's quote names exactly one weekday (English or Malay) and the due date falls on another day, the date moves to the nearest day that is that weekday, after today.
+- **What it leaves alone:** a date already on the named weekday ("Thursday next week"), a quote naming two weekdays, and no date at all.
+- **Item majorities:** McNemar can't compare them, since both versions were right in most runs on all 30 items. The fix removes the minority of runs that were wrong.
+- **Caveat:** made-up items, and the fix was designed from these misses: dev numbers. The labelled real messages (E6) are the check.
+- **Live email tests:** 9 of 9 over 3 runs.
+- **Results:** `data/eval/results/20261020-1348*` (before), `-1356*` (after).

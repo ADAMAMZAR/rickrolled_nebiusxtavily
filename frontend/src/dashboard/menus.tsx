@@ -63,7 +63,11 @@ export function Settings({ onChange }: { onChange: () => void }) {
         {error && <p className="error-line">Couldn't load settings: {error}</p>}
         {status?.connected && (<>
           <p><span className="ok">Connected</span> · Last email check: {last}</p>
-          <p className="muted">Reads email only from people linked to open loops. Drafts and calendar events need your OK. Nothing is ever sent.</p>
+          {status.sync_error && <p className="error-line">Last check failed: {status.sync_error}</p>}
+          <p className="muted">
+            {status.auto_sync_minutes > 0 ? `Checks email every ${status.auto_sync_minutes} minutes while Troth runs. ` : "Checks email when scripts/sync.py runs. "}
+            Reads email only from people linked to open loops. Drafts and calendar events need your OK. Nothing is ever sent.
+          </p>
           <div><button className="btn small" type="button" disabled={!!busy} onClick={() => google("/api/google/disconnect", "Disconnecting…")}>{busy ?? "Disconnect"}</button></div>
         </>)}
         {status && !status.connected && status.set_up && (<>

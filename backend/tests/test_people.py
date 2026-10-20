@@ -47,6 +47,17 @@ def test_set_person_email(session: Session) -> None:
         eng.set_person_email(session, "  ", "a@b.co")
 
 
+def test_one_address_belongs_to_one_person(session: Session) -> None:
+    """Sync gives each email to one sender, so the same address on two people left one of them without it."""
+    demo(session)
+    eng.set_person_email(session, "Sarah", "sarah@nvidia.com")
+    with pytest.raises(eng.InvalidRequest, match="already Sarah's email"):
+        eng.set_person_email(session, "Ben", "Sarah@nvidia.com")
+    assert eng.set_person_email(session, "sarah", "sarah@nvidia.com").email == "sarah@nvidia.com"  # saving it again is fine
+    eng.set_person_email(session, "Sarah", None)
+    assert eng.set_person_email(session, "Ben", "sarah@nvidia.com").email == "sarah@nvidia.com"  # once it's free
+
+
 def test_a_new_name_creates_the_person_and_links_matching_loops(session: Session) -> None:
     """Loops saved before their person existed (or without one) get linked by their waiting_on name."""
     changes = process(session, result(new=[loop("Get dataset", "waiting", waiting_on="Alex")]), "Alex owes me the dataset.")

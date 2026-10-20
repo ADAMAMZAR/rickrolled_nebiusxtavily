@@ -185,3 +185,14 @@ def test_overdue_and_blocked_show_both_reasons(session: Session) -> None:
     assert items[due_soon.id].reason == 'due tomorrow; at risk: "L1" is due Thu Oct 8, after this'
     order = [a.loop.id for a in eng.needs_attention(session, TODAY)]
     assert order.index(late.id) < order.index(due_soon.id)
+
+
+def test_a_loop_whose_needs_are_done_shows_as_ready_for_a_few_days(session: Session) -> None:
+    """Chat and Telegram say "ready" when it happens; Needs attention keeps it for READY_DAYS, for the dashboard."""
+    closed = eng.local_now().date()  # resolve_loop stamps the real time
+    top, need = chain(session, closed + timedelta(days=60), None)
+    assert top.id not in {a.loop.id for a in eng.needs_attention(session, closed)}
+    eng.resolve_loop(session, need.id)
+    assert {a.loop.id: a.reason for a in eng.needs_attention(session, closed)}[top.id] == 'ready: "L1" is done'
+    later = closed + timedelta(days=eng.READY_DAYS + 1)
+    assert top.id not in {a.loop.id for a in eng.needs_attention(session, later)}

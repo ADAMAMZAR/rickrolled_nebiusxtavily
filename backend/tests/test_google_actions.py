@@ -169,7 +169,36 @@ def test_google_settings_routes(db_url: str, tmp_path: Path, monkeypatch: pytest
     disconnected: list[bool] = []
     monkeypatch.setattr(google, "disconnect", lambda s: (disconnected.append(True), Path(s.google_token_file).unlink()))
     with TestClient(create_app(db_url), base_url="http://127.0.0.1:8000", headers={"X-Troth": "1"}) as http:
-        assert http.get("/api/google/status").json() == {"connected": True, "set_up": False, "last_sync": None}
+        assert http.get("/api/google/status").json() == {"connected": True, "set_up": False, "last_sync": None,
+                                                         "sync_error": None, "auto_sync_minutes": 0}
         assert http.post("/api/google/connect").json()["message"].startswith("Google isn't set up: no OAuth client file")
         assert http.post("/api/google/disconnect").json()["connected"] is False and disconnected
         assert http.post("/api/google/forget").json() == {"forgotten": 0}
+
+
+def test_auto_sync_reads_email_while_troth_runs(db_url: str, monkeypatch: pytest.MonkeyPatch,
+                                                caplog: pytest.LogCaptureFixture) -> None:
+    """AUTO_SYNC_MINUTES: the check scripts/sync.py does, inside Troth, for people without Telegram."""
+    import time
+
+    from fastapi.testclient import TestClient
+
+    from app import main
+
+    ran: list[bool] = []
+    monkeypatch.setattr(main, "AUTO_SYNC_FIRST", 0)
+    monkeypatch.setattr(settings, "auto_sync_minutes", 10)
+    monkeypatch.setattr(eng, "run_sync", lambda session, llm, get_google, search: ran.append(get_google is not None) or [])
+    with TestClient(main.create_app(db_url, get_llm=lambda: FakeLLM())):
+        for _ in range(100):
+            if ran:
+                break
+            time.sleep(0.05)
+    assert ran == [True]  # once at start, with Google (connected in tests); the next run is 10 minutes away
+
+    def broken(*args: object) -> list[str]:
+        raise RuntimeError("Sarah's email text")
+    monkeypatch.setattr(eng, "run_sync", broken)
+    with caplog.at_level("WARNING", logger="continuum.api"):
+        main._sync_once(None, lambda: FakeLLM(), lambda: None, lambda: None)  # type: ignore[arg-type, return-value]
+    assert "auto_sync_failed error=RuntimeError" in caplog.text and "Sarah" not in caplog.text  # the next run tries again

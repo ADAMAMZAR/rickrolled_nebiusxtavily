@@ -1,5 +1,5 @@
 import logging
-from datetime import date
+from datetime import date, datetime
 from typing import Any
 
 import pytest
@@ -159,3 +159,18 @@ def test_a_loop_without_a_summary_uses_its_title(session: Session) -> None:
     """Seen live: "summary": null used to fail the whole message twice."""
     [made] = process(session, result(new=[loop("Send Google application", summary=None)]), "Send the Google application.").created_loops
     assert made.summary == "Send Google application"
+
+
+def test_a_due_date_lands_on_the_weekday_its_quote_names(session: Session) -> None:
+    """Nemotron put "by Thursday" on Friday in 4% of runs (troth_eval.md §14); the calendar decides instead."""
+    today = date(2026, 10, 20)  # a Tuesday
+    assert eng.on_its_weekday(date(2026, 10, 23), "pay the deposit by Thursday", today) == date(2026, 10, 22)
+    assert eng.on_its_weekday(date(2026, 10, 22), "Bayar sewa rumah sebelum Rabu", today) == date(2026, 10, 21)
+    assert eng.on_its_weekday(date(2026, 10, 21), "by Tuesday", today) == date(2026, 10, 27)  # never today or before
+    assert eng.on_its_weekday(date(2026, 10, 29), "by Thursday next week", today) == date(2026, 10, 29)  # right day
+    assert eng.on_its_weekday(date(2026, 10, 27), "by Monday, before the trip on Wednesday", today) == date(2026, 10, 27)
+    assert eng.on_its_weekday(None, "by Thursday", today) is None
+    reply = result(new=[loop("Pay deposit", due="2026-10-23", quote="pay the deposit by Thursday")])
+    changes = eng.process_message(session, FakeLLM(reply), "Venue is Friday, I need to pay the deposit by Thursday.",
+                                  now=datetime(2026, 10, 20, 9, tzinfo=NOW.tzinfo))
+    assert changes.created_loops[0].due == date(2026, 10, 22)

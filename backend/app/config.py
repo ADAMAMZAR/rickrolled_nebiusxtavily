@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     google_client_secret_file: str = "./data/client_secret.json"
     google_token_file: str = "./data/google_token.json"  # written when you connect; never commit it
     sync_lookback_days: int = 7  # how far back the first email sync reads
+    auto_sync_minutes: int = 0  # read email and watched pages every N minutes while Troth runs; 0 = off
     uploads_dir: str = "./data/uploads"  # investigation screenshots; never served publicly
     public_url: str = "http://127.0.0.1:8000"  # where people open the dashboard; links in chat use it
     app_password: SecretStr = SecretStr("")  # set on a public server: pages and /api need it (any username)

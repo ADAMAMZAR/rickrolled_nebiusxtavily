@@ -259,3 +259,16 @@ def test_an_email_change_needs_words_from_the_email(session: Session) -> None:
     assert eng.get_loop(session, wait.id).loop.status == LoopStatus.open
     [made] = [a for a in eng.list_activity(session) if a.by == "email"]
     assert made.quote == OCT8 and eng.get_loop(session, made.loop_id).quote == OCT8
+
+
+def test_one_sync_reports_a_google_error_once_and_keeps_it_for_settings(session: Session) -> None:
+    """scripts/sync.py and AUTO_SYNC_MINUTES share run_sync. Without Telegram, Settings shows the error."""
+    wait, _ = linked(session)
+    llm = FakeLLM(result(resolved=[{"id": str(wait.id), "quote": YES}]))
+    assert eng.run_sync(session, llm, lambda: FakeMailbox(error="Token has been expired or revoked."), None) == [
+        "Token has been expired or revoked."]
+    assert eng.run_sync(session, llm, lambda: FakeMailbox(error="Token has been expired or revoked."), None) == []
+    assert eng.get_setting(session, eng.LAST_SYNC_ERROR) == "Token has been expired or revoked."
+    assert eng.run_sync(session, llm, lambda: FakeMailbox({SARAH: [email()]}), None) == [
+        'Email from Sarah: closed "Wait for Sarah\'s response".']
+    assert eng.get_setting(session, eng.LAST_SYNC_ERROR) is None  # a good check clears it

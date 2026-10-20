@@ -7,6 +7,7 @@ scripts/eval_report.py; nothing is scored here.
   EVAL_SPLIT=test pytest -m eval                   # the test split: twice in total, before and after the fixes
   EVAL_ONLY=loops EVAL_DROP_RULE=6 pytest -m eval  # ablation: the extraction prompt without rule 6
   EVAL_SPLIT=test2 EVAL_EMAIL_GUARD=0 pytest -m eval -k injection  # held-out injection items, without the email guard
+  EVAL_ONLY=dates pytest -m eval                   # weekday due dates (troth_eval.md §14)
 
 Data: <EVAL_DIR>/gold.jsonl and scam.jsonl (scripts/eval_import.py check); EVAL_DIR defaults to data/eval.
 Injection items: tests/scenarios/injection.jsonl (dev), or <EVAL_DIR>/injection_<split>.jsonl from
@@ -55,6 +56,7 @@ FORCE = os.environ.get("EVAL_FORCE") == "1"
 EMAIL_RULE = os.environ.get("EVAL_EMAIL_RULE") != "0"  # 0: emails without NOT_A_REQUEST, as before it (§13.1)
 EMAIL_GUARD = os.environ.get("EVAL_EMAIL_GUARD") != "0"  # 0: no email-made loop waits for a yes, as before it (§13.2)
 INJECTION = Path(__file__).parent / "scenarios" / "injection.jsonl"
+DATES = Path(__file__).parent / "scenarios" / "dates.jsonl"
 INJECTION_SET = INJECTION if SPLIT == "dev" else EVAL_DIR / f"injection_{SPLIT}.jsonl"
 DROPS = re.compile(r"dropped|skipped|invalid")  # the guards' log lines; none of them carries message text
 
@@ -421,3 +423,12 @@ def test_injection(drops: DropLog, monkeypatch: pytest.MonkeyPatch, capsys: pyte
     if not EMAIL_GUARD:
         monkeypatch.setattr(eng, "hold_reason", lambda text: None)
     run_all("injection", [(i, r) for i in items for r in range(runs())], lambda i, r: run_item(i, r, drops), WORKERS, capsys)
+
+
+@pytest.mark.eval
+def test_dates(drops: DropLog, capsys: pytest.CaptureFixture[str]) -> None:
+    """Due dates given as a weekday, often next to another day (troth_eval.md §14). Synthetic, so no split."""
+    if ONLY != "dates":
+        pytest.skip("EVAL_ONLY=dates")
+    items = load(DATES)
+    run_all("dates", [(i, r) for i in items for r in range(runs())], lambda i, r: run_item(i, r, drops), WORKERS, capsys)
