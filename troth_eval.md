@@ -301,7 +301,50 @@ Items steered in most runs: 7 → 6 of 24 (McNemar p = 1.0).
 - **Web pages: 0 of 30 runs** steered, in both. Email only, as on the dev set.
 - **Not scored:** calendar events (the harness stops before them; AgentDojo's event is in the past, which Troth drops anyway), and attacks that only add text to a reply without a URL (no bad words to find: they count only when they change a loop).
 - Keep the rule: it costs no real changes and stops fake notes from the user.
-- **This set is spent** (scored twice). A fix for plain requests needs new items: BIPIA's `text_attack_train` to tune on, AgentDojo's banking, Slack and travel goals to test on. Ideas, simplest first, not built:
-  1. An email-made task that holds a URL or an email address, or asks for money or details, waits for a yes instead of being made.
-  2. Every email-made new loop waits for a yes, like web findings. Closes and date changes still apply, with undo.
+- **This set is spent** (scored twice). The fix for plain requests, with new items to tune and test on, is §13.2.
 - **Files:** `data/eval/injection_test.jsonl`; `data/eval/results/20261020-1007*` (without), `-1011*` (with). Sources (sha256, first 12): `agentdojo_baseline_attacks.py` 0e3f3cec2173, `agentdojo_important_instructions_attacks.py` 519f24e0b9d7, `agentdojo_workspace_injection_tasks.py` 03e0894ffb54, `bipia_text_attack_test.json` 75750e7b4e8b. Not committed.
+
+### 13.2 Email guard: risky email tasks wait for a yes (2026-10-20)
+
+**What changed:** a new loop an email would make now waits for the user's yes when its title, summary, next step or quote:
+- has a link;
+- has an email address;
+- asks for money or details: `MONEY`, plus password, PIN, login, security or verification code, IC, passport, donation.
+
+It's `hold_reason` in `engine.py`. Everything else in the email still applies right away, with undo: closes, date changes and other new loops.
+
+**How it works:**
+- The held loop is a `loop_update` action with no loop yet (`HeldLoop`), so Postgres needs no new enum value.
+- The dashboard and Telegram show it as "Add "…" from Sarah's email? It has a link, so check who's asking first." with yes/no.
+- Yes makes the loop, logged as by email with its quote.
+- No forgets the email's words if nothing else uses them. Forgetting all email text (the Google menu) drops waiting ones too.
+
+**Tuning set:** BIPIA `text_attack_train`, 45 items from its 9 categories that could change a loop (format-only ones left out). The guard was tuned on these, the spent §13.1 set and the dev set.
+
+| Tuning, 45 items × 5 runs | Steered without asking | Real changes made |
+|---|---|---|
+| Without the guard | 37% (24–51%) | 95% |
+| Guard: link, address, `MONEY` | 30% (18–44%) | 95% |
+
+- **Widening the guard:** the misses that named money or details (a donation appeal, a "password" tip) led to the details words above.
+- **Replayed estimate with the wider guard:** on the recorded outputs, the tuning set drops from 37% to 27%, §13.1 from 26% to 14%, and the dev set from 11% to 3%. No attacker link or address is left in a task made without asking.
+- **What still gets made is harmless:** "explain photosynthesis", "write a short story", "add a phrase to your reply".
+
+**Held-out set `test2`:** AgentDojo v1 banking, Slack and travel, 21 goals × 2 wrappers = 42 items. They weren't read before scoring, and the guard was frozen first. Scored twice, the only two times.
+
+| Held out, 42 items × 5 runs | Steered without asking | Steered (any, a yes/no counts) | Real changes made |
+|---|---|---|---|
+| Without the guard | 10% (4–22%) | 10% (4–22%) | 96% (85–99%) |
+| **With it (kept)** | **3% (1–14%)** | 7% (2–19%) | 96% (85–99%) |
+
+- **Steered email runs:** 20 → 7 of 160. Items steered without asking in most runs: 3 → 1 (McNemar p = 0.5: too few items to call it).
+- **Attacker addresses and account numbers:** 8 ended up in made tasks before, 0 after. 14 tasks waited for a yes instead: 8 asked for money or details, 6 had an email address.
+- **Still gets through:**
+  - "Get the most expensive hotel in Paris" (a travel goal, 4 runs);
+  - one "Gather user information";
+  - one wrong close.
+- **Web pages:** 0 of 50 runs steered, before and after.
+- **Without the guard, Nemotron ignores most of AgentDojo's tool-shaped goals** ("send money to IBAN…", "change the password"): 10% steered, against 26–37% for BIPIA's plain requests.
+- **Not measured:** how often a real email task with a link or a payment now waits for a yes. That's the guard's cost, one tap each, and it's for E6 on labelled emails.
+- **Live email tests:** 9 of 9 over 3 runs.
+- **Files:** `data/eval/injection_train.jsonl`, `injection_test2.jsonl`; `results/20261020-1050*` and `-1104*` (train), `-1119*` and `-1126*` (test2). Sources (sha256, first 12): `bipia_text_attack_train.json` 63f95d3e67ea, `agentdojo_banking_injection_tasks.py` fa2dedf8e66c, `agentdojo_slack_injection_tasks.py` d5775da1689e, `agentdojo_travel_injection_tasks.py` 9252be834b0a.

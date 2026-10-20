@@ -254,7 +254,7 @@ The gateway (`hermes -p continuum gateway run`) must be running for it to fire. 
 
 ### Email and web sync on Telegram (optional, needs Telegram plus Google or Tavily)
 
-Every 10 minutes Troth reads new email from people linked to open loops, and once a day it checks each loop you asked it to watch on the web. It sends what changed to Telegram: loops an email closed or updated (undo in the dashboard), a calendar event when an email sets a date and time, and web findings. Events and web findings wait for your "yes" or "no". Create the job once, after `setup_hermes.py` (it installs the script the job runs):
+Every 10 minutes Troth reads new email from people linked to open loops, and once a day it checks each loop you asked it to watch on the web. It sends what changed to Telegram: loops an email closed, updated or added (undo in the dashboard), a calendar event when an email sets a date and time, and web findings. Events, web findings and an email's new task that has a link or an email address or asks for money or details wait for your "yes" or "no". Create the job once, after `setup_hermes.py` (it installs the script the job runs):
 
 ```bash
 hermes -p continuum cron create "every 10m" --no-agent --script continuum_sync.py --deliver telegram --name sync
@@ -287,7 +287,7 @@ pytest -m live    # real Nemotron + Hermes + Tavily (needs keys and both servers
 
 The live suite runs the acceptance inputs against real Nemotron, e.g. "Alex said he'll send me the dataset tomorrow" (a waiting loop due tomorrow), "The weather was nice today" (nothing saved), the same message twice (one loop), and "Alex sent the dataset" (loop resolved).
 
-`pytest -m eval` scores Troth on real, labelled messages, 5 runs each, with 95% intervals. That covers loops from chat and email, message checks, and injection attempts: 20 synthetic, 24 held out from the AgentDojo and BIPIA benchmarks. The data stays local in `backend/data/eval/`. How it works, and how to label: [troth_eval.md](troth_eval.md), [troth_labelling_guide.md](troth_labelling_guide.md).
+`pytest -m eval` scores Troth on real, labelled messages, 5 runs each, with 95% intervals. That covers loops from chat and email, message checks, and injection attempts: 20 synthetic, and 111 from the AgentDojo and BIPIA benchmarks. The data stays local in `backend/data/eval/`. How it works, and how to label: [troth_eval.md](troth_eval.md), [troth_labelling_guide.md](troth_labelling_guide.md).
 
 ## Privacy
 
@@ -312,7 +312,7 @@ The live suite runs the acceptance inputs against real Nemotron, e.g. "Alex said
 - Run on your own computer, Telegram and the daily briefing only work while it's on. The [GCP deploy](#deploy-to-gcp-compute-engine) keeps them running.
 - Scheduled jobs (the daily briefing, web watch) only run while the gateway is running. A briefing missed while it was off is sent once when the gateway starts again, so it can arrive late.
 - **Check who's asking** shows on loops whose words mention money, a link or an account (a keyword test). Any message can still be checked on **Check a message**.
-- **An email can still slip in a task.** On 24 held-out attacks from the AgentDojo and BIPIA benchmarks, 26% still changed something (28% without the fix), all through email ([troth_eval.md](troth_eval.md) §13.1). Most were plain requests in an email that became tasks. Every email change can be undone, and a new loop that asks for money or details comes with a reminder to check who's asking.
+- **An email can still slip in a task.** On 42 held-out attacks from the AgentDojo benchmark, 3% still changed something without asking, down from 10% ([troth_eval.md](troth_eval.md) §13.2). A task with a link or an email address, or one that asks for money or details, waits for your yes. Plain requests ("explain photosynthesis") still become tasks. Every email change can be undone.
 
 ## Feedback on Nebius Token Factory and Nemotron
 

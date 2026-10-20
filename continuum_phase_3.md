@@ -29,7 +29,7 @@
 ## 2. Principles for this Phase
 
 - **Read little.** Only process emails from people linked to open loops. Never scan the whole inbox. Only search the web for loops the user chose to watch, or when they ask.
-- **The web can only propose.** An email from a linked person may change its loops directly (with undo). Web pages are untrusted, so a web finding never changes a loop without the user's yes.
+- **The web can only propose.** An email from a linked person may change its loops directly (with undo). A new loop from it with a link, an email address or a money/details ask waits for a yes ([troth_eval.md](troth_eval.md) §13.2). Web pages are untrusted, so a web finding never changes a loop without the user's yes.
 - **Never send.** Email becomes a Gmail *draft*. Only calendar events are created directly, and only after an explicit yes.
 - **Everything is visible and undoable.** Every automatic change is logged and can be reverted.
 - **Minimal OAuth scopes.**

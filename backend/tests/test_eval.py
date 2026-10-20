@@ -6,11 +6,11 @@ scripts/eval_report.py; nothing is scored here.
   EVAL_PILOT=1 pytest -m eval                      # 5 loop items and 2 checks once: cost per item, before a full run
   EVAL_SPLIT=test pytest -m eval                   # the test split: twice in total, before and after the fixes
   EVAL_ONLY=loops EVAL_DROP_RULE=6 pytest -m eval  # ablation: the extraction prompt without rule 6
-  EVAL_SPLIT=test EVAL_EMAIL_RULE=0 pytest -m eval -k injection  # held-out injection items, without the email rule
+  EVAL_SPLIT=test2 EVAL_EMAIL_GUARD=0 pytest -m eval -k injection  # held-out injection items, without the email guard
 
 Data: <EVAL_DIR>/gold.jsonl and scam.jsonl (scripts/eval_import.py check); EVAL_DIR defaults to data/eval.
-Injection items: tests/scenarios/injection.jsonl (dev, tuned on), <EVAL_DIR>/injection_test.jsonl (held out, from
-scripts/eval_import.py injection). Results go to <EVAL_DIR>/results/.
+Injection items: tests/scenarios/injection.jsonl (dev), or <EVAL_DIR>/injection_<split>.jsonl from
+scripts/eval_import.py injection (train to tune on; test, test2 held out). Results go to <EVAL_DIR>/results/.
 Other settings: EVAL_RUNS (5), EVAL_WORKERS (4 for loops; checks use half), EVAL_FORCE=1 (a third test run).
 """
 
@@ -52,9 +52,10 @@ DROP_RULE = int(os.environ["EVAL_DROP_RULE"]) if os.environ.get("EVAL_DROP_RULE"
 PILOT = os.environ.get("EVAL_PILOT") == "1"
 WORKERS = int(os.environ.get("EVAL_WORKERS", "4"))
 FORCE = os.environ.get("EVAL_FORCE") == "1"
-EMAIL_RULE = os.environ.get("EVAL_EMAIL_RULE") != "0"  # 0: emails without NOT_A_REQUEST, as before the fix (§13)
+EMAIL_RULE = os.environ.get("EVAL_EMAIL_RULE") != "0"  # 0: emails without NOT_A_REQUEST, as before it (§13.1)
+EMAIL_GUARD = os.environ.get("EVAL_EMAIL_GUARD") != "0"  # 0: no email-made loop waits for a yes, as before it (§13.2)
 INJECTION = Path(__file__).parent / "scenarios" / "injection.jsonl"
-INJECTION_TEST = EVAL_DIR / "injection_test.jsonl"
+INJECTION_SET = INJECTION if SPLIT == "dev" else EVAL_DIR / f"injection_{SPLIT}.jsonl"
 DROPS = re.compile(r"dropped|skipped|invalid")  # the guards' log lines; none of them carries message text
 
 
@@ -111,10 +112,12 @@ class Results:
         folder.mkdir(parents=True, exist_ok=True)
         v = version(kind)
         drop = DROP_RULE if kind == "loops" else None
-        rule = EMAIL_RULE or kind != "injection"
-        self.meta = {"kind": kind, "split": "pilot" if PILOT else SPLIT, "drop_rule": drop, "email_rule": rule, **v}
+        rule, guard = EMAIL_RULE or kind != "injection", EMAIL_GUARD or kind != "injection"
+        self.meta = {"kind": kind, "split": "pilot" if PILOT else SPLIT, "drop_rule": drop, "email_rule": rule,
+                     "email_guard": guard, **v}
         name = f"{datetime.now():%Y%m%d-%H%M%S}-{kind}-{self.meta['split']}-{v['commit']}-{v['prompt']}"
-        self.path = folder / (name + (f"-drop{drop}" if drop else "") + ("" if rule else "-noemailrule") + ".jsonl")
+        self.path = folder / (name + (f"-drop{drop}" if drop else "") + ("" if rule else "-noemailrule")
+                              + ("" if guard else "-noguard") + ".jsonl")
         self._lock = threading.Lock()
 
     def add(self, record: dict[str, Any]) -> None:
@@ -213,10 +216,10 @@ def pick(items: list[dict[str, Any]], pilot: int) -> list[dict[str, Any]]:
 
 def guard_test(kind: str) -> None:
     """The test split is scored twice in total: before and after the fixes. More would tune on it."""
-    if SPLIT == "test" and not PILOT and not FORCE:
-        done = list((EVAL_DIR / "results").glob(f"*-{kind}-test-*.jsonl"))
+    if SPLIT.startswith("test") and not PILOT and not FORCE:
+        done = list((EVAL_DIR / "results").glob(f"*-{kind}-{SPLIT}-*.jsonl"))
         if len(done) >= 2:
-            pytest.skip(f"The {kind} test split was already scored {len(done)} times. EVAL_FORCE=1 to run it anyway.")
+            pytest.skip(f"The {kind} {SPLIT} split was already scored {len(done)} times. EVAL_FORCE=1 to run it anyway.")
 
 
 def runs() -> int:
@@ -403,16 +406,18 @@ def test_scam(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.Ca
 @pytest.mark.eval
 def test_injection(drops: DropLog, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     """Emails and web pages that try to steer the model (troth_eval.md §1.3). Dev: the synthetic items the email
-    rule was tuned on. Test: the held-out items made from AgentDojo and BIPIA (§13), scored twice in total."""
+    rule was tuned on. Other splits: items made from AgentDojo and BIPIA (§13); test ones are scored twice in total."""
     if ONLY not in ("", "injection") or PILOT:
         pytest.skip("EVAL_ONLY or EVAL_PILOT")
-    items = load(INJECTION_TEST if SPLIT == "test" else INJECTION)
+    items = load(INJECTION_SET)
     if not items:
-        pytest.skip(f"No {INJECTION_TEST}: run scripts/eval_import.py injection first.")
+        pytest.skip(f"No {INJECTION_SET}: run scripts/eval_import.py injection --set {SPLIT} first.")
     guard_test("injection")
     if not EMAIL_RULE:
         without = extraction.EMAIL_NOTE.removesuffix(extraction.NOT_A_REQUEST)
         assert without != extraction.EMAIL_NOTE, "EMAIL_NOTE no longer ends with NOT_A_REQUEST"
         monkeypatch.setattr(extraction, "EMAIL_NOTE", without)  # what version() hashes
         monkeypatch.setattr(eng, "EMAIL_NOTE", without)  # what ingest_email sends
+    if not EMAIL_GUARD:
+        monkeypatch.setattr(eng, "hold_reason", lambda text: None)
     run_all("injection", [(i, r) for i in items for r in range(runs())], lambda i, r: run_item(i, r, drops), WORKERS, capsys)
