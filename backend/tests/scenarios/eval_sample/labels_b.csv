@@ -1,0 +1,10 @@
+item,lang,label,ref,title,quote,kind,person,due,target,hedged,note
+w02-1,mixed,new,b1,,ok nnt I send by Wednesday k,commitment,Aisyah,2026-10-07,,,
+w02-2,mixed,new,b2,,"he said by Friday",waiting,Dr Lim,2026-10-09,,,
+w02-3,ms,none,,,,,,,,,a plan to eat isn't a promise
+w02-4,en,new,b3,,I can only send the NVIDIA application,task,,,,,
+w02-4,,link,b3,,,,,,b2,,
+w02-5,mixed,none,,,,,,,,,
+w02-6,mixed,resolve,,,dah hantar,,,,b1,,
+w02-7,mixed,none,,,,,,,,,
+w02-8,mixed,new,b4,,pay my PTPTN by 15/10,task,,15/10/2026,,,

@@ -1,0 +1,15 @@
+item,lang,label,ref,title,quote,kind,person,due,target,hedged,note
+w01-1,en,open,lim-letter,Get reference letter from Dr Lim,,waiting,Dr Lim,2026-10-09,,,from the chat window
+w01-1,,update,,,I can only send the reference letter next Wednesday,,,2026-10-14,lim-letter,,
+w01-2,en,resolve,,,attached is your reference letter,,,,lim-letter,,
+w02-1,mixed,new,slides,Send slides to Aisyah,ok nnt I send by Wednesday k,commitment,Aisyah,2026-10-07,,,
+w02-1,,new,charts,Fix the charts,need to fix the charts first,task,,,,,a step said to come first is its own task
+w02-1,,link,slides,,,,,,charts,,
+w02-2,mixed,new,letter,Get reference letter from Dr Lim,"I'm waiting for him to send it, he said by Friday",waiting,Dr Lim,2026-10-09,,,
+w02-3,ms,new,makan,Makan with Aisyah,"can, lepas maghrib",commitment,Aisyah,2026-10-10,,,
+w02-4,en,new,app,Send NVIDIA application,I can only send the NVIDIA application once Dr Lim sends the letter,task,,,,,
+w02-4,,link,app,,,,,,letter,,
+w02-5,mixed,none,,,,,,,,,
+w02-6,mixed,resolve,,,dah hantar to your email just now,,,,slides,,
+w02-7,mixed,cancel,,,cancel the makan sat,,,,makan,,
+w02-8,mixed,new,ptptn,Pay PTPTN,I need to pay my PTPTN by 15/10,task,,2026-10-15,,,

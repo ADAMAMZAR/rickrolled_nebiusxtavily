@@ -287,6 +287,8 @@ pytest -m live    # real Nemotron + Hermes + Tavily (needs keys and both servers
 
 The live suite runs the acceptance inputs against real Nemotron, e.g. "Alex said he'll send me the dataset tomorrow" (a waiting loop due tomorrow), "The weather was nice today" (nothing saved), the same message twice (one loop), and "Alex sent the dataset" (loop resolved).
 
+`pytest -m eval` scores Troth on real, labelled messages, 5 runs each, with 95% intervals. That covers loops from chat and email, message checks, and 20 injection attempts. The data stays local in `backend/data/eval/`. How it works, and how to label: [troth_eval.md](troth_eval.md), [troth_labelling_guide.md](troth_labelling_guide.md).
+
 ## Privacy
 
 - Everything is in one database: `backend/data/continuum.db` (SQLite) on your machine, or the Postgres in `DATABASE_URL` (the GCP deploy uses Neon). What leaves it: text sent to Nebius for Nemotron to do its job; your Telegram messages if you turn Telegram on (they pass through Telegram's servers); with a Tavily key, only your watch searches and lookup questions go to Tavily, never your messages. Only the names of people you wait on go to the model, not their email addresses.
