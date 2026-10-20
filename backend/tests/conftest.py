@@ -42,6 +42,7 @@ def no_real_services(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyP
         monkeypatch.setattr(settings, "nebius_api_key", SecretStr(""))
         monkeypatch.setattr(settings, "tavily_api_key", SecretStr(""))
     monkeypatch.setattr(settings, "app_password", SecretStr(""))  # a server .env's password; tests that need one set it
+    monkeypatch.setattr(settings, "auto_sync_minutes", 0)  # a .env's automatic sync would run inside every test app
 
 
 @pytest.fixture

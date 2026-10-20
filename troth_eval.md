@@ -239,7 +239,7 @@ Each item ran once against real Nemotron and Tavily, on the synthetic sample (`t
 
 ## 12. Next: your part
 
-1. Put the exports in `backend/data/eval/raw/`: WhatsApp `.txt`, Telegram `result.json`, Gmail `.mbox`. Keep them on this company PC only if policy allows.
+1. Put the exports in `backend/data/eval/raw/`: WhatsApp `.txt`, Telegram `result.json`, Gmail `.mbox`. For Gmail, `python scripts/eval_import.py gmail --months 3` pulls it through Troth's Google connection instead of Takeout (done 2026-10-20: 58 emails, 48 usable). Keep them on this company PC only if policy allows.
 2. From `backend/`: `python scripts/eval_import.py windows --me "Your WhatsApp name" --me "Your Telegram name" --me-email you@gmail.com`. Add `--month-first` if your WhatsApp dates are month/day.
 3. Label `sheet_a.csv` and save it as `labels_a.csv` ([guide](troth_labelling_guide.md)). Labeller B does the same with `sheet_b.csv`, saving `labels_b.csv`.
 4. Fill in `scam.csv` (~40 rows; columns in the guide). For B: `python scripts/eval_import.py blank-scam` writes the sheet to label as `scam_b.csv`.

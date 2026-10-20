@@ -50,6 +50,7 @@ uvicorn app.main:app --reload     # Troth on :8000 (MCP at /mcp/)
 hermes -p continuum gateway run   # Hermes API server on :8642
 pytest                            # offline, LLM mocked
 pytest -m live                    # real LLM + Hermes (needs keys and both servers running)
+python scripts/eval_import.py gmail --months 3          # your Gmail -> data/eval/raw/gmail.mbox (instead of Takeout)
 python scripts/eval_import.py windows --me "Your Name"   # exports in data/eval/raw/ -> sheets to label (troth_eval.md)
 python scripts/eval_import.py check                      # labels -> data/eval/gold.jsonl, scam.jsonl
 python scripts/eval_import.py injection --set test2      # AgentDojo/BIPIA files in data/eval/benchmarks/ -> injection items (train, test, test2)
