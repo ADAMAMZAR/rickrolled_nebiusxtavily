@@ -203,6 +203,17 @@ def test_chat_messages_never_propose_events(session: Session) -> None:
     assert process(session, reply, "Interview on Oct 8 at 10.").events == []
 
 
+def test_a_new_loop_that_asks_for_money_says_check_first(session: Session) -> None:
+    """In chat, `remember` offers a check; from email the sync line says it (the injection set found email-made
+    payment tasks, troth_eval.md §11)."""
+    linked(session)
+    fee = "please pay the RM250 admin fee today"
+    reply = result(new=[loop("Pay RM250 admin fee", quote=fee), loop("Prepare for NVIDIA interview", quote=OCT8)])
+    lines, _ = sync(session, FakeLLM(reply), FakeMailbox({SARAH: [email(body=f"Great news, {OCT8}. Also {fee}.")]}))
+    assert lines == ['Email from Sarah: new "Pay RM250 admin fee" (asks for money or details: check who\'s asking first,'
+                     ' /check); new "Prepare for NVIDIA interview".']
+
+
 def test_an_email_change_needs_words_from_the_email(session: Session) -> None:
     """Email changes apply without the user, so one the model can't quote from the email isn't made (audit item 4)."""
     wait, _ = linked(session)

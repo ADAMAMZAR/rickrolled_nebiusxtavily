@@ -312,6 +312,7 @@ The live suite runs the acceptance inputs against real Nemotron, e.g. "Alex said
 - Run on your own computer, Telegram and the daily briefing only work while it's on. The [GCP deploy](#deploy-to-gcp-compute-engine) keeps them running.
 - Scheduled jobs (the daily briefing, web watch) only run while the gateway is running. A briefing missed while it was off is sent once when the gateway starts again, so it can arrive late.
 - **Check who's asking** shows on loops whose words mention money, a link or an account (a keyword test). Any message can still be checked on **Check a message**.
+- **An email can still slip in a task.** On Troth's own synthetic set of 20 injection attempts, 13% still changed something after the fix, through email only ([troth_eval.md](troth_eval.md) §13). Every email change can be undone, and a new loop that asks for money or details comes with a reminder to check who's asking.
 
 ## Feedback on Nebius Token Factory and Nemotron
 

@@ -1272,7 +1272,9 @@ def describe_email(person: Person, changes: ChangeSet) -> str:
         return f" (due {loop.due:%a %b} {loop.due.day})" if loop.due else ""
     parts = [f'closed "{l.title}"' for l in changes.resolved_loops]
     parts += [f'updated "{l.title}"{due(l)}' for l in changes.updated_loops]
-    parts += [f'new "{l.title}"{due(l)}' for l in changes.created_loops]
+    # Chat offers a check for these (`remember`); an email's new loop reaches Telegram with no one to offer it.
+    parts += [f'new "{l.title}"{due(l)}' + (" (asks for money or details: check who's asking first, /check)"
+                                           if asks_for_money(l) else "") for l in changes.created_loops]
     parts += [f'new goal "{g.title}"' for g in changes.created_goals]
     return f"Email from {person.name}: {'; '.join(parts)}."
 
