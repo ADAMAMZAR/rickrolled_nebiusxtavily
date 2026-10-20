@@ -93,6 +93,7 @@ class Attention:
 def process_message(
     session: Session, llm: Completer, text: str, now: datetime | None = None, by: ActivityBy = ActivityBy.chat,
     person: Person | None = None, source: Source | None = None, chat_context: str | None = None,
+    hold: str | None = None, note: str | None = None,
 ) -> ChangeSet:
     """Extract goals and loops from one message, then save them in one transaction.
 
@@ -102,6 +103,9 @@ def process_message(
     Each change keeps the model's quote only if those words are in the text. An email's changes apply without
     the user, so there a change without a real quote is dropped: Troth never acts on words nobody wrote.
     `chat_context`: from Hermes, what "it" or "she" refers to ("push it to Monday"). Quotes still come from `text`.
+    `hold`: every new loop waits for a yes for this reason (an email from someone new), and no goal is added
+    except with a loop the user approves.
+    `note`: where a non-email message came from, e.g. PASTE_NOTE.
     """
     now = now or local_now()
     goals = [s.goal for s in list_goals(session)]
@@ -116,7 +120,7 @@ def process_message(
             now,
             goals=[{"title": g.title} for g in goals],
             loops=[_loop_context(loop, goal_titles) for loop in in_scope],
-            note=EMAIL_NOTE.format(name=person.name) if person else None,
+            note=EMAIL_NOTE.format(name=person.name) if person else note,
             people=[p.name for p in people.values()],
             chat_context=chat_context,
         )
@@ -127,6 +131,8 @@ def process_message(
     known = {str(loop.id): loop for loop in in_scope}
     goal_by_name = {normalize(g.title): g for g in goals}
     seen = {_loop_key(loop.title, loop.waiting_on) for loop in open_loops}
+    if person is not None:  # an email repeating one that already waits for a yes (a reminder) doesn't ask twice
+        seen |= {_loop_key(h.title, h.waiting_on) for a in list_actions(session) if (h := _held(a)) is not None}
     in_scope_by_key = {_loop_key(loop.title, loop.waiting_on): loop for loop in in_scope}
     risks_before, blocked_before = dependency_risks(session, now.date()), _blocked(session)
     strict = person is not None  # an email's changes apply without the user: no real quote, no change
@@ -137,7 +143,7 @@ def process_message(
             session.add(source)
         link = source.url or ""  # an email's Gmail thread, shown as the change's source
         changes = ChangeSet(source=source, events=result.events if person else [])
-        for candidate in result.goals:
+        for candidate in result.goals if hold is None else []:
             _find_or_add_goal(session, candidate.title, candidate.description, goal_by_name, changes)
 
         new_by_title: dict[str, OpenLoop] = {}  # this reply's loops, for links that name one by title
@@ -154,11 +160,12 @@ def process_message(
             seen.add(key)
             due = on_its_weekday(candidate.due, quote, now.date())
             words = " ".join(filter(None, (candidate.title, candidate.summary, candidate.next_action, quote)))
-            if person is not None and (why := hold_reason(words)):
+            if person is not None and (why := hold_reason(words) or hold):
                 held = HeldLoop(title=candidate.title, summary=candidate.summary or candidate.title,
                                 kind=LoopKind(candidate.kind), waiting_on=candidate.waiting_on, due=due,
                                 next_action=candidate.next_action, goal=candidate.goal, quote=quote or "",
-                                source_id=source.id, source_url=link or None, sender=person.name, why=why)
+                                source_id=source.id, source_url=link or None, sender=person.name,
+                                sender_email=person.email, why=why)
                 action = PendingAction(kind=ActionKind.loop_update, payload=held.model_dump(mode="json"))
                 session.add(action)
                 changes.held.append(action)
@@ -963,7 +970,11 @@ class HeldLoop(BaseModel):
     source_id: UUID
     source_url: str | None = None  # the Gmail thread: the dashboard links it
     sender: str
-    why: str  # "has a link", ... (hold_reason)
+    sender_email: str | None = None  # saved for them on a yes, so their next email can update the loop
+    why: str  # "has a link", ... (hold_reason), or NEW_SENDER
+
+
+NEW_SENDER = "is from someone new"  # HeldLoop.why for mail from someone Troth doesn't follow yet (sync_email)
 
 
 def _held(action: PendingAction) -> HeldLoop | None:
@@ -1059,6 +1070,8 @@ def describe_action(session: Session, action: PendingAction) -> str:
     """One line for the dashboard, chat and Telegram."""
     if (held := _held(action)) is not None:
         due = f" (due {held.due:%a %b} {held.due.day})" if held.due else ""
+        if held.why == NEW_SENDER:
+            return f'Add "{held.title}"{due} from {held.sender}\'s email? They\'re new: on a yes, Troth follows their replies.'
         return f'Add "{held.title}"{due} from {held.sender}\'s email? It {held.why}, so check who\'s asking first.'
     loop = session.get(OpenLoop, action.loop_id) if action.loop_id else None
     title = f'"{loop.title}"' if loop else "a deleted loop"
@@ -1104,6 +1117,8 @@ def reject_action(session: Session, action_id: UUID) -> PendingAction:
     action = _decide(session, action_id, ActionStatus.rejected)
     if (held := _held(action)) is not None:  # the email isn't needed for anything else
         _forget_source(session, held.source_id)
+        action.payload = held.model_copy(update={"summary": held.title, "quote": "", "source_url": None,
+                                                 "sender_email": None}).model_dump(mode="json")
     session.commit()
     session.refresh(action)
     log.info("action_rejected id=%s", action_id)
@@ -1158,7 +1173,11 @@ def _make_held_loop(session: Session, action: PendingAction, held: HeldLoop) -> 
                     next_action=held.next_action)
     people = {normalize(p.name): p for p in list_people(session)}
     named = loop.waiting_on if loop.kind != LoopKind.task and normalize(loop.waiting_on or "") else held.sender
-    loop.person_id = _find_or_add_person(session, named, people).id  # like a loop the email made (process_message)
+    person = _find_or_add_person(session, named, people)
+    loop.person_id = person.id  # like a loop the email made (process_message)
+    if (held.sender_email and person.email is None and normalize(named) == normalize(held.sender)
+            and held.sender_email not in {p.email for p in people.values()}):  # one address, one person
+        person.email = held.sender_email  # someone new: sync now follows their replies
     action.loop_id = loop.id
     _log(session, loop, ActivityAction.created, ActivityBy.email, held.source_url or "", source_id=held.source_id,
          quote=held.quote)
@@ -1319,7 +1338,7 @@ def _find_or_add_person(session: Session, name: str, people: dict[str, Person]) 
     return people[key]
 
 
-# --- email: replies from people linked to open loops ---
+# --- email: replies from people linked to open loops; from anyone else, only proposals ---
 
 LAST_EMAIL_SYNC = "email_last_sync"  # Setting keys
 LAST_SYNC_ERROR = "email_sync_error"
@@ -1327,6 +1346,7 @@ LAST_SYNC_ERROR = "email_sync_error"
 
 class Mailbox(Protocol):
     def messages_from(self, sender: str, after: datetime | None = None, limit: int = 5) -> list[Email]: ...
+    def new_mail(self, after: datetime | None = None, limit: int = 20) -> list[Email]: ...
 
 
 def get_setting(session: Session, key: str) -> str | None:
@@ -1349,16 +1369,24 @@ def _set_setting(session: Session, key: str, value: str | None) -> None:
 def sync_email(
     session: Session, llm: Completer, mailbox: Mailbox, now: datetime | None = None
 ) -> tuple[list[str], list[str]]:
-    """Read new mail from people who have an email and an open loop, nobody else. Returns one line per
-    email that changed something, and error lines (each error is reported once, not every run)."""
+    """Read new mail from people who have an email and an open loop. With EMAIL_NEW_SENDERS, also mail people sent
+    from anyone else (Mailbox.new_mail): what it would add waits for a yes (NEW_SENDER), and it can't change a loop.
+    Returns one line per email that changed or proposed something, and error lines (each error is reported once,
+    not every run)."""
     now = now or local_now()
     started = now.astimezone(UTC)
     last = get_setting(session, LAST_EMAIL_SYNC)
     after = datetime.fromisoformat(last) if last else started - timedelta(days=settings.sync_lookback_days)
-    people = [p for p in list_people(session) if p.email and person_loops(session, p.id)]
+    everyone = list_people(session)
+    people = [p for p in everyone if p.email and person_loops(session, p.id)]
+    followed = {p.email for p in people}
     try:  # fetch everything first: a Google error writes nothing
-        # ponytail: newest 10 per person per run; raise the limit if someone sends more than that in 10 minutes
+        # ponytail: newest 10 per person and 20 new per run; raise the limits if more arrive in 10 minutes
         inbox = [(p, e) for p in people for e in mailbox.messages_from(p.email, after=after, limit=10)]  # type: ignore[arg-type]
+        if settings.email_new_senders:  # a Person kept only if the user says yes (_make_held_loop)
+            known = {p.email: p for p in everyone if p.email}
+            inbox += [(known.get(e.from_address) or Person(name=e.from_name, email=e.from_address), e)
+                      for e in mailbox.new_mail(after=after, limit=20) if e.from_address and e.from_address not in followed]
     except GoogleError as e:
         log.warning("email_sync_failed error=%s", type(e).__name__)
         return [], report_sync_errors(session, [str(e)])
@@ -1367,7 +1395,7 @@ def sync_email(
         if session.exec(select(Source).where(Source.external_id == email.id)).first():
             continue
         try:
-            changes = ingest_email(session, llm, person, email, now)
+            changes = ingest_email(session, llm, person, email, now, new=person.email not in followed)
         except (ExtractionError, LLMError) as e:
             log.warning("email_unreadable id=%s error=%s", email.id, type(e).__name__)
             errors.append(f"Couldn't read an email from {person.name}: {e}")
@@ -1379,15 +1407,20 @@ def sync_email(
                   for a in changes.held + _propose_events(session, person, changes, now)]
     if not errors:  # otherwise the same window is read again next run
         _set_setting(session, LAST_EMAIL_SYNC, started.isoformat())
-    log.info("email_synced people=%d messages=%d changed=%d", len(people), len(inbox), len(lines))
+    log.info("email_synced people=%d messages=%d new=%d changed=%d", len(people), len(inbox),
+             sum(p.email not in followed for p, _ in inbox), len(lines))
     return lines, report_sync_errors(session, errors)
 
 
-def ingest_email(session: Session, llm: Completer, person: Person, email: Email, now: datetime | None = None) -> ChangeSet:
+def ingest_email(
+    session: Session, llm: Completer, person: Person, email: Email, now: datetime | None = None, new: bool = False,
+) -> ChangeSet:
     """One email from a linked person. It may close or update only their loops, and add new ones.
-    Every change is logged as by "email" with undo, linked to the Gmail thread."""
+    Every change is logged as by "email" with undo, linked to the Gmail thread.
+    `new`: from someone Troth doesn't follow yet, so every loop it would add waits for a yes (NEW_SENDER)."""
     source = Source(kind="email", text=email.text, external_id=email.id, url=email.url, sender=person.name)
-    return process_message(session, llm, email.text, now, ActivityBy.email, person=person, source=source)
+    return process_message(session, llm, email.text, now, ActivityBy.email, person=person, source=source,
+                           hold=NEW_SENDER if new else None)
 
 
 def _propose_events(session: Session, person: Person, changes: ChangeSet, now: datetime) -> list[PendingAction]:
@@ -1424,16 +1457,34 @@ def run_sync(
     return lines
 
 
-def describe_email(person: Person, changes: ChangeSet) -> str:
-    """One line for Telegram, e.g. 'Email from Sarah: closed "Wait for Sarah's response"; new "Prepare for interview" (due Thu Oct 8).'
-    Empty when the email only proposed something: that gets its own yes/no line."""
+def describe_changes(changes: ChangeSet) -> list[str]:
+    """What a message changed, e.g. ['closed "Wait for Sarah\'s response"', 'new "Prepare for interview" (due Thu Oct 8)']."""
     def due(loop: OpenLoop) -> str:
         return f" (due {loop.due:%a %b} {loop.due.day})" if loop.due else ""
     parts = [f'closed "{l.title}"' for l in changes.resolved_loops]
     parts += [f'updated "{l.title}"{due(l)}' for l in changes.updated_loops]
-    parts += [f'new "{l.title}"{due(l)}' for l in changes.created_loops]  # money or details wait (hold_reason)
+    parts += [f'new "{l.title}"{due(l)}' for l in changes.created_loops]  # an email's money or details ask waits
     parts += [f'new goal "{g.title}"' for g in changes.created_goals]
+    return parts
+
+
+def describe_email(person: Person, changes: ChangeSet) -> str:
+    """One line for Telegram, e.g. 'Email from Sarah: closed "Wait for Sarah's response"; new "Prepare for interview" (due Thu Oct 8).'
+    Empty when the email only proposed something: that gets its own yes/no line."""
+    parts = describe_changes(changes)
     return f"Email from {person.name}: {'; '.join(parts)}." if parts else ""
+
+
+def describe_saved(changes: ChangeSet) -> str:
+    """The dashboard's reply to a pasted message (POST /api/messages): what it saved, what that put at risk or freed
+    up, and each new loop that asks for money, since chat would offer a check for it."""
+    parts = describe_changes(changes) + [f'"{a.title}" needs "{b.title}"' for a, b in changes.linked]
+    if not parts:
+        return "Nothing to save in that. To ask Troth something, use Chat (it needs Hermes running)."
+    lines = [f"Saved: {'; '.join(parts)}.", *risk_lines(changes)]
+    lines += [f'"{l.title}" asks for money: check who\'s asking before you pay (open it under Open loops).'
+              for l in changes.created_loops if asks_for_money(l)]
+    return "\n".join(lines)
 
 
 def report_sync_errors(session: Session, errors: list[str]) -> list[str]:

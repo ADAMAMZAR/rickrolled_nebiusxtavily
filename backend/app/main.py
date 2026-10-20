@@ -27,9 +27,9 @@ from app.connectors.tavily import TavilyClient
 from app.db import (
     ActionStatus, Activity, Goal, LoopKind, LoopStatus, OpenLoop, PendingAction, Person, Source, create_db_engine,
 )
-from app.extraction import Completer
+from app.extraction import PASTE_NOTE, Completer, ExtractionError
 from app.hermes import HermesClient, HermesError, HermesReply
-from app.llm import LLMClient
+from app.llm import LLMClient, LLMError
 from app.mcp_tools import build_mcp
 
 log = logging.getLogger("continuum.api")
@@ -38,11 +38,16 @@ STATIC = Path(__file__).parent / "static"
 
 class Agent(Protocol):
     def ask(self, message: str, conversation: str = ...) -> HermesReply: ...
+    def running(self) -> bool: ...
 
 
 class ChatIn(BaseModel):
     message: str = Field(min_length=1, max_length=8000)
     conversation: str = Field(default="continuum", max_length=100)  # the UI sends one per page load
+
+
+class MessageIn(BaseModel):
+    text: str = Field(min_length=1, max_length=8000)
 
 
 class SnoozeIn(BaseModel):
@@ -271,6 +276,22 @@ def create_app(
         log.info("chat_ok tools=%s", ",".join(reply.tools_called) or "none")
         return {"reply": reply.text}
 
+    @app.get("/api/chat/status")
+    def chat_status() -> dict[str, bool]:
+        try:
+            return {"running": get_hermes().running()}
+        except HermesError:  # no HERMES_API_KEY: Hermes was never set up here
+            return {"running": False}
+
+    @app.post("/api/messages", response_model=None)
+    def save_message(body: MessageIn, session: Session = Depends(get_session)) -> dict[str, str] | JSONResponse:
+        """The dashboard's Paste box: what chat's `remember` does, without Hermes (e.g. where it isn't installed)."""
+        try:
+            changes = eng.process_message(session, get_llm(), body.text, note=PASTE_NOTE)
+        except (ExtractionError, LLMError) as e:
+            return error(503, "llm_unavailable", f"Couldn't save that: {e}")
+        return {"reply": eng.describe_saved(changes)}
+
     @app.get("/api/goals")
     def goals(session: Session = Depends(get_session)) -> list[dict[str, Any]]:
         return [{**g.goal.model_dump(mode="json"), "open_loops": g.open_loops} for g in eng.list_goals(session)]
@@ -417,6 +438,7 @@ def create_app(
             "last_sync": eng.get_setting(session, eng.LAST_EMAIL_SYNC),
             "sync_error": eng.get_setting(session, eng.LAST_SYNC_ERROR),  # cleared by the next good check
             "auto_sync_minutes": settings.auto_sync_minutes,
+            "new_senders": settings.email_new_senders,
         }
 
     @app.post("/api/google/connect")

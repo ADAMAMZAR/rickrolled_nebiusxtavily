@@ -1,4 +1,4 @@
-"""Google: read mail from one sender, save Gmail drafts, create Calendar events. Never sends email.
+"""Google: read mail from one sender or from people, save Gmail drafts, create Calendar events. Never sends email.
 
 Uses an OAuth "Desktop app" client (README: Google setup). The token is saved to GOOGLE_TOKEN_FILE.
 """
@@ -7,6 +7,7 @@ import base64
 import re
 from datetime import UTC, datetime, timedelta
 from email.message import EmailMessage
+from email.utils import parseaddr
 from pathlib import Path
 from typing import Any
 
@@ -30,24 +31,45 @@ EVENTS = "https://www.googleapis.com/calendar/v3/calendars/primary/events"
 REVOKE = "https://oauth2.googleapis.com/revoke"
 RECONNECT = "Connect again in the dashboard (Settings)."
 MAX_TEXT = 4000  # characters of an email that go to the LLM
+# Mail people sent you: not yours, not in Gmail's Promotions, Social, Updates or Forums tabs.
+PEOPLE_MAIL = "-from:me -category:promotions -category:social -category:updates -category:forums"
+NO_REPLY = re.compile(r"(no-?reply|notifications?|mailer-daemon)@")
 
 
 class GoogleError(Exception):
     pass
 
 
+def automated(address: str, headers: dict[str, str]) -> bool:
+    """A newsletter, a mailing list or a no-reply sender, not mail a person wrote. `headers`: lowercase names.
+    The eval's email sample leaves out the same mail (eval_import.read_mbox), so its numbers hold for what sync reads."""
+    bulk = bool(headers.get("list-unsubscribe")) or headers.get("precedence", "").lower() in {"bulk", "list", "junk"}
+    return bulk or bool(NO_REPLY.match(address))
+
+
 class Email(BaseModel):
     id: str
     thread_id: str
-    sender: str
+    sender: str  # the From header: "Sarah Tan <sarah@x.com>"
     subject: str
     received: datetime
     snippet: str
     body: str = ""  # plain text, quotes and signature removed
+    automated: bool = False  # see automated()
 
     @property
     def url(self) -> str:
         return f"https://mail.google.com/mail/u/0/#all/{self.thread_id}"
+
+    @property
+    def from_address(self) -> str:
+        return parseaddr(self.sender)[1].lower()
+
+    @property
+    def from_name(self) -> str:
+        """The sender's name, or the first part of their address."""
+        name, address = parseaddr(self.sender)
+        return " ".join(name.split()) or address.split("@")[0]
 
     @property
     def text(self) -> str:
@@ -136,6 +158,13 @@ class GoogleClient:
         found = self._call("GET", f"{GMAIL}/messages", params={"q": query, "maxResults": limit})
         return [self._email(m["id"]) for m in found.get("messages", [])]
 
+    def new_mail(self, after: datetime | None = None, limit: int = 20) -> list[Email]:
+        """Newest first: mail people sent you (PEOPLE_MAIL), without newsletters and no-reply senders (automated).
+        Sync reads it for senders Troth doesn't follow yet."""
+        query = PEOPLE_MAIL + (f" after:{int(after.timestamp())}" if after else "")
+        found = self._call("GET", f"{GMAIL}/messages", params={"q": query, "maxResults": limit})
+        return [e for m in found.get("messages", []) if not (e := self._email(m["id"])).automated]
+
     def raw_messages(self, query: str, limit: int) -> list[bytes]:
         """Whole messages (RFC 822) for a Gmail search, newest first: the eval's mail sample (eval_import.py gmail)."""
         ids: list[str] = []
@@ -155,7 +184,8 @@ class GoogleClient:
         return Email(id=m["id"], thread_id=m["threadId"], sender=headers.get("from", ""),
                      subject=headers.get("subject", ""), snippet=m.get("snippet", ""),
                      body=strip_reply(_plain_text(m["payload"])),
-                     received=datetime.fromtimestamp(int(m["internalDate"]) / 1000, UTC))
+                     received=datetime.fromtimestamp(int(m["internalDate"]) / 1000, UTC),
+                     automated=automated(parseaddr(headers.get("from", ""))[1].lower(), headers))
 
     def create_draft(self, to: str, subject: str, body: str, thread_id: str | None = None) -> str:
         """Save a draft in Gmail for the user to send (or not). Returns the draft id."""

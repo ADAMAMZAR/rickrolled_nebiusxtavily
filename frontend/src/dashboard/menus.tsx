@@ -66,7 +66,10 @@ export function Settings({ onChange }: { onChange: () => void }) {
           {status.sync_error && <p className="error-line">Last check failed: {status.sync_error}</p>}
           <p className="muted">
             {status.auto_sync_minutes > 0 ? `Checks email every ${status.auto_sync_minutes} minutes while Troth runs. ` : "Checks email when scripts/sync.py runs. "}
-            Reads email only from people linked to open loops. Drafts and calendar events need your OK. Nothing is ever sent.
+            {status.new_senders
+              ? "Reads email from people linked to open loops. Mail from anyone else (not newsletters, or Gmail's Promotions, Social, Updates and Forums) only suggests loops, for your yes. "
+              : "Reads email only from people linked to open loops. "}
+            Drafts and calendar events need your OK. Nothing is ever sent.
           </p>
           <div><button className="btn small" type="button" disabled={!!busy} onClick={() => google("/api/google/disconnect", "Disconnecting…")}>{busy ?? "Disconnect"}</button></div>
         </>)}

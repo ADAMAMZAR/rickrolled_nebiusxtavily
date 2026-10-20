@@ -1,4 +1,5 @@
-"""Email sync (spec §6): only linked people are read, each email once, and an email touches only its sender's loops."""
+"""Email sync (spec §6): linked people are read, each email once, and an email touches only its sender's loops.
+Mail from anyone else only proposes loops, for the user's yes."""
 
 from datetime import UTC, datetime, timedelta
 
@@ -25,18 +26,27 @@ def email(id: str = "m1", body: str = "Great news, we'd like to interview you on
 
 
 class FakeMailbox:
-    """Returns queued emails per sender and records each query."""
+    """Returns queued emails per sender, and `new` as new mail (anyone), and records each query."""
 
-    def __init__(self, mail: dict[str, list[Email]] | None = None, error: str | None = None) -> None:
+    def __init__(self, mail: dict[str, list[Email]] | None = None, error: str | None = None,
+                 new: list[Email] | None = None) -> None:
         self.mail = mail or {}
         self.error = error
+        self.new = new or []
         self.queries: list[tuple[str, datetime | None]] = []
+        self.new_queries: list[datetime | None] = []
 
     def messages_from(self, sender: str, after: datetime | None = None, limit: int = 5) -> list[Email]:
         self.queries.append((sender, after))
         if self.error:
             raise GoogleError(self.error)
         return self.mail.get(sender, [])
+
+    def new_mail(self, after: datetime | None = None, limit: int = 20) -> list[Email]:
+        self.new_queries.append(after)
+        if self.error:
+            raise GoogleError(self.error)
+        return self.new
 
 
 def linked(session: Session):
@@ -72,7 +82,7 @@ def test_an_email_closes_its_loop_with_undo(session: Session) -> None:
     assert (source.kind, source.sender, source.external_id) == ("email", "Sarah", "m1")
 
 
-def test_only_people_with_an_email_and_an_open_loop_are_read(session: Session) -> None:
+def test_only_people_with_an_email_and_an_open_loop_are_followed(session: Session) -> None:
     wait, _ = linked(session)
     process(session, result(new=[loop("Get dataset", "waiting", waiting_on="Alex")]), "Alex owes me the dataset.")
     eng.set_person_email(session, "Bob", "bob@x.com")  # no open loop
@@ -231,9 +241,10 @@ def test_a_rejected_email_task_keeps_nothing_of_the_email(session: Session) -> N
     reply = result(new=[loop("Confirm account", quote=words)])
     lines, _ = sync(session, FakeLLM(reply), FakeMailbox({SARAH: [email(body=f"Hi Adam, please {words}.")]}))
     assert lines == ['Add "Confirm account" from Sarah\'s email? It has a link, so check who\'s asking first. (yes/no)']
-    eng.reject_action(session, eng.list_actions(session)[0].id)
+    rejected = eng.reject_action(session, eng.list_actions(session)[0].id)
     source = session.exec(select(Source).where(Source.external_id == "m1")).one()
     assert (source.text, source.sender) == ("", None)  # the Gmail id stays, so it's never read again
+    assert (rejected.payload["quote"], rejected.payload["sender_email"], rejected.payload["source_url"]) == ("", None, None)
     assert eng.hold_reason("Send the report to ben@example.com") == "has an email address"
     assert eng.hold_reason("Reply with the security code") == eng.hold_reason("Add a donation appeal") == (
         "asks for money or details")
@@ -289,3 +300,72 @@ def test_an_email_task_is_linked_to_its_sender_so_their_next_email_can_close_it(
                     now=NOW + timedelta(minutes=10))
     assert lines == ['Email from Sarah: closed "Complete online assessment".']
     assert str(made.id) in llm.calls[0][1]["content"]  # the model was shown it
+
+
+# --- mail from someone new: proposals only ---
+
+PEARL = "pearl@revolab.com"
+SIGN = "please sign and return the contract by Friday"
+
+
+def pearl(id: str = "p1", body: str = f"Hi Adam, {SIGN}.", minutes: int = 0) -> Email:
+    return Email(id=id, thread_id=f"t-{id}", sender=f"Pearl Li <{PEARL}>", subject="Offer", snippet="",
+                 body=body, received=NOW.astimezone(UTC) + timedelta(minutes=minutes))
+
+
+def test_mail_from_someone_new_only_proposes_and_a_yes_follows_them(session: Session) -> None:
+    """Sync read only people linked to an open loop, so a new recruiter's request never reached Troth. Their mail
+    now proposes loops and changes none; a yes saves their address, so their replies are followed."""
+    wait, _ = linked(session)
+    reply = result(goals=[{"title": "Join Revolab"}], resolved=[{"id": str(wait.id), "quote": SIGN}],
+                   new=[loop("Sign Revolab contract", due="2026-10-02", goal="Join Revolab", quote=SIGN)])
+    llm, mailbox = FakeLLM(reply), FakeMailbox(new=[pearl()])
+    lines, _ = sync(session, llm, mailbox)
+    assert lines == ['Add "Sign Revolab contract" (due Fri Oct 2) from Pearl Li\'s email? They\'re new: on a yes, '
+                     'Troth follows their replies. (yes/no)']
+    assert str(wait.id) not in llm.calls[0][1]["content"] and PEARL not in llm.calls[0][1]["content"]
+    assert eng.get_loop(session, wait.id).loop.status == LoopStatus.open
+    assert [s.goal.title for s in eng.list_goals(session)] == ["Secure NVIDIA internship"]  # no goal without a yes
+    assert "Pearl Li" not in [p.name for p in eng.list_people(session)]  # nobody is kept for a proposal
+
+    eng.approve_action(session, eng.list_actions(session)[0].id)
+    made = next(l for l in eng.list_loops(session) if l.title == "Sign Revolab contract")
+    person = next(p for p in eng.list_people(session) if p.name == "Pearl Li")
+    assert (made.person_id, person.email, made.goal_id is not None) == (person.id, PEARL, True)
+    sync(session, FakeLLM(), mailbox, now=NOW + timedelta(minutes=10))
+    assert PEARL in [q[0] for q in mailbox.queries]  # followed: their next email can update or close it
+
+
+def test_a_risky_ask_from_someone_new_says_why_and_a_reminder_doesnt_ask_twice(session: Session) -> None:
+    words = "pay the RM50 deposit at www.revolab-pay.co"
+    reply = result(new=[loop("Pay Revolab deposit", quote=words)])
+    lines, _ = sync(session, FakeLLM(reply, reply),
+                    FakeMailbox(new=[pearl("p2", f"Reminder: {words}.", minutes=5), pearl("p1", f"Hi, {words}.")]))
+    assert lines == ['Add "Pay Revolab deposit" from Pearl Li\'s email? It has a link, so check who\'s asking first. (yes/no)']
+    assert len(eng.list_actions(session)) == 1
+
+
+def test_someone_saved_without_an_open_loop_is_new_too(session: Session) -> None:
+    eng.set_person_email(session, "Bob", "bob@x.com")
+    ask = "send the slides by Friday"
+    mail = Email(id="b1", thread_id="t-b1", sender="Robert <bob@x.com>", subject="Slides", snippet="",
+                 body=f"Can you {ask}?", received=NOW.astimezone(UTC))
+    sync(session, FakeLLM(result(new=[loop("Send slides to Bob", quote=ask)])), FakeMailbox(new=[mail]))
+    eng.approve_action(session, eng.list_actions(session)[0].id)
+    [bob] = eng.list_people(session)
+    assert (bob.name, bob.email) == ("Bob", "bob@x.com")
+    assert next(l for l in eng.list_loops(session) if l.title == "Send slides to Bob").person_id == bob.id
+
+
+def test_new_mail_from_someone_followed_is_read_once_as_theirs(session: Session) -> None:
+    wait, _ = linked(session)
+    llm = FakeLLM(result(resolved=[{"id": str(wait.id), "quote": YES}]))
+    lines, _ = sync(session, llm, FakeMailbox({SARAH: [email()]}, new=[email()]))
+    assert lines == ['Email from Sarah: closed "Wait for Sarah\'s response".'] and len(llm.calls) == 1
+
+
+def test_new_senders_can_be_turned_off(session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "email_new_senders", False)
+    mailbox = FakeMailbox(new=[pearl()])
+    assert sync(session, FakeLLM(), mailbox) == ([], [])
+    assert mailbox.new_queries == []

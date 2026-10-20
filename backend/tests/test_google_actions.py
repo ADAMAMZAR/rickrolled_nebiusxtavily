@@ -170,7 +170,7 @@ def test_google_settings_routes(db_url: str, tmp_path: Path, monkeypatch: pytest
     monkeypatch.setattr(google, "disconnect", lambda s: (disconnected.append(True), Path(s.google_token_file).unlink()))
     with TestClient(create_app(db_url), base_url="http://127.0.0.1:8000", headers={"X-Troth": "1"}) as http:
         assert http.get("/api/google/status").json() == {"connected": True, "set_up": False, "last_sync": None,
-                                                         "sync_error": None, "auto_sync_minutes": 0}
+                                                         "sync_error": None, "auto_sync_minutes": 0, "new_senders": True}
         assert http.post("/api/google/connect").json()["message"].startswith("Google isn't set up: no OAuth client file")
         assert http.post("/api/google/disconnect").json()["connected"] is False and disconnected
         assert http.post("/api/google/forget").json() == {"forgotten": 0}
