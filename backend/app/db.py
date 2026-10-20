@@ -49,7 +49,7 @@ class ActivityBy(StrEnum):
 class ActionKind(StrEnum):
     gmail_draft = "gmail_draft"
     calendar_event = "calendar_event"
-    loop_update = "loop_update"  # resolve or a new due date, found on the web
+    loop_update = "loop_update"  # resolve or a new due date found on the web, or a loop an email would make (HeldLoop)
 
 
 class ActionStatus(StrEnum):

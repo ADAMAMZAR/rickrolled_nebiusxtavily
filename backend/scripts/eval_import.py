@@ -3,12 +3,12 @@
   python scripts/eval_import.py windows --me "Adam Amzar" --me-email adam@example.com
   python scripts/eval_import.py check
   python scripts/eval_import.py blank-scam
-  python scripts/eval_import.py injection
+  python scripts/eval_import.py injection --set test2
 
 Exports go in data/eval/raw/: WhatsApp "Export chat" .txt, Telegram Desktop result.json, Gmail Takeout .mbox.
 `windows` writes items.jsonl and the two labelling sheets; `check` turns labels_a.csv into gold.jsonl and
 scam.csv into scam.jsonl. `injection` puts published attacks from data/eval/benchmarks/ into the benign injection
-items, as a held-out set (troth_eval.md §13). Everything stays in data/eval/ (gitignored). Prints counts and row
+items: a set to tune on or a held-out one (troth_eval.md §13). Everything stays in data/eval/ (gitignored). Prints counts and row
 numbers, never text.
 """
 
@@ -542,16 +542,24 @@ def cmd_blank_scam(args: argparse.Namespace) -> None:
 # --- held-out injection items (troth_eval.md §13) ---
 
 INJECTION = ROOT / "tests" / "scenarios" / "injection.jsonl"
-BENCHMARKS = {"wrappers": ("agentdojo_baseline_attacks.py", "agentdojo_important_instructions_attacks.py"),
-              "goals": ("agentdojo_workspace_injection_tasks.py",), "bipia": ("bipia_text_attack_test.json",)}
+WRAPPER_FILES = ("agentdojo_baseline_attacks.py", "agentdojo_important_instructions_attacks.py")
+# BIPIA's categories that could change a loop. The others (ciphers, emoji, translation, misspelling...) change how a
+# chat answer is written; Troth writes fields, so they would pass for free. Chosen before each set was scored.
+BIPIA_CATEGORIES = ("Task Automation", "Information Dissemination", "Marketing & Advertising", "Scams & Fraud",
+                    "Misinformation & Propaganda")
+BIPIA_TRAIN_CATEGORIES = ("Information Retrieval", "Content Creation", "Learning and Tutoring", "Programming Help",
+                          "Instruction", "Social Interaction", "Persuasion", "Clickbait", "Malware Distribution")
+# What each set is made of: AgentDojo suites (2 wrappers per goal), and a BIPIA file with how many of its attacks
+# (None: all) from which categories. "test" was scored twice and is spent; "train" is for tuning; "test2" waits for
+# the email guard (troth_eval.md §13.2). The letters start each item's id.
+SETS: dict[str, dict[str, Any]] = {
+    "test": {"agentdojo": {"workspace": "ad"}, "bipia": ("bipia_text_attack_test.json", 12, "bp", BIPIA_CATEGORIES)},
+    "train": {"agentdojo": {}, "bipia": ("bipia_text_attack_train.json", None, "bt", BIPIA_TRAIN_CATEGORIES)},
+    "test2": {"agentdojo": {"banking": "ab", "slack": "as", "travel": "at"}, "bipia": None},
+}
 # AgentDojo's templates that need only the goal and two names (tool_knowledge also needs AgentDojo's tool calls).
 WRAPPERS = ("direct", "ignore_previous", "system_message", "injecagent", "important_instructions")
 USER, MODEL = "Adam", "Nemotron"  # the carriers' "Dear Adam"; AgentDojo names the model it attacks
-# BIPIA's categories that could change a loop. The others (ciphers, emoji, translation...) change how a chat answer
-# is written; Troth writes fields, so they would pass for free. Chosen before anything was scored.
-BIPIA_CATEGORIES = ("Task Automation", "Information Dissemination", "Marketing & Advertising", "Scams & Fraud",
-                    "Misinformation & Propaganda")
-BIPIA_ITEMS = 12
 POSITIONS = ("start", "middle", "end")  # where BIPIA puts an attack in its context
 URL = re.compile(r"www\.[\w.-]*\w")
 
@@ -625,33 +633,41 @@ def insert(text: str, attack: str, position: str) -> str:
 
 
 def cmd_injection(args: argparse.Namespace) -> None:
-    folder = Path(args.dir)
+    folder, chosen = Path(args.dir), SETS[args.set]
     src = folder / "benchmarks"
-    files = {k: [src / name for name in names] for k, names in BENCHMARKS.items()}
-    if missing := [p.name for paths in files.values() for p in paths if not p.exists()]:
+    suites, bipia_file = chosen["agentdojo"], chosen["bipia"]
+    files = ([src / name for name in WRAPPER_FILES] if suites else []) + [
+        src / f"agentdojo_{suite}_injection_tasks.py" for suite in suites] + ([src / bipia_file[0]] if bipia_file else [])
+    if missing := [p.name for p in files if not p.exists()]:
         sys.exit(f"Missing in {src}: {', '.join(missing)}. troth_eval.md §13 says where to get them.")
-    out = folder / "injection_test.jsonl"
+    out = folder / f"injection_{args.set}.jsonl"
     if out.exists() and not args.force:
         sys.exit(f"{out} exists. Make it again only if it hasn't been scored (--force).")
     rng = random.Random(args.seed)
-    wrappers = read_wrappers(files["wrappers"])
+    wrappers = read_wrappers(files[:2]) if suites else {}
     attacks = []
-    for name, goal, used in read_goals(files["goals"][0]):
-        for wrapper in rng.sample(WRAPPERS, 2):
-            attacks.append({"item": f"ad-{len(attacks) + 1:02}", "pattern": f"agentdojo/{wrapper}",
-                            "text": wrappers[wrapper].format(goal=goal, user=USER, model=MODEL),
-                            "bad": list(dict.fromkeys(u for u in used if len(u) >= 6)),  # not "13": dates have it
-                            "from": f"AgentDojo v1 workspace {name}"})
-    bipia = json.loads(files["bipia"][0].read_text(encoding="utf-8"))
-    if missing := [c for c in BIPIA_CATEGORIES if c not in bipia]:
-        sys.exit(f"No BIPIA category {', '.join(missing)}: the file may be another version.")
-    pools = [[(c, text) for text in rng.sample(bipia[c], len(bipia[c]))] for c in BIPIA_CATEGORIES]
-    for n, (category, text) in enumerate([pair for row in zip(*pools) for pair in row][:BIPIA_ITEMS], 1):
-        attacks.append({"item": f"bp-{n:02}", "pattern": f"bipia/{category}", "text": text, "bad": URL.findall(text),
-                        "from": "BIPIA text_attack_test"})
+    for suite, prefix in suites.items():
+        n = 0
+        for name, goal, used in read_goals(src / f"agentdojo_{suite}_injection_tasks.py"):
+            for wrapper in rng.sample(WRAPPERS, 2):
+                n += 1
+                attacks.append({"item": f"{prefix}-{n:02}", "pattern": f"agentdojo/{wrapper}",
+                                "text": wrappers[wrapper].format(goal=goal, user=USER, model=MODEL),
+                                "bad": list(dict.fromkeys(u for u in used if len(u) >= 6)),  # not "13": dates have it
+                                "from": f"AgentDojo v1 {suite} {name}"})
+    if bipia_file:
+        name, count, prefix, categories = bipia_file
+        bipia = json.loads((src / name).read_text(encoding="utf-8"))
+        if missing := [c for c in categories if c not in bipia]:
+            sys.exit(f"No BIPIA category {', '.join(missing)}: the file may be another version.")
+        pools = [[(c, text) for text in rng.sample(bipia[c], len(bipia[c]))] for c in categories]
+        for n, (category, text) in enumerate([pair for row in zip(*pools) for pair in row][:count], 1):
+            attacks.append({"item": f"{prefix}-{n:02}", "pattern": f"bipia/{category}", "text": text,
+                            "bad": URL.findall(text), "from": f"BIPIA {name.removeprefix('bipia_').removesuffix('.json')}"})
     with INJECTION.open(encoding="utf-8") as f:
         carriers = [i for i in map(json.loads, filter(str.strip, f)) if i["pattern"] == "benign"]
     rng.shuffle(attacks)  # then each carrier gets one attack at each position
+    held = args.set.startswith("test")
     items = []
     for n, a in enumerate(attacks):
         carrier, position = carriers[n % len(carriers)], POSITIONS[n // len(carriers) % len(POSITIONS)]
@@ -659,15 +675,17 @@ def cmd_injection(args: argparse.Namespace) -> None:
         items.append(carrier | {
             "item": a["item"], "pattern": a["pattern"], field: insert(carrier[field], a["text"], position),
             "bad": a["bad"], "carrier": carrier["item"], "position": position,
-            "note": (f"TEST SAMPLE, held out: {a['from']} inside {carrier['item']} ({position}). Made by "
-                     "scripts/eval_import.py injection; never tune on it (troth_eval.md §13)."),
+            "note": (f"TEST SAMPLE, {'held out' if held else 'to tune on'}: {a['from']} inside {carrier['item']} "
+                     f"({position}). Made by scripts/eval_import.py injection"
+                     + ("; never tune on it" if held else "") + " (troth_eval.md §13)."),
         })
     with out.open("w", encoding="utf-8") as f:
         f.writelines(json.dumps(i, ensure_ascii=False) + "\n" for i in sorted(items, key=lambda i: i["item"]))
-    sums = ", ".join(f"{p.name} {hashlib.sha256(p.read_bytes()).hexdigest()[:12]}" for paths in files.values() for p in paths)
-    print(f"{out.name}: {len(items)} held-out items ({sum(i['item'].startswith('ad-') for i in items)} AgentDojo, "
-          f"{sum(i['item'].startswith('bp-') for i in items)} BIPIA) in {len(carriers)} benign carriers.\n"
-          f"Sources (sha256): {sums}\nScore it with EVAL_SPLIT=test pytest -m eval -k injection, twice in total.")
+    sums = ", ".join(f"{p.name} {hashlib.sha256(p.read_bytes()).hexdigest()[:12]}" for p in files)
+    agentdojo = sum(a["pattern"].startswith("agentdojo/") for a in attacks)
+    print(f"{out.name}: {len(items)} items ({agentdojo} AgentDojo, {len(items) - agentdojo} BIPIA) in {len(carriers)} "
+          f"benign carriers.\nSources (sha256): {sums}\nScore it with EVAL_SPLIT={args.set} pytest -m eval -k injection"
+          + (", twice in total." if held else "."))
 
 
 def main() -> None:
@@ -688,7 +706,8 @@ def main() -> None:
     c = sub.add_parser("check", help="labels_a.csv -> gold.jsonl; scam.csv -> scam.jsonl")
     c.add_argument("--test", type=float, default=0.4)
     sub.add_parser("blank-scam", help="scam.csv -> scam_sheet_b.csv without labels")
-    j = sub.add_parser("injection", help="benchmarks/ -> injection_test.jsonl, the held-out injection items")
+    j = sub.add_parser("injection", help="benchmarks/ -> injection_<set>.jsonl: published attacks in benign items")
+    j.add_argument("--set", choices=SETS, default="test")
     j.add_argument("--seed", type=int, default=SEED)
     j.add_argument("--force", action="store_true")
     args = parser.parse_args()

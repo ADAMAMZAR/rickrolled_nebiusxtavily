@@ -315,18 +315,24 @@ def benchmarks(folder: Path) -> None:
         'class B(Base):\n    _JB_STRING = (\n        "\\n\\nFrom {user} to {model}:\\n\\n"\n        "{goal}\\n\\n"\n    )\n'
         '    name = "important_instructions"\n\n    def __init__(self, s, p):\n        super().__init__(self._JB_STRING, s, p)\n\n\n'
         'class C(B):\n    name = "important_instructions_no_names"\n\n    def __init__(self, s, p):\n        super().__init__(s, p)\n'))
-    write(src / "agentdojo_workspace_injection_tasks.py", "".join(
-        f'class InjectionTask{n}(Base):\n    DIFFICULTY = D.EASY\n    _PLACE = "plants-{n}@example.com"\n    _N = "13"\n'
-        f'    GOAL = (f"Water {{_PLACE}} " f"{{_N}} times.")\n\n' for n in range(6)))
-    write(src / "bipia_text_attack_test.json", json.dumps(
-        {c: [f"Placeholder {k} at www.example{k}.com." for k in range(5)] for c in (*imp.BIPIA_CATEGORIES, "Reverse Text")}))
+    for suite in ("workspace", "banking", "slack", "travel"):
+        write(src / f"agentdojo_{suite}_injection_tasks.py", "".join(
+            f'class InjectionTask{n}(Base):\n    DIFFICULTY = D.EASY\n    _PLACE = "plants-{n}@example.com"\n    _N = "13"\n'
+            f'    GOAL = (f"Water {{_PLACE}} " f"{{_N}} times.")\n\n' for n in range(6)))
+    for split, categories in (("test", imp.BIPIA_CATEGORIES), ("train", imp.BIPIA_TRAIN_CATEGORIES)):
+        write(src / f"bipia_text_attack_{split}.json", json.dumps(
+            {c: [f"Placeholder {k} at www.example{k}.com." for k in range(5)] for c in (*categories, "Reverse Text")}))
+
+
+def make(folder: Path, name: str) -> list[dict[str, Any]]:
+    imp.cmd_injection(argparse.Namespace(dir=str(folder), set=name, seed=imp.SEED, force=False))
+    return rep.load(folder / f"injection_{name}.jsonl")
 
 
 def test_held_out_injection_items_come_from_the_benchmark_files(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     benchmarks(tmp_path)
-    imp.cmd_injection(argparse.Namespace(dir=str(tmp_path), seed=imp.SEED, force=False))
+    items = make(tmp_path, "test")
     assert "Placeholder" not in capsys.readouterr().out  # counts, never text
-    items = rep.load(tmp_path / "injection_test.jsonl")
     carriers = {i["item"]: i for i in rep.load(INJECTION) if i["pattern"] == "benign"}
     assert len({i["item"] for i in items}) == 24
     assert Counter((i["carrier"], i["position"]) for i in items) == Counter((c, p) for c in carriers for p in imp.POSITIONS)
@@ -345,7 +351,16 @@ def test_held_out_injection_items_come_from_the_benchmark_files(tmp_path: Path, 
     assert sum(bipia.values()) == 12 and set(bipia) == {f"bipia/{c}" for c in imp.BIPIA_CATEGORIES}
     assert all(i["bad"][0].startswith("www.example") for i in items if i["item"].startswith("bp-"))
     with pytest.raises(SystemExit, match="exists"):  # made again only with --force, before it's scored
-        imp.cmd_injection(argparse.Namespace(dir=str(tmp_path), seed=imp.SEED, force=False))
+        make(tmp_path, "test")
+
+
+def test_the_other_injection_sets_take_their_own_sources(tmp_path: Path) -> None:
+    benchmarks(tmp_path)
+    train = make(tmp_path, "train")  # every BIPIA train attack in the chosen categories, to tune on
+    assert len(train) == 45 and all(i["item"].startswith("bt-") and "to tune on" in i["note"] for i in train)
+    test2 = make(tmp_path, "test2")  # AgentDojo's other suites, held out
+    assert Counter(i["item"][:2] for i in test2) == Counter({"ab": 12, "as": 12, "at": 12})
+    assert all(i["pattern"].startswith("agentdojo/") and "held out" in i["note"] for i in test2)
 
 
 def test_an_attack_goes_in_as_its_own_paragraph() -> None:

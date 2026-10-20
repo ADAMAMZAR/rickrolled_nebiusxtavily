@@ -10,7 +10,7 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 from urllib.parse import urlparse
 from uuid import UUID
 from zoneinfo import ZoneInfo
@@ -62,6 +62,7 @@ class ChangeSet:
     linked: list[tuple[OpenLoop, OpenLoop]] = field(default_factory=list)  # (loop, what it needs)
     at_risk: list[Risk] = field(default_factory=list)  # new or changed since before this message
     ready: list[OpenLoop] = field(default_factory=list)  # the last open thing they needed just closed
+    held: list[PendingAction] = field(default_factory=list)  # loops an email would make that wait for a yes (hold_reason)
 
 
 @dataclass
@@ -151,6 +152,16 @@ def process_message(
                 log.info("change_dropped change=new reason=no_quote")
                 continue
             seen.add(key)
+            words = " ".join(filter(None, (candidate.title, candidate.summary, candidate.next_action, quote)))
+            if person is not None and (why := hold_reason(words)):
+                held = HeldLoop(title=candidate.title, summary=candidate.summary or candidate.title,
+                                kind=LoopKind(candidate.kind), waiting_on=candidate.waiting_on, due=candidate.due,
+                                next_action=candidate.next_action, goal=candidate.goal, quote=quote or "",
+                                source_id=source.id, source_url=link or None, sender=person.name, why=why)
+                action = PendingAction(kind=ActionKind.loop_update, payload=held.model_dump(mode="json"))
+                session.add(action)
+                changes.held.append(action)
+                continue
             goal = _find_or_add_goal(session, candidate.goal, None, goal_by_name, changes) if candidate.goal else None
             created = add_loop(
                 session,
@@ -213,7 +224,7 @@ def process_message(
                 log.info("dependency_dropped reason=unknown")
 
         if not (changes.created_goals or changes.created_loops or changes.updated_loops or changes.resolved_loops
-                or changes.linked):
+                or changes.linked or changes.held):
             session.rollback()
             changes.source = None
             log.info("message_processed nothing_to_save")
@@ -236,6 +247,8 @@ def process_message(
         log.info("loop_created id=%s", loop.id)
     for loop in changes.resolved_loops:
         log.info("loop_resolved id=%s", loop.id)
+    for action in changes.held:
+        log.info("action_proposed id=%s kind=new_loop", action.id)
     return changes
 
 
@@ -759,20 +772,26 @@ def delete_loop(session: Session, loop_id: UUID) -> None:
     session.delete(loop)
     session.flush()
     for source_id in sources - {None}:
-        source = session.get(Source, source_id)
-        if source is None or _source_used(session, source_id):
-            continue
-        if source.external_id:  # an email: keep its Gmail id, so sync never reads it again
-            source.text, source.sender, source.url = "", None, None
-        else:
-            session.delete(source)
+        _forget_source(session, source_id)
     session.commit()
     log.info("loop_deleted id=%s", loop_id)
 
 
+def _forget_source(session: Session, source_id: UUID) -> None:
+    """Drop the words a loop came from once nothing uses them (no commit)."""
+    source = session.get(Source, source_id)
+    if source is None or _source_used(session, source_id):
+        return
+    if source.external_id:  # an email: keep its Gmail id, so sync never reads it again
+        source.text, source.sender, source.url = "", None, None
+    else:
+        session.delete(source)
+
+
 def _source_used(session: Session, source_id: UUID) -> bool:
     return any(session.exec(select(model.id).where(model.source_id == source_id)).first() is not None
-               for model in (OpenLoop, Activity, Dependency))
+               for model in (OpenLoop, Activity, Dependency)) or any(
+        held.source_id == source_id for a in list_actions(session, WAITING) if (held := _held(a)) is not None)
 
 
 def _get(session: Session, loop_id: UUID) -> OpenLoop:
@@ -862,6 +881,48 @@ class LoopUpdate(BaseModel):
         return self
 
 
+LINK = re.compile(r"https?://|www\.", re.IGNORECASE)
+# Besides MONEY: a login, a code, an ID or a donation (tuned on BIPIA's train attacks, troth_eval.md §13.2).
+DETAILS = re.compile(r"\b(password|passcode|PIN|log ?in|security code|verification code|IC|passport|donat\w*)\b",
+                     re.IGNORECASE)
+
+
+def hold_reason(text: str) -> str | None:
+    """Why a loop an email would make waits for the user's yes: its words have a link or an email address, or ask
+    for money or details. On published attacks, that's how an email tries to get them (troth_eval.md §13.2).
+    None: it's made right away, like every other email change."""
+    if LINK.search(text):
+        return "has a link"
+    if re.search(EMAIL, text):
+        return "has an email address"
+    if MONEY.search(text) or DETAILS.search(text):
+        return "asks for money or details"
+    return None
+
+
+class HeldLoop(BaseModel):
+    """A loop an email would make, waiting for the user's yes (hold_reason). Kept as a loop_update action with no
+    loop yet: a new action kind would need a migration on Postgres."""
+
+    new_loop: Literal[True] = True
+    title: str
+    summary: str
+    kind: LoopKind
+    waiting_on: str | None = None
+    due: date | None = None
+    next_action: str | None = None
+    goal: str | None = None
+    quote: str
+    source_id: UUID
+    source_url: str | None = None  # the Gmail thread: the dashboard links it
+    sender: str
+    why: str  # "has a link", ... (hold_reason)
+
+
+def _held(action: PendingAction) -> HeldLoop | None:
+    return HeldLoop.model_validate(action.payload) if action.payload.get("new_loop") else None
+
+
 def propose_loop_update(session: Session, loop_id: UUID, change: LoopUpdate) -> PendingAction:
     """Save a proposal. If the same change already waits for an answer, return that one instead."""
     if _get(session, loop_id).status != LoopStatus.open:
@@ -949,6 +1010,9 @@ def list_actions(
 
 def describe_action(session: Session, action: PendingAction) -> str:
     """One line for the dashboard, chat and Telegram."""
+    if (held := _held(action)) is not None:
+        due = f" (due {held.due:%a %b} {held.due.day})" if held.due else ""
+        return f'Add "{held.title}"{due} from {held.sender}\'s email? It {held.why}, so check who\'s asking first.'
     loop = session.get(OpenLoop, action.loop_id) if action.loop_id else None
     title = f'"{loop.title}"' if loop else "a deleted loop"
     if action.kind == ActionKind.loop_update:
@@ -991,6 +1055,8 @@ def approve_action(
 
 def reject_action(session: Session, action_id: UUID) -> PendingAction:
     action = _decide(session, action_id, ActionStatus.rejected)
+    if (held := _held(action)) is not None:  # the email isn't needed for anything else
+        _forget_source(session, held.source_id)
     session.commit()
     session.refresh(action)
     log.info("action_rejected id=%s", action_id)
@@ -1014,6 +1080,9 @@ def _decide(session: Session, action_id: UUID, status: ActionStatus) -> PendingA
 
 
 def _apply_loop_update(session: Session, action: PendingAction) -> None:
+    if (held := _held(action)) is not None:
+        _make_held_loop(session, action, held)
+        return
     change = LoopUpdate.model_validate(action.payload)
     loop = _get(session, action.loop_id)  # type: ignore[arg-type]  # a loop_update always has a loop
     if loop.status != LoopStatus.open:
@@ -1029,6 +1098,24 @@ def _apply_loop_update(session: Session, action: PendingAction) -> None:
     loop.updated_at = now
     _log(session, loop, ActivityAction.resolved if change.resolve else ActivityAction.updated,
          ActivityBy.web, change.source_url, undo)
+
+
+def _make_held_loop(session: Session, action: PendingAction, held: HeldLoop) -> None:
+    """The loop the email would have made, made now that the user said yes. Its history says it came from the email."""
+    if _loop_key(held.title, held.waiting_on) in {_loop_key(l.title, l.waiting_on) for l in list_loops(session)}:
+        raise InvalidRequest("That loop is already tracked.")
+    goals = {normalize(s.goal.title): s.goal for s in list_goals(session)}
+    goal = _find_or_add_goal(session, held.goal, None, goals, ChangeSet(source=None)) if held.goal else None
+    loop = add_loop(session, source_id=held.source_id, goal_id=goal.id if goal else None, title=held.title,
+                    summary=held.summary, kind=held.kind, waiting_on=held.waiting_on, due=held.due,
+                    next_action=held.next_action)
+    if loop.kind in (LoopKind.waiting, LoopKind.commitment) and normalize(loop.waiting_on or ""):
+        people = {normalize(p.name): p for p in list_people(session)}
+        loop.person_id = _find_or_add_person(session, loop.waiting_on, people).id  # type: ignore[arg-type]
+    action.loop_id = loop.id
+    _log(session, loop, ActivityAction.created, ActivityBy.email, held.source_url or "", source_id=held.source_id,
+         quote=held.quote)
+    log.info("loop_created id=%s", loop.id)
 
 
 def _run_google(session: Session, action: PendingAction, client: GoogleClient) -> None:
@@ -1234,10 +1321,11 @@ def sync_email(
             log.warning("email_unreadable id=%s error=%s", email.id, type(e).__name__)
             errors.append(f"Couldn't read an email from {person.name}: {e}")
             continue
-        if changes.source is not None:
-            lines.append(describe_email(person, changes))
+        if changes.source is not None and (line := describe_email(person, changes)):
+            lines.append(line)
         lines += risk_lines(changes)  # e.g. a delay that puts a promise that needs it at risk
-        lines += [f"{describe_action(session, a)} (yes/no)" for a in _propose_events(session, person, changes, now)]
+        lines += [f"{describe_action(session, a)} (yes/no)"
+                  for a in changes.held + _propose_events(session, person, changes, now)]
     if not errors:  # otherwise the same window is read again next run
         _set_setting(session, LAST_EMAIL_SYNC, started.isoformat())
     log.info("email_synced people=%d messages=%d changed=%d", len(people), len(inbox), len(lines))
@@ -1267,16 +1355,15 @@ def _propose_events(session: Session, person: Person, changes: ChangeSet, now: d
 
 
 def describe_email(person: Person, changes: ChangeSet) -> str:
-    """One line for Telegram, e.g. 'Email from Sarah: closed "Wait for Sarah's response"; new "Prepare for interview" (due Thu Oct 8).'"""
+    """One line for Telegram, e.g. 'Email from Sarah: closed "Wait for Sarah's response"; new "Prepare for interview" (due Thu Oct 8).'
+    Empty when the email only proposed something: that gets its own yes/no line."""
     def due(loop: OpenLoop) -> str:
         return f" (due {loop.due:%a %b} {loop.due.day})" if loop.due else ""
     parts = [f'closed "{l.title}"' for l in changes.resolved_loops]
     parts += [f'updated "{l.title}"{due(l)}' for l in changes.updated_loops]
-    # Chat offers a check for these (`remember`); an email's new loop reaches Telegram with no one to offer it.
-    parts += [f'new "{l.title}"{due(l)}' + (" (asks for money or details: check who's asking first, /check)"
-                                           if asks_for_money(l) else "") for l in changes.created_loops]
+    parts += [f'new "{l.title}"{due(l)}' for l in changes.created_loops]  # money or details wait (hold_reason)
     parts += [f'new goal "{g.title}"' for g in changes.created_goals]
-    return f"Email from {person.name}: {'; '.join(parts)}."
+    return f"Email from {person.name}: {'; '.join(parts)}." if parts else ""
 
 
 def report_sync_errors(session: Session, errors: list[str]) -> list[str]:
@@ -1314,6 +1401,9 @@ def forget_email_data(session: Session) -> int:
     sources = session.exec(select(Source).where(Source.kind == "email")).all()
     for source in sources:
         source.text, source.sender, source.url = "", None, None
+    for action in list_actions(session, None):  # loops an email proposed carry its words too
+        if _held(action) is not None:
+            session.delete(action)
     for activity in session.exec(select(Activity).where(Activity.by == ActivityBy.email)).all():
         activity.detail, activity.quote = "", None
     session.commit()

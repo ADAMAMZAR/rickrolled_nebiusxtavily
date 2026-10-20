@@ -203,15 +203,50 @@ def test_chat_messages_never_propose_events(session: Session) -> None:
     assert process(session, reply, "Interview on Oct 8 at 10.").events == []
 
 
-def test_a_new_loop_that_asks_for_money_says_check_first(session: Session) -> None:
-    """In chat, `remember` offers a check; from email the sync line says it (the injection set found email-made
-    payment tasks, troth_eval.md §11)."""
+def test_an_email_task_that_asks_for_money_waits_for_a_yes(session: Session) -> None:
+    """Published attacks get in as plain requests in an email; the harmful ones name money, a link or an address
+    (troth_eval.md §13.2). Those wait for a yes; the rest of the email applies as before."""
     linked(session)
     fee = "please pay the RM250 admin fee today"
     reply = result(new=[loop("Pay RM250 admin fee", quote=fee), loop("Prepare for NVIDIA interview", quote=OCT8)])
     lines, _ = sync(session, FakeLLM(reply), FakeMailbox({SARAH: [email(body=f"Great news, {OCT8}. Also {fee}.")]}))
-    assert lines == ['Email from Sarah: new "Pay RM250 admin fee" (asks for money or details: check who\'s asking first,'
-                     ' /check); new "Prepare for NVIDIA interview".']
+    assert lines == ['Email from Sarah: new "Prepare for NVIDIA interview".',
+                     'Add "Pay RM250 admin fee" from Sarah\'s email? It asks for money or details, so check who\'s asking'
+                     ' first. (yes/no)']
+    assert "Pay RM250 admin fee" not in [l.title for l in eng.list_loops(session)]
+
+    action = eng.list_actions(session)[0]
+    eng.approve_action(session, action.id)
+    made = next(l for l in eng.list_loops(session) if l.title == "Pay RM250 admin fee")
+    assert eng.get_loop(session, made.id).source.external_id == "m1"
+    created = eng.list_activity(session, made.id)[0]
+    assert (created.by, created.quote, created.detail) == ("email", fee, "https://mail.google.com/mail/u/0/#all/t-m1")
+    with pytest.raises(eng.InvalidRequest):  # once only
+        eng.approve_action(session, action.id)
+
+
+def test_a_rejected_email_task_keeps_nothing_of_the_email(session: Session) -> None:
+    linked(session)
+    words = "confirm your account at www.nvidia-careers.co today"
+    reply = result(new=[loop("Confirm account", quote=words)])
+    lines, _ = sync(session, FakeLLM(reply), FakeMailbox({SARAH: [email(body=f"Hi Adam, please {words}.")]}))
+    assert lines == ['Add "Confirm account" from Sarah\'s email? It has a link, so check who\'s asking first. (yes/no)']
+    eng.reject_action(session, eng.list_actions(session)[0].id)
+    source = session.exec(select(Source).where(Source.external_id == "m1")).one()
+    assert (source.text, source.sender) == ("", None)  # the Gmail id stays, so it's never read again
+    assert eng.hold_reason("Send the report to ben@example.com") == "has an email address"
+    assert eng.hold_reason("Reply with the security code") == eng.hold_reason("Add a donation appeal") == (
+        "asks for money or details")
+    assert eng.hold_reason("Send the report by Friday") is None
+
+
+def test_forgetting_email_data_drops_the_tasks_it_proposed(session: Session) -> None:
+    linked(session)
+    fee = "please pay the RM250 admin fee today"
+    sync(session, FakeLLM(result(new=[loop("Pay RM250 admin fee", quote=fee)])), FakeMailbox({SARAH: [email(body=fee)]}))
+    assert len(eng.list_actions(session)) == 1
+    eng.forget_email_data(session)
+    assert eng.list_actions(session, None) == []
 
 
 def test_an_email_change_needs_words_from_the_email(session: Session) -> None:
