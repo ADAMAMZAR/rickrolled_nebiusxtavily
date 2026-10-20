@@ -12,7 +12,7 @@ from sqlmodel import Session
 from app import engine as eng
 from app.config import settings, setup_logging
 from app.connectors import google
-from app.connectors.google import GoogleClient, GoogleError
+from app.connectors.google import GoogleClient
 from app.connectors.tavily import TavilyClient
 from app.db import create_db_engine
 from app.llm import LLMClient
@@ -23,19 +23,11 @@ def main() -> None:
     if not (google.connected(settings) or eng.web_enabled()):
         return
     db = create_db_engine(settings.database_url)
-    llm = LLMClient(settings)
-    lines: list[str] = []
+    web = TavilyClient(settings) if eng.web_enabled() else None
     with Session(db) as s:
-        if google.connected(settings):
-            try:
-                changed, errors = eng.sync_email(s, llm, GoogleClient.from_settings(settings))
-            except GoogleError as e:  # expired or revoked token
-                changed, errors = [], eng.report_sync_errors(s, [str(e)])
-            lines += changed + errors
-        if eng.web_enabled():
-            web = TavilyClient(settings)
-            proposals, errors = eng.watch_the_web(s, llm, lambda q: web.search(q, time_range="week").results)
-            lines += [f"{eng.describe_action(s, a)} (yes/no)" for a in proposals] + errors
+        lines = eng.run_sync(s, LLMClient(settings),
+                             (lambda: GoogleClient.from_settings(settings)) if google.connected(settings) else None,
+                             (lambda q: web.search(q, time_range="week").results) if web else None)
     db.dispose()
     if lines:
         print("\n".join(lines))

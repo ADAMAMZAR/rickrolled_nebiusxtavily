@@ -78,6 +78,8 @@ export interface GoogleStatus {
   connected: boolean;
   set_up: boolean;
   last_sync: string | null;
+  sync_error: string | null; // the last email check failed, e.g. Google ended the connection
+  auto_sync_minutes: number; // 0: email is read only when sync runs
 }
 
 export type RiskLevel = "LOW" | "GUARDED" | "ELEVATED" | "HIGH" | "CRITICAL" | "INSUFFICIENT_EVIDENCE";

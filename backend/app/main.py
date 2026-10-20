@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import logging
 import secrets
@@ -75,6 +76,31 @@ def default_hermes() -> HermesClient:
 @cache
 def default_web() -> TavilyClient:
     return TavilyClient(settings)
+
+
+AUTO_SYNC_FIRST = 30  # seconds after start before the first automatic check
+
+
+async def auto_sync(db: Any, get_llm: Callable[[], Completer], get_google: Callable[[], GoogleClient],
+                    get_web: Callable[[], TavilyClient]) -> None:
+    """AUTO_SYNC_MINUTES: scripts/sync.py while Troth runs, for people without Telegram. What changed shows in the
+    dashboard. The lines hold message text, so only their count is logged."""
+    await asyncio.sleep(AUTO_SYNC_FIRST)
+    while True:
+        await asyncio.to_thread(_sync_once, db, get_llm, get_google, get_web)
+        await asyncio.sleep(settings.auto_sync_minutes * 60)
+
+
+def _sync_once(db: Any, get_llm: Callable[[], Completer], get_google: Callable[[], GoogleClient],
+               get_web: Callable[[], TavilyClient]) -> None:
+    try:
+        web = get_web() if eng.web_enabled() else None
+        with Session(db) as session:
+            lines = eng.run_sync(session, get_llm(), get_google if google.connected(settings) else None,
+                                 (lambda q: web.search(q, time_range="week").results) if web else None)
+        log.info("auto_sync_done lines=%d", len(lines))
+    except Exception as e:  # the next run tries again; the type is enough to look into it (details may hold email text)
+        log.warning("auto_sync_failed error=%s", type(e).__name__)
 
 
 def get_session(request: Request) -> Iterator[Session]:
@@ -166,8 +192,12 @@ def create_app(
         app.state.db = create_db_engine(database_url or settings.database_url)
         with Session(app.state.db) as session:
             inv.fail_interrupted(session)
+        sync = (asyncio.create_task(auto_sync(app.state.db, get_llm, get_google, get_web))
+                if settings.auto_sync_minutes > 0 else None)
         async with mcp.session_manager.run():
             yield
+        if sync is not None:
+            sync.cancel()
         app.state.db.dispose()
 
     app = FastAPI(title="Troth", lifespan=lifespan)
@@ -385,6 +415,8 @@ def create_app(
             "connected": google.connected(settings),
             "set_up": Path(settings.google_client_secret_file).exists(),  # the OAuth client file is there
             "last_sync": eng.get_setting(session, eng.LAST_EMAIL_SYNC),
+            "sync_error": eng.get_setting(session, eng.LAST_SYNC_ERROR),  # cleared by the next good check
+            "auto_sync_minutes": settings.auto_sync_minutes,
         }
 
     @app.post("/api/google/connect")

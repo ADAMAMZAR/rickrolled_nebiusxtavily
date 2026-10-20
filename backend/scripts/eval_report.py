@@ -5,6 +5,7 @@ failures.csv, for error analysis.
   python scripts/eval_report.py compare A B              # two loop (or injection) runs on the same items: McNemar
   python scripts/eval_report.py scam [RESULTS] [--weight KIND=N] [--floors 75,50,25,1] [--ablate]
   python scripts/eval_report.py injection [RESULTS]
+  python scripts/eval_report.py dates [RESULTS]          # weekday due dates
   python scripts/eval_report.py kappa                    # labels_a.csv vs labels_b.csv, scam.csv vs scam_b.csv
   python scripts/eval_report.py cost RESULTS... [--price-in USD --price-out USD --credit USD] [--runs 5]
 
@@ -38,6 +39,7 @@ from scripts.eval_import import load_items, parse_labels, parse_scam  # noqa: E4
 
 EVAL_DIR = Path(os.environ.get("EVAL_DIR", "data/eval"))
 INJECTION = ROOT / "tests" / "scenarios" / "injection.jsonl"
+DATES = ROOT / "tests" / "scenarios" / "dates.jsonl"
 NOT_SCORED = "LLMError"  # Nebius unreachable or rate-limited: not the model's answer, so left out
 
 
@@ -349,6 +351,9 @@ def cmd_compare(args: argparse.Namespace) -> None:
     if ra and ra[0].get("kind") == "injection":
         compare_injection(ra, rb)
         return
+    if ra and ra[0].get("kind") == "dates":
+        compare_dates(ra, rb)
+        return
     gold = load_gold()
     a, b = scored(ra, gold), scored(rb, gold)
 
@@ -594,6 +599,54 @@ def compare_injection(ra: list[dict[str, Any]], rb: list[dict[str, Any]]) -> Non
               f" Only A: {only_a}, only B: {only_b}, McNemar p = {mcnemar(only_a, only_b):.3f}")
 
 
+# --- weekday due dates (troth_eval.md §14) ---
+
+
+def date_right(item: dict[str, Any], p: dict[str, Any] | None) -> tuple[bool, bool]:
+    """(found the item's task, with the right due date). The task is a new loop, or one waiting for a yes, whose
+    title has one of the item's keywords."""
+    p = p or EMPTY
+    loops = p["loops"] + [a["payload"] for a in p["proposals"] if a["payload"].get("new_loop")]
+    mine = [l for l in loops if any(k in l["title"].casefold() for k in item["keywords"])]
+    return bool(mine), any(l["due"] == item["due"] for l in mine)
+
+
+def cmd_dates(args: argparse.Namespace) -> None:
+    path = Path(args.results) if args.results else latest("dates")
+    records, items = load(path), {i["item"]: i for i in load(DATES)}
+    header(path, records)
+    runs, skipped = by_item(records)
+    scores = {i: [date_right(items[i], r["predicted"]) for r in rs] for i, rs in runs.items()}
+    print(f"\n{len(runs)} items, {sum(map(len, runs.values()))} runs ({skipped} left out: Nebius unreachable).\n")
+    print("| Field | Rate | 95% interval | n |\n|---|---|---|---|")
+    for label, keep in (("All", lambda i: True), ("Chat", lambda i: items[i]["path"] == "chat"),
+                        ("Email", lambda i: items[i]["path"] == "email"), ("English", lambda i: items[i]["lang"] == "en"),
+                        ("Malay", lambda i: items[i]["lang"] == "ms")):
+        ids = [i for i in scores if keep(i)]
+        print(rate_row(f"{label}: right due date", sum(sum(r for _, r in scores[i]) / len(scores[i]) for i in ids),
+                       len(ids), "items"))
+    print(rate_row("Task found", sum(sum(f for f, _ in s) / len(s) for s in scores.values()), len(scores), "items"))
+    wrong = {i: Counter(l["due"] for r in runs[i] for l in r["predicted"]["loops"]
+                        if any(k in l["title"].casefold() for k in items[i]["keywords"]))
+             for i, s in scores.items() if not all(r for _, r in s)}
+    print("\nWrong in some runs (item: expected, dates given): " + ("; ".join(
+        f"{i}: {items[i]['due']}, {dict(c)}" for i, c in sorted(wrong.items())) or "none"))
+
+
+def compare_dates(ra: list[dict[str, Any]], rb: list[dict[str, Any]]) -> None:
+    items = {i["item"]: i for i in load(DATES)}
+    a, b = by_item(ra)[0], by_item(rb)[0]
+
+    def right(rs: list[dict[str, Any]]) -> bool:
+        return sum(date_right(items[r["item"]], r["predicted"])[1] for r in rs) * 2 > len(rs)
+
+    ids = sorted(a.keys() & b.keys())
+    only_a = sum(right(a[i]) and not right(b[i]) for i in ids)
+    only_b = sum(right(b[i]) and not right(a[i]) for i in ids)
+    print(f"Right due date in most runs: A {sum(right(a[i]) for i in ids)}, B {sum(right(b[i]) for i in ids)} of "
+          f"{len(ids)}. Only A: {only_a}, only B: {only_b}, McNemar p = {mcnemar(only_a, only_b):.3f}")
+
+
 # --- labeller agreement ---
 
 QUESTIONS: dict[str, Callable[[list[dict[str, Any]]], bool]] = {
@@ -670,7 +723,7 @@ def cmd_cost(args: argparse.Namespace) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     sub = parser.add_subparsers(dest="cmd", required=True)
-    for name in ("loops", "injection"):
+    for name in ("loops", "injection", "dates"):
         sub.add_parser(name).add_argument("results", nargs="?")
     s = sub.add_parser("scam")
     s.add_argument("results", nargs="?")
@@ -689,8 +742,8 @@ def main() -> None:
     cost.add_argument("--runs", type=int, default=5)
     cost.add_argument("--split", default="dev")
     args = parser.parse_args()
-    {"loops": cmd_loops, "compare": cmd_compare, "scam": cmd_scam, "injection": cmd_injection, "kappa": cmd_kappa,
-     "cost": cmd_cost}[args.cmd](args)
+    {"loops": cmd_loops, "compare": cmd_compare, "scam": cmd_scam, "injection": cmd_injection, "dates": cmd_dates,
+     "kappa": cmd_kappa, "cost": cmd_cost}[args.cmd](args)
 
 
 if __name__ == "__main__":

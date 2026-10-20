@@ -60,7 +60,7 @@ Every loop goes through five steps:
 ### Before things slip
 
 - **Needs attention.** The top of the dashboard lists what's overdue, due today or tomorrow, or hasn't been touched for 4 days (`STALE_DAYS`). Plain rules, no LLM, so it's instant and predictable. Ask *"What's urgent?"* in chat for the same list.
-- **What it depends on.** Say *"I promised Sarah my NVIDIA application by Friday, but I can only send it once Dr. Lim sends my reference letter"* and Troth links the two. If Dr. Lim's letter slips past Friday (say his email moves it to next week), the application moves to the top of Needs attention with the reason and options worked out in code: *at risk: "Get reference letter from Dr. Lim" is due Wed Oct 28, after this. Options: Ask Dr. Lim if Thu Oct 22 works · Tell Sarah early and offer Wed Oct 28 · Move your date.* The sync job posts the same line to Telegram, and *Ready* once the letter arrives. Links come only from what you say, never from a shared topic. Ask *"what's blocking the application?"* to see them.
+- **What it depends on.** Say *"I promised Sarah my NVIDIA application by Friday, but I can only send it once Dr. Lim sends my reference letter"* and Troth links the two. If Dr. Lim's letter slips past Friday (say his email moves it to next week), the application moves to the top of Needs attention with the reason and options worked out in code: *at risk: "Get reference letter from Dr. Lim" is due Wed Oct 28, after this. Options: Ask Dr. Lim if Thu Oct 22 works · Tell Sarah early and offer Wed Oct 28 · Move your date.* The sync job posts the same line to Telegram, and *Ready* once the letter arrives; Needs attention shows *ready* for 3 days too. Links come only from what you say, never from a shared topic. Ask *"what's blocking the application?"* to see them.
 - **Snooze.** Hide a loop until Tomorrow, In 3 days, Next Monday or any date, from the dashboard or in chat (*"snooze the portfolio till Monday"*). It comes back on that day.
 - **Drafts.** Click **Draft** (or ask *"draft a follow-up to Sarah"*) and Troth writes a short message for you to copy. It never sends anything.
 - **Telegram.** The same assistant on your phone: capture loops on the go, ask what's urgent. [Setup](#telegram-optional).
@@ -252,6 +252,10 @@ An older job made from `hermes/briefing_prompt.md` switches over with `hermes -p
 
 The gateway (`hermes -p continuum gateway run`) must be running for it to fire. To try it now: `hermes -p continuum cron list` shows the job id, and `hermes -p continuum cron run <id>` sends it within a minute.
 
+### Automatic email and web sync (optional, no Telegram needed)
+
+Set `AUTO_SYNC_MINUTES=10` in `.env` and restart Troth. While it runs, it reads new email from people linked to open loops and checks watched loops on the web every 10 minutes, the same as `python scripts/sync.py`. What changed shows in the dashboard: loops an email closed or updated (with Undo), **Pending actions** for what waits for your yes, and **Needs attention**. **Settings** shows the last email check and, if one failed, why (for example, Google ended the connection: connect again). Use this or the Telegram job below on one machine, not both.
+
 ### Email and web sync on Telegram (optional, needs Telegram plus Google or Tavily)
 
 Every 10 minutes Troth reads new email from people linked to open loops, and once a day it checks each loop you asked it to watch on the web. It sends what changed to Telegram: loops an email closed, updated or added (undo in the dashboard), a calendar event when an email sets a date and time, and web findings. Events, web findings and an email's new task that has a link or an email address or asks for money or details wait for your "yes" or "no". Create the job once, after `setup_hermes.py` (it installs the script the job runs):
@@ -270,7 +274,7 @@ Lets Troth read email from people you're waiting on and, with your yes, save Gma
 2. Under **Google Auth Platform → Audience**, set the user type to **External**, leave the status at **Testing**, and under **Test users** add the Google account you'll sign in with. Without it, Google stops sign-in with *"Access blocked … Error 403: access_denied"* (the app is in testing and you're not a tester).
 3. Under **Clients**, create a client of type **Desktop app**. Download its JSON and save it as `backend/data/client_secret.json`.
 4. In the dashboard, open **Settings** and click **Connect Google**. Your browser opens Google's sign-in.
-5. Give someone's address, in chat (*"Sarah's email is sarah@nvidia.com"*) or in a loop's **Contact email**. From then on, `python scripts/sync.py` (or the cron job above) reads their new email and updates their loops. The first run reads the last 7 days (`SYNC_LOOKBACK_DAYS`).
+5. Give someone's address, in chat (*"Sarah's email is sarah@nvidia.com"*) or in a loop's **Contact email**. From then on, `python scripts/sync.py` (or `AUTO_SYNC_MINUTES`, or the cron job above) reads their new email and updates their loops. One address belongs to one person. The first run reads the last 7 days (`SYNC_LOOKBACK_DAYS`).
 
 To check the connection on its own: `python scripts/google_gate.py someone@example.com` lists the last 5 emails from that address, saves a test draft (not sent) and creates a test event tomorrow at 10:00. Delete both afterwards.
 
