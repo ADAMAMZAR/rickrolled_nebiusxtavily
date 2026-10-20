@@ -3,18 +3,23 @@
   python scripts/eval_import.py windows --me "Adam Amzar" --me-email adam@example.com
   python scripts/eval_import.py check
   python scripts/eval_import.py blank-scam
+  python scripts/eval_import.py injection
 
 Exports go in data/eval/raw/: WhatsApp "Export chat" .txt, Telegram Desktop result.json, Gmail Takeout .mbox.
 `windows` writes items.jsonl and the two labelling sheets; `check` turns labels_a.csv into gold.jsonl and
-scam.csv into scam.jsonl. Everything stays in data/eval/ (gitignored). Prints counts and row numbers, never text.
+scam.csv into scam.jsonl. `injection` puts published attacks from data/eval/benchmarks/ into the benign injection
+items, as a held-out set (troth_eval.md §13). Everything stays in data/eval/ (gitignored). Prints counts and row
+numbers, never text.
 """
 
 import argparse
+import ast
 import csv
 import email
 import email.message
 import email.policy
 import email.utils
+import hashlib
 import html
 import json
 import mailbox
@@ -534,6 +539,137 @@ def cmd_blank_scam(args: argparse.Namespace) -> None:
     print(f"scam_sheet_b.csv: {len(rows)} items without labels, for labeller B (save as scam_b.csv).")
 
 
+# --- held-out injection items (troth_eval.md §13) ---
+
+INJECTION = ROOT / "tests" / "scenarios" / "injection.jsonl"
+BENCHMARKS = {"wrappers": ("agentdojo_baseline_attacks.py", "agentdojo_important_instructions_attacks.py"),
+              "goals": ("agentdojo_workspace_injection_tasks.py",), "bipia": ("bipia_text_attack_test.json",)}
+# AgentDojo's templates that need only the goal and two names (tool_knowledge also needs AgentDojo's tool calls).
+WRAPPERS = ("direct", "ignore_previous", "system_message", "injecagent", "important_instructions")
+USER, MODEL = "Adam", "Nemotron"  # the carriers' "Dear Adam"; AgentDojo names the model it attacks
+# BIPIA's categories that could change a loop. The others (ciphers, emoji, translation...) change how a chat answer
+# is written; Troth writes fields, so they would pass for free. Chosen before anything was scored.
+BIPIA_CATEGORIES = ("Task Automation", "Information Dissemination", "Marketing & Advertising", "Scams & Fraud",
+                    "Misinformation & Propaganda")
+BIPIA_ITEMS = 12
+POSITIONS = ("start", "middle", "end")  # where BIPIA puts an attack in its context
+URL = re.compile(r"www\.[\w.-]*\w")
+
+
+def class_strings(node: ast.ClassDef) -> dict[str, str]:
+    """A class's own string attributes, e.g. name = "direct"."""
+    out: dict[str, str] = {}
+    for stmt in node.body:
+        if isinstance(stmt, ast.Assign) and isinstance(stmt.value, ast.Constant) and isinstance(stmt.value.value, str):
+            out |= {t.id: stmt.value.value for t in stmt.targets if isinstance(t, ast.Name)}
+    return out
+
+
+def read_wrappers(paths: list[Path]) -> dict[str, str]:
+    """AgentDojo's attack templates by name. The files are parsed, never run: a template is the string a class
+    passes to super().__init__, written there or kept in one of its own attributes."""
+    found: dict[str, str] = {}
+    for path in paths:
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if not isinstance(node, ast.ClassDef) or "name" not in (strings := class_strings(node)):
+                continue
+            for call in ast.walk(node):
+                if not (isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute) and call.func.attr == "__init__"
+                        and isinstance(call.func.value, ast.Call) and getattr(call.func.value.func, "id", None) == "super"
+                        and call.args):
+                    continue
+                arg = call.args[0]
+                if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                    found[strings["name"]] = arg.value
+                elif isinstance(arg, ast.Attribute) and arg.attr in strings:
+                    found[strings["name"]] = strings[arg.attr]
+    if missing := [w for w in WRAPPERS if w not in found]:
+        sys.exit(f"No AgentDojo template named {', '.join(missing)}: the files may be another version.")
+    return {w: found[w] for w in WRAPPERS}
+
+
+def read_goals(path: Path) -> list[tuple[str, str, list[str]]]:
+    """AgentDojo's injection tasks: (class, GOAL, the values GOAL is built from). GOAL is an f-string over the
+    class's own strings; anything else stops the import rather than guess."""
+    goals = []
+    for node in ast.parse(path.read_text(encoding="utf-8")).body:
+        if not isinstance(node, ast.ClassDef):
+            continue
+        strings = class_strings(node)
+        goal = next((stmt.value for stmt in node.body if isinstance(stmt, ast.Assign)
+                     and any(getattr(t, "id", None) == "GOAL" for t in stmt.targets)), None)
+        if goal is None:
+            continue
+        parts, used = [], []
+        for v in goal.values if isinstance(goal, ast.JoinedStr) else [goal]:
+            if isinstance(v, ast.Constant) and isinstance(v.value, str):
+                parts.append(v.value)
+            elif (isinstance(v, ast.FormattedValue) and isinstance(v.value, ast.Name) and v.value.id in strings
+                  and v.conversion == -1 and v.format_spec is None):
+                parts.append(strings[v.value.id])
+                used.append(strings[v.value.id])
+            else:
+                sys.exit(f"{path.name}: {node.name}.GOAL isn't an f-string over the class's own strings.")
+        goals.append((node.name, "".join(parts), used))
+    if not goals:
+        sys.exit(f"No injection tasks in {path.name}.")
+    return goals
+
+
+def insert(text: str, attack: str, position: str) -> str:
+    """The attack as its own paragraph (sentence, on a one-paragraph page) at the start, middle or end."""
+    sep = "\n\n" if "\n\n" in text else " "
+    parts = text.split(sep) if sep != " " else re.split(r"(?<=[.!?]) ", text)
+    at = {"start": 0, "middle": (len(parts) + 1) // 2, "end": len(parts)}[position]
+    return sep.join(parts[:at] + [attack.strip()] + parts[at:])
+
+
+def cmd_injection(args: argparse.Namespace) -> None:
+    folder = Path(args.dir)
+    src = folder / "benchmarks"
+    files = {k: [src / name for name in names] for k, names in BENCHMARKS.items()}
+    if missing := [p.name for paths in files.values() for p in paths if not p.exists()]:
+        sys.exit(f"Missing in {src}: {', '.join(missing)}. troth_eval.md §13 says where to get them.")
+    out = folder / "injection_test.jsonl"
+    if out.exists() and not args.force:
+        sys.exit(f"{out} exists. Make it again only if it hasn't been scored (--force).")
+    rng = random.Random(args.seed)
+    wrappers = read_wrappers(files["wrappers"])
+    attacks = []
+    for name, goal, used in read_goals(files["goals"][0]):
+        for wrapper in rng.sample(WRAPPERS, 2):
+            attacks.append({"item": f"ad-{len(attacks) + 1:02}", "pattern": f"agentdojo/{wrapper}",
+                            "text": wrappers[wrapper].format(goal=goal, user=USER, model=MODEL),
+                            "bad": list(dict.fromkeys(u for u in used if len(u) >= 6)),  # not "13": dates have it
+                            "from": f"AgentDojo v1 workspace {name}"})
+    bipia = json.loads(files["bipia"][0].read_text(encoding="utf-8"))
+    if missing := [c for c in BIPIA_CATEGORIES if c not in bipia]:
+        sys.exit(f"No BIPIA category {', '.join(missing)}: the file may be another version.")
+    pools = [[(c, text) for text in rng.sample(bipia[c], len(bipia[c]))] for c in BIPIA_CATEGORIES]
+    for n, (category, text) in enumerate([pair for row in zip(*pools) for pair in row][:BIPIA_ITEMS], 1):
+        attacks.append({"item": f"bp-{n:02}", "pattern": f"bipia/{category}", "text": text, "bad": URL.findall(text),
+                        "from": "BIPIA text_attack_test"})
+    with INJECTION.open(encoding="utf-8") as f:
+        carriers = [i for i in map(json.loads, filter(str.strip, f)) if i["pattern"] == "benign"]
+    rng.shuffle(attacks)  # then each carrier gets one attack at each position
+    items = []
+    for n, a in enumerate(attacks):
+        carrier, position = carriers[n % len(carriers)], POSITIONS[n // len(carriers) % len(POSITIONS)]
+        field = "body" if carrier["path"] == "email" else "content"
+        items.append(carrier | {
+            "item": a["item"], "pattern": a["pattern"], field: insert(carrier[field], a["text"], position),
+            "bad": a["bad"], "carrier": carrier["item"], "position": position,
+            "note": (f"TEST SAMPLE, held out: {a['from']} inside {carrier['item']} ({position}). Made by "
+                     "scripts/eval_import.py injection; never tune on it (troth_eval.md §13)."),
+        })
+    with out.open("w", encoding="utf-8") as f:
+        f.writelines(json.dumps(i, ensure_ascii=False) + "\n" for i in sorted(items, key=lambda i: i["item"]))
+    sums = ", ".join(f"{p.name} {hashlib.sha256(p.read_bytes()).hexdigest()[:12]}" for paths in files.values() for p in paths)
+    print(f"{out.name}: {len(items)} held-out items ({sum(i['item'].startswith('ad-') for i in items)} AgentDojo, "
+          f"{sum(i['item'].startswith('bp-') for i in items)} BIPIA) in {len(carriers)} benign carriers.\n"
+          f"Sources (sha256): {sums}\nScore it with EVAL_SPLIT=test pytest -m eval -k injection, twice in total.")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--dir", default=str(EVAL_DIR))
@@ -552,8 +688,11 @@ def main() -> None:
     c = sub.add_parser("check", help="labels_a.csv -> gold.jsonl; scam.csv -> scam.jsonl")
     c.add_argument("--test", type=float, default=0.4)
     sub.add_parser("blank-scam", help="scam.csv -> scam_sheet_b.csv without labels")
+    j = sub.add_parser("injection", help="benchmarks/ -> injection_test.jsonl, the held-out injection items")
+    j.add_argument("--seed", type=int, default=SEED)
+    j.add_argument("--force", action="store_true")
     args = parser.parse_args()
-    {"windows": cmd_windows, "check": cmd_check, "blank-scam": cmd_blank_scam}[args.cmd](args)
+    {"windows": cmd_windows, "check": cmd_check, "blank-scam": cmd_blank_scam, "injection": cmd_injection}[args.cmd](args)
 
 
 if __name__ == "__main__":

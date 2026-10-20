@@ -13,7 +13,7 @@ Hackathon: Nebius x NVIDIA, Personal AI track. **Hermes Agent + NVIDIA Nemotron 
   - Addendum [continuum_personal_ai_plan.md](continuum_personal_ai_plan.md): one Personal AI, not two apps. Risky checks become loops, loops can be checked, `/check` and `/briefing` skills. *(P0–P2 built 2026-10-10; P3 deployed on GCP 2026-10-19; P4 after the video)*
   - Addendum [troth_improvements.md](troth_improvements.md): loops that depend on other loops; an upstream slip flags the promise "at risk" with options built in code. *(C1–C3 + a "Needs" line built and deployed 2026-10-19, checked live through Hermes; Telegram check pending)*
   - Audit [troth_audit_2026-10-19.md](troth_audit_2026-10-19.md): findings and ranked fixes. *(all 10 items built 2026-10-19)*
-  - Addendum [troth_eval.md](troth_eval.md): measure Troth on real, labelled messages, with intervals, then fix only what that shows. Labellers read [troth_labelling_guide.md](troth_labelling_guide.md). *(E0–E5 and E8 built 2026-10-20, plus the email-injection fix (§13); waiting for labelled data)*
+  - Addendum [troth_eval.md](troth_eval.md): measure Troth on real, labelled messages, with intervals, then fix only what that shows. Labellers read [troth_labelling_guide.md](troth_labelling_guide.md). *(E0–E5 and E8 built 2026-10-20, plus the email-injection fix, checked on a held-out set (§13); waiting for labelled data)*
 
 Start a phase only after every box in the previous phase's Done Checklist is checked. When a phase is finished, move the "current phase" marker.
 
@@ -52,6 +52,7 @@ pytest                            # offline, LLM mocked
 pytest -m live                    # real LLM + Hermes (needs keys and both servers running)
 python scripts/eval_import.py windows --me "Your Name"   # exports in data/eval/raw/ -> sheets to label (troth_eval.md)
 python scripts/eval_import.py check                      # labels -> data/eval/gold.jsonl, scam.jsonl
+python scripts/eval_import.py injection                  # AgentDojo/BIPIA files in data/eval/benchmarks/ -> held-out injection items
 EVAL_PILOT=1 pytest -m eval       # cost per item first; then pytest -m eval (dev split, 5 runs)
 python scripts/eval_report.py loops   # also: scam, injection, kappa, compare A B, cost
 python scripts/correction_rate.py --log troth.log   # real use: edits, undos, deletes within 48 h

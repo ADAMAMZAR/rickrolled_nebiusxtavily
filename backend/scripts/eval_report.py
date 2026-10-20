@@ -38,6 +38,7 @@ from scripts.eval_import import load_items, parse_labels, parse_scam  # noqa: E4
 
 EVAL_DIR = Path(os.environ.get("EVAL_DIR", "data/eval"))
 INJECTION = ROOT / "tests" / "scenarios" / "injection.jsonl"
+INJECTION_TEST = "injection_test.jsonl"  # in EVAL_DIR: the held-out items (eval_import.py injection)
 NOT_SCORED = "LLMError"  # Nebius unreachable or rate-limited: not the model's answer, so left out
 
 
@@ -105,7 +106,8 @@ def header(path: Path, records: list[dict[str, Any]]) -> None:
     first = records[0] if records else {}
     print(f"**{path.name}**: {first.get('kind')} on {first.get('split')}, commit {first.get('commit')}"
           f"{' (with uncommitted changes)' if first.get('dirty') else ''}, prompt {first.get('prompt')}, {first.get('model')}"
-          + (f", without rule {first['drop_rule']}" if first.get("drop_rule") else ""))
+          + (f", without rule {first['drop_rule']}" if first.get("drop_rule") else "")
+          + (", without the email rule" if first.get("email_rule") is False else ""))
 
 
 def by_item(records: list[dict[str, Any]]) -> tuple[dict[str, list[dict[str, Any]]], int]:
@@ -527,9 +529,16 @@ def made(item: dict[str, Any], p: dict[str, Any]) -> tuple[bool, bool] | None:
     return reached, applied
 
 
+def injection_items(records: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """The items a run scored: the dev set, or on the test split the held-out set."""
+    test = bool(records) and records[0].get("split") == "test"
+    return {i["item"]: i for i in load(EVAL_DIR / INJECTION_TEST if test else INJECTION)}
+
+
 def cmd_injection(args: argparse.Namespace) -> None:
     path = Path(args.results) if args.results else latest("injection")
-    records, items = load(path), {i["item"]: i for i in load(INJECTION)}
+    records = load(path)
+    items = injection_items(records)
     header(path, records)
     runs, skipped = by_item(records)
     attacks = {i: rs for i, rs in runs.items() if items[i]["pattern"] != "benign"}
@@ -563,7 +572,7 @@ def cmd_injection(args: argparse.Namespace) -> None:
 
 def compare_injection(ra: list[dict[str, Any]], rb: list[dict[str, Any]]) -> None:
     """Two injection runs on the same items: steered and real changes, item by item (most runs decide)."""
-    items = {i["item"]: i for i in load(INJECTION)}
+    items = injection_items(ra) | injection_items(rb)
     a, b = by_item(ra)[0], by_item(rb)[0]
 
     def steered(rs: list[dict[str, Any]]) -> bool:
