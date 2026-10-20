@@ -37,8 +37,8 @@ class FakeLLM:
 
 @pytest.fixture(autouse=True)
 def no_real_services(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Offline tests can't reach Nebius or Tavily by accident: their keys are blanked unless the test is `live`."""
-    if request.node.get_closest_marker("live") is None:
+    """Offline tests can't reach Nebius or Tavily by accident: their keys are blanked unless the test is `live` or `eval`."""
+    if request.node.get_closest_marker("live") is None and request.node.get_closest_marker("eval") is None:
         monkeypatch.setattr(settings, "nebius_api_key", SecretStr(""))
         monkeypatch.setattr(settings, "tavily_api_key", SecretStr(""))
     monkeypatch.setattr(settings, "app_password", SecretStr(""))  # a server .env's password; tests that need one set it

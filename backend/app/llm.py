@@ -1,6 +1,7 @@
 """LLM client: NVIDIA Nemotron on Nebius Token Factory. Every model call goes through here."""
 
 import logging
+import threading
 import time
 from typing import Any
 
@@ -28,6 +29,9 @@ class LLMClient:
             timeout=settings.llm_timeout,
             max_retries=2,
         )
+        # Totals for cost estimates (troth_eval.md). A message check calls from several threads at once.
+        self.calls = self.tokens_in = self.tokens_out = 0
+        self._lock = threading.Lock()
 
     def complete(self, messages: list[dict[str, Any]], json_mode: bool = False, model: str | None = None) -> str:
         """Return the model's text reply. json_mode asks for a JSON object.
@@ -49,7 +53,13 @@ class LLMClient:
             raise LLMError(f"Nebius request failed: {type(e).__name__}") from e
 
         ms = int((time.perf_counter() - start) * 1000)
-        log.info("llm_call model=%s ms=%d json=%s", model, ms, json_mode)
+        usage = getattr(response, "usage", None)
+        tokens_in, tokens_out = (usage.prompt_tokens, usage.completion_tokens) if usage else (0, 0)
+        with self._lock:
+            self.calls += 1
+            self.tokens_in += tokens_in
+            self.tokens_out += tokens_out
+        log.info("llm_call model=%s ms=%d json=%s tokens_in=%d tokens_out=%d", model, ms, json_mode, tokens_in, tokens_out)
         content = (response.choices[0].message.content or "").strip()
         if not content:
             raise LLMError("Nebius returned an empty reply.")

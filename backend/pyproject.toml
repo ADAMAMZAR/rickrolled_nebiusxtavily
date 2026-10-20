@@ -32,5 +32,8 @@ packages = ["app", "app.connectors"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]  # import app/ without installing the package
-addopts = "-m 'not live'"
-markers = ["live: calls real services: Nebius, Hermes, Tavily (needs keys)"]
+addopts = "-m 'not live and not eval'"
+markers = [
+    "live: calls real services: Nebius, Hermes, Tavily (needs keys)",
+    "eval: scores Troth on the labelled set in data/eval with real Nemotron and Tavily (troth_eval.md)",
+]

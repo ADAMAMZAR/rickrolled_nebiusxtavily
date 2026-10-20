@@ -50,6 +50,17 @@ def test_empty_reply_is_an_error() -> None:
         llm.complete([{"role": "user", "content": "hi"}])
 
 
+def test_tokens_are_counted() -> None:
+    llm, completions = fake_client("ok")
+    usage = SimpleNamespace(prompt_tokens=120, completion_tokens=30)
+    completions.create = lambda **_: SimpleNamespace(  # type: ignore[method-assign]
+        choices=[SimpleNamespace(message=SimpleNamespace(content="ok"))], usage=usage)
+
+    llm.complete([{"role": "user", "content": "hi"}])
+    llm.complete([{"role": "user", "content": "hi"}])
+    assert (llm.calls, llm.tokens_in, llm.tokens_out) == (2, 240, 60)
+
+
 @pytest.mark.live
 @pytest.mark.skipif(not settings.nebius_api_key.get_secret_value(), reason="NEBIUS_API_KEY not set")
 def test_live_llm_call() -> None:

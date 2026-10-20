@@ -9,6 +9,9 @@ __pycache__/
 .vscode/
 backend/data/uploads/
 backend/data/tavily_cache/
+backend/data/eval/
+backend/tests/scenarios/eval_sample/results/
+backend/tests/scenarios/eval_sample/failures.csv
 .gstack/
 frontend/node_modules/
 .impeccable/questions/

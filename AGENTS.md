@@ -13,6 +13,7 @@ Hackathon: Nebius x NVIDIA, Personal AI track. **Hermes Agent + NVIDIA Nemotron 
   - Addendum [continuum_personal_ai_plan.md](continuum_personal_ai_plan.md): one Personal AI, not two apps. Risky checks become loops, loops can be checked, `/check` and `/briefing` skills. *(P0–P2 built 2026-10-10; P3 deployed on GCP 2026-10-19; P4 after the video)*
   - Addendum [troth_improvements.md](troth_improvements.md): loops that depend on other loops; an upstream slip flags the promise "at risk" with options built in code. *(C1–C3 + a "Needs" line built and deployed 2026-10-19, checked live through Hermes; Telegram check pending)*
   - Audit [troth_audit_2026-10-19.md](troth_audit_2026-10-19.md): findings and ranked fixes. *(all 10 items built 2026-10-19)*
+  - Addendum [troth_eval.md](troth_eval.md): measure Troth on real, labelled messages, with intervals, then fix only what that shows. Labellers read [troth_labelling_guide.md](troth_labelling_guide.md). *(E0–E5 built 2026-10-20; waiting for labelled data)*
 
 Start a phase only after every box in the previous phase's Done Checklist is checked. When a phase is finished, move the "current phase" marker.
 
@@ -49,6 +50,10 @@ uvicorn app.main:app --reload     # Troth on :8000 (MCP at /mcp/)
 hermes -p continuum gateway run   # Hermes API server on :8642
 pytest                            # offline, LLM mocked
 pytest -m live                    # real LLM + Hermes (needs keys and both servers running)
+python scripts/eval_import.py windows --me "Your Name"   # exports in data/eval/raw/ -> sheets to label (troth_eval.md)
+python scripts/eval_import.py check                      # labels -> data/eval/gold.jsonl, scam.jsonl
+EVAL_PILOT=1 pytest -m eval       # cost per item first; then pytest -m eval (dev split, 5 runs)
+python scripts/eval_report.py loops   # also: scam, injection, kappa, compare A B, cost
 cd ../frontend && npm install && npm run build   # after any UI change: type-checks and rebuilds backend/app/static
 ```
 
@@ -56,6 +61,7 @@ cd ../frontend && npm install && npm run build   # after any UI change: type-che
 - Python 3.11+, type hints, Pydantic for anything from the LLM or HTTP.
 - Tests mock the LLM. Only `-m live` tests hit the network.
 - Never commit `.env`, `*.db`, bot tokens, or Google tokens/client secrets. Never log API keys or message content.
+- `backend/data/eval/` holds other people's messages: never commit it, and eval scripts print counts, never text. Claude reads `failures.csv` only for error analysis (troth_eval.md D3). The eval's test split is scored twice in total, before and after the fixes.
 - Don't swallow exceptions.
 - Stay in the current phase's scope. Ask before adding anything from its "Out" list.
 - Troth never sends anything on the user's behalf. Drafts and approved calendar events only.
