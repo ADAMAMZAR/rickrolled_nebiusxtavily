@@ -24,7 +24,7 @@ One assistant holds both your commitments and the requests trying to become one.
 
 ## Operating Context
 
-- Capture: dashboard chat, Telegram, email from people linked to open loops, a pasted message, link or screenshot.
+- Capture: dashboard chat, the dashboard's Paste mode (no Hermes), Telegram, email from people linked to open loops (from anyone else, suggestions that wait for a yes), a pasted message, link or screenshot.
 - Each loop goes through five steps: capture, remember, check, remind (Needs attention, 8:00 Telegram briefing), close (by the user, an email reply, or web watch).
 - Checks take 1–2 minutes and show live progress steps.
 - Proposals (calendar events, Gmail drafts, web findings) wait for the user's yes.
@@ -33,7 +33,7 @@ One assistant holds both your commitments and the requests trying to become one.
 ## Capabilities and Constraints
 
 - Two surfaces today: the dashboard (`/`: chat, Needs attention, Pending actions, Open loops with detail, Settings) and the message check (`/investigate.html`: form, live steps, result, evidence graph, claims and evidence).
-- The REST API under `/api` is the contract the frontend uses. Chat goes to Hermes through `/api/chat`.
+- The REST API under `/api` is the contract the frontend uses. Chat goes to Hermes through `/api/chat`; Paste saves through `/api/messages` without Hermes, and the chat sheet opens on Paste when `/api/chat/status` says Hermes isn't running.
 - All message, web and model text shown in the UI is untrusted: render it as text, never HTML; only http(s) links are clickable.
 - One user; a server deploy sets `APP_PASSWORD` (HTTP Basic on every page and `/api`).
 - Malaysian regulators only (SC, Bank Negara) for now.

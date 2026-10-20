@@ -292,7 +292,7 @@ Settling an entry draws one ballpoint-blue stroke (2.2px, round caps, a slightly
 Running source text (quotes, the checked message) sits on pale rules at a 1.7em line height, like writing on the page. Flagged phrases in a checked message get a 2px red underline, 4px offset, no fill.
 
 ### Chat
-A sheet that sizes to content, then becomes a fixed scrolling sheet (max 640px). Your messages are blue bubbles with paper text, right-aligned; Troth's are outlined in pale rule; errors are outlined in red.
+A sheet that sizes to content, then becomes a fixed scrolling sheet (max 640px). Your messages are blue bubbles with paper text, right-aligned; Troth's are outlined in pale rule; errors are outlined in red. Two modes share the sheet, picked by two link buttons in its head (the current one in ink, not underlined): Chat (Hermes, Send) and Paste (saves loops without Hermes, Save). It opens on Paste where Hermes isn't running.
 
 ### Evidence Graph
 Cytoscape on paper inside a ruled border, in the same inks: red edges and borders for warnings, blue for support, pale rule for neutral; ink for strong sources. Edge labels appear on hover only. A legend of short coloured lines sits below.

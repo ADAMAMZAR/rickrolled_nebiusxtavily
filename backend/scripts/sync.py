@@ -1,8 +1,9 @@
 """Check email and the web for open loops. Prints what changed and what waits for the user's yes, or nothing.
 
 Run by hand, or every 10 minutes by a Hermes cron job (spec step 6). Each watched loop is searched
-at most once a day, so frequent runs cost nothing extra. Email is read only from people linked to
-open loops. Without Google connected or TAVILY_API_KEY, that part is skipped.
+at most once a day, so frequent runs cost nothing extra. Email from people linked to open loops can
+change their loops; mail from anyone else only proposes (EMAIL_NEW_SENDERS). Without Google connected
+or TAVILY_API_KEY, that part is skipped.
 
   python scripts/sync.py
 """

@@ -174,3 +174,12 @@ def test_a_due_date_lands_on_the_weekday_its_quote_names(session: Session) -> No
     changes = eng.process_message(session, FakeLLM(reply), "Venue is Friday, I need to pay the deposit by Thursday.",
                                   now=datetime(2026, 10, 20, 9, tzinfo=NOW.tzinfo))
     assert changes.created_loops[0].due == date(2026, 10, 22)
+
+
+def test_the_paste_reply_says_what_was_saved(session: Session) -> None:
+    """The dashboard's Paste box (POST /api/messages) answers without Hermes, so it says what chat would."""
+    assert eng.describe_saved(process(session, result(), "What am I waiting on?")) == (
+        "Nothing to save in that. To ask Troth something, use Chat (it needs Hermes running).")
+    fee = process(session, result(new=[loop("Pay RM250 admin fee")]), "Pay the RM250 admin fee by Friday.")
+    assert eng.describe_saved(fee) == ('Saved: new "Pay RM250 admin fee".\n"Pay RM250 admin fee" asks for money: '
+                                       "check who's asking before you pay (open it under Open loops).")

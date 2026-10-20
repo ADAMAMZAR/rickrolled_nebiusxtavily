@@ -12,7 +12,7 @@ Built for the Nebius x NVIDIA Global AI Hackathon, **Personal AI** track. It run
 
 Every loop goes through five steps:
 
-1. **Capture.** You tell it in the dashboard chat or on Telegram, email arrives from someone you're waiting on, or you forward a message or a screenshot.
+1. **Capture.** You tell it in the dashboard chat or on Telegram, paste a message into the dashboard (no Hermes needed), email arrives from someone you're waiting on, or you forward a message or a screenshot.
 2. **Remember.** Goals, loops, people and the exact words each loop came from are saved in one SQLite file.
 3. **Check.** When a loop asks you to pay or share details, ScamGraph researches who's asking on the live web and fixed rules score the risk.
 4. **Remind.** **Needs attention** and the 8:00 Telegram briefing list what's overdue, due soon, stalled or risky.
@@ -123,7 +123,7 @@ flowchart LR
     I -->|extract, plan, check, summary| N
     I -->|search + extract| T[Tavily]
     SYNC[sync.py<br/>Hermes cron, every 10 min] --> E
-    SYNC -->|mail from linked people| GM[Gmail]
+    SYNC -->|mail from linked people;<br/>from others, proposals only| GM[Gmail]
     SYNC -->|watched loops| T
     E -->|after your yes| GA[Gmail drafts / Calendar]
 ```
@@ -254,11 +254,11 @@ The gateway (`hermes -p continuum gateway run`) must be running for it to fire. 
 
 ### Automatic email and web sync (optional, no Telegram needed)
 
-Set `AUTO_SYNC_MINUTES=10` in `.env` and restart Troth. While it runs, it reads new email from people linked to open loops and checks watched loops on the web every 10 minutes, the same as `python scripts/sync.py`. What changed shows in the dashboard: loops an email closed or updated (with Undo), **Pending actions** for what waits for your yes, and **Needs attention**. **Settings** shows the last email check and, if one failed, why (for example, Google ended the connection: connect again). Use this or the Telegram job below on one machine, not both.
+Set `AUTO_SYNC_MINUTES=10` in `.env` and restart Troth. While it runs, it reads new email and checks watched loops on the web every 10 minutes, the same as `python scripts/sync.py`. Email from people linked to open loops can close or update their loops. Mail from anyone else (not newsletters, no-reply senders, or Gmail's Promotions, Social, Updates and Forums tabs) only suggests new loops under **Waiting for your yes**: **Add** saves the loop and the sender's address, so their replies are followed; **Ignore** deletes that email's text and the sender's address. `EMAIL_NEW_SENDERS=0` reads only linked people. What changed shows in the dashboard: loops an email closed or updated (with Undo), **Pending actions** for what waits for your yes, and **Needs attention**. **Settings** shows the last email check and, if one failed, why (for example, Google ended the connection: connect again). Use this or the Telegram job below on one machine, not both.
 
 ### Email and web sync on Telegram (optional, needs Telegram plus Google or Tavily)
 
-Every 10 minutes Troth reads new email from people linked to open loops, and once a day it checks each loop you asked it to watch on the web. It sends what changed to Telegram: loops an email closed, updated or added (undo in the dashboard), a calendar event when an email sets a date and time, and web findings. Events, web findings and an email's new task that has a link or an email address or asks for money or details wait for your "yes" or "no". Create the job once, after `setup_hermes.py` (it installs the script the job runs):
+Every 10 minutes Troth reads new email, and once a day it checks each loop you asked it to watch on the web. It sends what changed to Telegram: loops an email closed, updated or added (undo in the dashboard), a calendar event when an email sets a date and time, and web findings. Events, web findings, an email's new task that has a link or an email address or asks for money or details, and every task from someone not linked to an open loop wait for your "yes" or "no". Create the job once, after `setup_hermes.py` (it installs the script the job runs):
 
 ```bash
 hermes -p continuum cron create "every 10m" --no-agent --script continuum_sync.py --deliver telegram --name sync
@@ -307,7 +307,7 @@ The live suite runs the acceptance inputs against real Nemotron, e.g. "Alex said
 
 - **One user.** Without `APP_PASSWORD`, run it on your own machine only.
 - **ScamGraph is a heuristic.** Signal weights are plain rules, not probabilities. Finding a company's official website depends on Nemotron reading the right page, about 2 runs in 3 for a clone of a foreign company; without it the identity stays "not verified". Malaysian regulators only (SC, Bank Negara). A check takes 1-2 minutes.
-- **Extraction is an LLM's judgment.** It can miss an item or misread a date. On 18 of the author's real emails held out from tuning, 52% (31–73%) were handled fully right, and 22% of the loops Troth made were in the hand-made answer key; most extras came from newsletters and announcements, which sync reads only if you link their sender to a loop ([troth_eval.md](troth_eval.md) §15). The prompt lists the next two weeks, so the model looks weekdays up instead of counting (10 of 10 weekday phrases right in a live run, 2026-10-19), and snooze days like "monday" are worked out in code. Every loop shows the words it came from so you can check it, and wrong loops can be deleted.
+- **Extraction is an LLM's judgment.** It can miss an item or misread a date. On 18 of the author's real emails held out from tuning, 52% (31–73%) were handled fully right, and 22% of the loops Troth made were in the hand-made answer key; most extras came from newsletters and announcements. Those senders aren't linked to a loop, so their tasks wait for your Add or Ignore instead of landing in your list ([troth_eval.md](troth_eval.md) §15–16). The prompt lists the next two weeks, so the model looks weekdays up instead of counting (10 of 10 weekday phrases right in a live run, 2026-10-19), and snooze days like "monday" are worked out in code. Every loop shows the words it came from so you can check it, and wrong loops can be deleted.
 - **`next_action` is usually empty**, because the model is told never to invent anything the message doesn't state.
 - **Dedup is exact-match** on normalized title + person, plus giving the model the existing loops. Reworded duplicates can slip through.
 - **Hermes' standalone gateway** (`gateway.standalone: true`) is a shim Hermes marks as temporary. `hermes/config.example.yaml` describes the fallback.

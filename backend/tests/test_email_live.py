@@ -12,7 +12,7 @@ from app.db import LoopStatus
 from app.db import OpenLoop
 from app.llm import LLMClient
 from tests.conftest import NOW
-from tests.test_email import SARAH, FakeMailbox, email, google_on  # noqa: F401 (google_on is a fixture)
+from tests.test_email import SARAH, FakeMailbox, email, google_on, pearl  # noqa: F401 (google_on is a fixture)
 from tests.test_process_message import loop, process, result
 
 pytestmark = [
@@ -24,6 +24,7 @@ pytestmark = [
 INTERVIEW = "Hi,\n\nGreat news, we'd like to interview you on Oct 8 at 10am. Let me know if that works.\n\nSarah"
 TRANSCRIPT = ("Hi,\n\nThanks for applying. We're still reviewing applications. Before we can move forward, "
               "please send me your latest transcript by October 5.\n\nSarah")
+OFFER = "Hi Adam,\n\nPlease review, sign and return the contract by Friday, October 2.\n\nBest,\nPearl"
 UNRELATED = "Hi all,\n\nOur team won the internal robotics demo day last week. Thanks everyone for cheering us on!\n\nSarah"
 
 
@@ -64,3 +65,13 @@ def test_an_unrelated_email_changes_nothing(session: Session) -> None:
     before = [(l.title, l.status, l.due) for l in eng.list_loops(session)]
     assert sync(session, UNRELATED) == []
     assert [(l.title, l.status, l.due) for l in eng.list_loops(session)] == before
+
+
+def test_mail_from_someone_new_only_proposes(session: Session) -> None:
+    """Someone Troth doesn't follow yet: their request waits for a yes (NEW_SENDER), and no loop changes."""
+    linked(session)
+    before = [(l.title, l.status, l.due) for l in eng.list_loops(session)]
+    lines, errors = eng.sync_email(session, LLMClient(settings), FakeMailbox(new=[pearl(body=OFFER)]), now=NOW)
+    assert errors == [] and [(l.title, l.status, l.due) for l in eng.list_loops(session)] == before, lines
+    held = [h for a in eng.list_actions(session) if (h := eng._held(a)) is not None]
+    assert any(h.why == eng.NEW_SENDER and h.due == date(2026, 10, 2) and "contract" in h.title.lower() for h in held), lines

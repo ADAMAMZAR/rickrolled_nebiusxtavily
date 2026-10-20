@@ -28,6 +28,9 @@ class FakeHermes:
         self.asked.append((message, conversation))
         return HermesReply(text="Saved.")
 
+    def running(self) -> bool:
+        return not self.down
+
 
 @pytest.fixture
 def hermes() -> FakeHermes:
@@ -69,6 +72,42 @@ def test_chat_when_hermes_down(client: TestClient, hermes: FakeHermes) -> None:
     response = client.post("/api/chat", json={"message": "hi"})
     assert response.status_code == 503
     assert response.json()["error"] == "agent_unavailable"
+
+
+def test_paste_saves_loops_without_hermes(client: TestClient, hermes: FakeHermes) -> None:
+    """Where Hermes isn't installed (the company PC), the dashboard opens on Paste: it saves loops as chat would."""
+    assert client.get("/api/chat/status").json() == {"running": True}
+    hermes.down = True
+    assert client.get("/api/chat/status").json() == {"running": False}
+    reply = client.post("/api/messages", json={"text": DEMO}).json()["reply"]
+    assert reply == ('Saved: new "Wait for Sarah\'s response" (due Fri Oct 2); new "Finish portfolio"; '
+                     'new goal "Secure NVIDIA internship".')
+    assert hermes.asked == [] and len(client.get("/api/loops").json()) == 2
+    history = client.get("/api/activity").json()
+    assert {(a["by"], a["said"]) for a in history} == {("chat", DEMO)}  # the history shows what was pasted
+
+
+def test_paste_tells_the_model_it_may_be_someone_elses_message(db_url: str) -> None:
+    from app.extraction import PASTE_NOTE
+
+    llm = FakeLLM(DEMO_RESULT)
+    with TestClient(create_app(db_url, get_llm=lambda: llm, get_hermes=FakeHermes), base_url="http://127.0.0.1:8000",
+                    headers={"X-Troth": "1"}) as http:
+        http.post("/api/messages", json={"text": DEMO})
+    assert PASTE_NOTE in llm.calls[0][1]["content"]
+
+
+def test_paste_when_the_model_fails(db_url: str) -> None:
+    from app.llm import LLMError
+
+    def no_key() -> FakeLLM:
+        raise LLMError("NEBIUS_API_KEY is not set. Add it to .env.")
+
+    app = create_app(db_url, get_llm=no_key, get_hermes=FakeHermes)
+    with TestClient(app, base_url="http://127.0.0.1:8000", headers={"X-Troth": "1"}) as http:
+        response = http.post("/api/messages", json={"text": "Send Sarah the slides by Friday."})
+    assert response.status_code == 503
+    assert response.json() == {"error": "llm_unavailable", "message": "Couldn't save that: NEBIUS_API_KEY is not set. Add it to .env."}
 
 
 def test_goals_and_loops(client: TestClient) -> None:

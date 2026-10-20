@@ -332,7 +332,8 @@ def run_item(item: dict[str, Any], run: int, drops: DropLog) -> dict[str, Any]:
                         body = strip_reply(item["body"]) if item.get("raw_body") else item["body"]
                         mail = Email(id=item["item"], thread_id=item["item"], sender=item["sender"],
                                      subject=item["subject"], received=now, snippet="", body=body)
-                        eng.ingest_email(s, rec, sender, mail, now)
+                        # as sync_email: someone with no open loop is new, so what their email adds waits for a yes
+                        eng.ingest_email(s, rec, sender, mail, now, new=not eng.person_loops(s, sender.id))
                     elif item["path"] == "web":
                         page = WebResult(title=item["title"], url=item["url"], content=item["content"])
                         eng._review_web_results(s, rec, loops[item["watch"]], [page], now)

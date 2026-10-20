@@ -84,7 +84,7 @@ export function App() {
         )}
         <div className="dash">
           <Attention items={attention} error={attentionError} actions={actions} actionsError={actionsError} act={act}
-            draft={(id, title) => chat.say(`Draft a follow-up for loop ${id}`, `Draft a follow-up: ${title}`, true)} />
+            draft={chat.hermes === false ? null : (id, title) => chat.say(`Draft a follow-up for loop ${id}`, `Draft a follow-up: ${title}`, true)} />
           <Chat chat={chat} />
           <Ledger loops={loops} error={loopsError} fresh={fresh} version={version} webEnabled={webEnabled}
             showSnoozed={showSnoozed} showResolved={showResolved} setShowSnoozed={setShowSnoozed} setShowResolved={setShowResolved}

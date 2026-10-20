@@ -40,7 +40,7 @@ sys.path.insert(0, str(ROOT))  # so `app` imports without installing the package
 
 from app.config import settings  # noqa: E402
 from app.investigation import MAX_TEXT as MAX_CHECK_TEXT  # noqa: E402
-from app.connectors.google import Email, GoogleClient, GoogleError, strip_reply  # noqa: E402
+from app.connectors.google import PEOPLE_MAIL, Email, GoogleClient, GoogleError, automated, strip_reply  # noqa: E402
 from app.quotes import appears  # noqa: E402
 
 EVAL_DIR = Path(os.environ.get("EVAL_DIR", "data/eval"))
@@ -152,13 +152,13 @@ def read_mbox(path: Path, tz: tzinfo, me: set[str]) -> tuple[list[Message], int]
         address = address.lower()
         if not address or address in me:
             continue
-        bulk = msg.get("List-Unsubscribe") or str(msg.get("Precedence", "")).lower() in {"bulk", "list", "junk"}
+        headers = {"list-unsubscribe": str(msg.get("List-Unsubscribe") or ""), "precedence": str(msg.get("Precedence", ""))}
         try:
             when = email.utils.parsedate_to_datetime(str(msg.get("Date", ""))).astimezone(tz)
             body = _body(msg)
         except (TypeError, ValueError, LookupError):  # no date, a bad date, an unknown charset
             when, body = None, ""
-        if bulk or re.match(r"(no-?reply|notifications?|mailer-daemon)@", address) or when is None or not body:
+        if automated(address, headers) or when is None or not body:  # as sync's new mail (GoogleClient.new_mail)
             skipped += 1
             continue
         out.append(Message(address, "gmail", when, name or address.split("@")[0], body, str(msg.get("Subject", ""))))
@@ -700,8 +700,7 @@ def cmd_gmail(args: argparse.Namespace) -> None:
     if out.exists() and not args.force:
         sys.exit(f"{out} exists. Pull again with --force (it replaces the file).")
     after = datetime.now().astimezone() - timedelta(days=30 * args.months)
-    query = (f"after:{int(after.timestamp())} -from:me -category:promotions -category:social -category:updates "
-             "-category:forums")
+    query = f"after:{int(after.timestamp())} {PEOPLE_MAIL}"  # what sync reads from people it doesn't follow yet
     try:
         raws = GoogleClient.from_settings(settings).raw_messages(query, args.max)
     except GoogleError as e:

@@ -33,6 +33,14 @@ class HermesClient:
             transport=transport,
         )
 
+    def running(self) -> bool:
+        """Whether anything answers at HERMES_API_URL: any HTTP reply counts. The dashboard opens on Chat or Paste by it."""
+        try:
+            self._http.get("models", timeout=3)
+        except httpx.HTTPError:
+            return False
+        return True
+
     def ask(self, message: str, conversation: str = "continuum") -> HermesReply:
         """One agent turn. Hermes keeps the history for each named conversation."""
         body = {"model": "continuum", "input": message, "conversation": conversation, "store": True}

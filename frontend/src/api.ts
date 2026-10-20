@@ -71,7 +71,8 @@ export interface PendingAction {
   summary: string;
   status: "proposed" | "failed"; // failed: approved but didn't work; approving again retries
   error: string | null;
-  payload: { source_url?: string };
+  // new_loop: a loop an email would make (Add / Ignore); sender_email: who sent that email
+  payload: { source_url?: string; new_loop?: boolean; sender_email?: string | null };
 }
 
 export interface GoogleStatus {
@@ -80,6 +81,7 @@ export interface GoogleStatus {
   last_sync: string | null;
   sync_error: string | null; // the last email check failed, e.g. Google ended the connection
   auto_sync_minutes: number; // 0: email is read only when sync runs
+  new_senders: boolean; // also reads mail people sent from anyone else; what it would add waits for a yes
 }
 
 export type RiskLevel = "LOW" | "GUARDED" | "ELEVATED" | "HIGH" | "CRITICAL" | "INSUFFICIENT_EVIDENCE";

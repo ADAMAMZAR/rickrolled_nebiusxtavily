@@ -81,6 +81,8 @@ li.fresh > .row-btn .title b::after {
 .msg.error { align-self: flex-start; color: var(--red); border: 1px solid color-mix(in oklab, var(--red) 40%, transparent); }
 .msg .copy { display: flex; margin-top: var(--s2); }
 .writing { color: var(--muted); font-size: var(--fs-small); }
+.mode-pick { gap: var(--s3); }
+.mode-pick .link-btn[aria-pressed="true"] { color: var(--ink); text-decoration: none; cursor: default; }
 .composer { display: flex; gap: var(--s2); align-items: flex-end; padding-top: var(--s3); border-top: 1px solid var(--rule); }
 .composer textarea { resize: none; max-height: 9.5em; }
 

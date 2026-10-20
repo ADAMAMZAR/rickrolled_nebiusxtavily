@@ -401,7 +401,7 @@ It's `hold_reason` in `engine.py`. Everything else in the email still applies ri
 | Closes found | 0 → 1 of 1 | 0 → 1 of 1 |
 | Due date right, on loops found | 98% → 100% | 95% → 100% |
 
-- **Real use should do better on bulk mail than this.** Sync reads only email from people linked to one of your loops; the eval reads every email. Most of the loops Troth made on its own came from senders sync wouldn't read: newsletters, job fairs, sales.
+- **Real use should do better on bulk mail than this.** Sync reads only email from people linked to one of your loops; the eval reads every email. Most of the loops Troth made on its own came from senders sync wouldn't read: newsletters, job fairs, sales. *(Since §16, sync reads that mail too, but what it adds waits for a yes.)*
 - **Still weak:** on held-out email, 22% of the loops Troth makes are in the answer key. It still makes some loops from bulk mail, and those are what the WhatsApp exports and more email should show.
 - **Small sets:** 8 loops in the held-out emails, so the intervals are wide.
 - **Checks after the prompt change:**
@@ -409,3 +409,28 @@ It's `hold_reason` in `engine.py`. Everything else in the email still applies ri
   - injection dev set: steered without asking 5% (1–24%), real changes 90%;
   - live email tests 9 of 9 over 3 runs.
 - **Results files:** `data/eval/results/20261020-1520*` (held out, before), `-1541*` (held out, after); `-1523*`, `-1532*`, `-1537*` (tuning: before, sender fix, both).
+
+## 16. Mail from someone new: suggestions, not loops (2026-10-20)
+
+**Why:** sync read only people linked to an open loop, so a new recruiter's "please send your CV by Friday" never reached Troth until the user had made a loop about them and typed in their address.
+
+**What changed:**
+- **Reading.** Sync also reads new mail people sent (`GoogleClient.new_mail`: the `PEOPLE_MAIL` Gmail query, minus newsletters and no-reply senders). That is the same mail this eval's sample was drawn from (`eval_import gmail` and `read_mbox` now share the query and the `automated` filter), so §15's numbers describe it.
+- **Suggestions only.** Mail from someone not linked to an open loop changes no loop and adds no goal. Every loop it would add waits for a yes (`NEW_SENDER`), shown as **Add** or **Ignore**.
+  - **Add** saves the sender's address, so their replies are then followed like any linked person's.
+  - **Ignore** deletes the email's text and the address.
+  - A reminder of a suggestion that's still waiting doesn't ask twice.
+  - `EMAIL_NEW_SENDERS=0` turns this off.
+- **The eval harness** takes the same path: a sender with no open loop in the item's state is new.
+
+**Checked:**
+
+| Check | Result |
+|---|---|
+| Tuning emails, 5 runs (`-163655*` vs `-1537*`) | Item right 64% vs 67%; right in most runs 19 vs 20, McNemar p = 1.0: no change, as expected (the prompt is the same, and suggestions count as found, §13.2) |
+| Where Troth's 85 new loops went (140 runs) | 82 wait for a yes (62 because the sender is new, 20 because of a link, address or money ask); 3 were made directly, from senders the item's state already linked |
+| Nothing-to-track emails (18 × 5 runs) | A loop went straight into the list in 0 of 90 runs (before: 4.4 of 18 per run). A suggestion appeared in 24 of 90 runs: about 1 in 4 such emails costs an Ignore |
+| Live email tests (`-m live -k email_live`) | 4 of 4 in each of 3 runs, including the new one: a contract request from someone new becomes a suggestion with the right date, and nothing changes |
+| Real Gmail, last 7 days, read-only, counts only | 14 emails matched the query; 12 were left after dropping newsletters and no-reply senders (about 2 a day to read) |
+
+The held-out split wasn't run again: it was spent in §15, and the prompt didn't change.

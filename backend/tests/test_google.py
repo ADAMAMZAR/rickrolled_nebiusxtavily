@@ -42,6 +42,32 @@ def test_messages_from_one_sender() -> None:
     assert email.text == "Subject: Interview\n\nGreat news, we'd like to interview you"  # no plain-text part: snippet
 
 
+def test_new_mail_is_mail_people_wrote() -> None:
+    """Sync reads it from people Troth doesn't follow yet: the eval's email sample is chosen the same way (§15)."""
+    def headers(sender: str, *extra: tuple[str, str]) -> list[dict[str, str]]:
+        return [{"name": "From", "value": sender}, {"name": "Subject", "value": "Hi"}, *({"name": n, "value": v} for n, v in extra)]
+
+    mail = {
+        "m1": headers('"Pearl  Li" <Pearl@Revolab.com>'),
+        "m2": headers("FPT News <news@fpt.com>", ("List-Unsubscribe", "<mailto:out@fpt.com>")),
+        "m3": headers("Luma <no-reply@luma.com>"),
+        "m4": headers("Digest <digest@x.com>", ("Precedence", "bulk")),
+    }
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if request.url.path.endswith("/messages"):
+            return httpx.Response(200, json={"messages": [{"id": i} for i in mail]})
+        i = request.url.path.rsplit("/", 1)[1]
+        return httpx.Response(200, json={**MESSAGE, "id": i, "payload": {"headers": mail[i]}})
+
+    [email] = google(handler).new_mail(after=datetime.fromtimestamp(1789990000))
+    assert seen[0].url.params["q"] == ("-from:me -category:promotions -category:social -category:updates -category:forums"
+                                       " after:1789990000")
+    assert (email.id, email.from_address, email.from_name) == ("m1", "pearl@revolab.com", "Pearl Li")
+
+
 def b64(text: str) -> str:
     return base64.urlsafe_b64encode(text.encode()).decode()
 
