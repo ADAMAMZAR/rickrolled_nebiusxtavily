@@ -81,7 +81,11 @@ EMAIL_NOTE = ("This is an email to the user from {name}. The existing open loops
               "Only report what the email clearly states. Resolve a waiting loop when the email gives what the user "
               "waited for (e.g. a decision), even if it brings a next step; add that step as a new loop. Don't resolve "
               "it if the email only says it's still pending or asks for something before deciding. A request to the "
-              "user is a new task with its own due date. If it sets a meeting, call or interview with both a date and "
+              "user is a new task with its own due date. Much email isn't written to the user alone: newsletters, "
+              "promotions, sales pitches, event and job-fair announcements, automated notices. Their general calls "
+              "to action (vote, join, register now, apply, book a chat, stay in touch) are not tasks; from such an "
+              "email, add only a step the user needs for something they already signed up for, registered for or "
+              "attended (e.g. finish a payment, a submission or an account setup), once. If it sets a meeting, call or interview with both a date and "
               'a time, also return "events": [{{"title": "...", "start": "YYYY-MM-DDTHH:MM", "end": null}}] '
               "in the email's local time. No time stated = no event. " + NOT_THE_USER + NOT_A_REQUEST)
 

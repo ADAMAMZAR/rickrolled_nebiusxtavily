@@ -245,10 +245,12 @@ def seed(session: Session, item: dict[str, Any]) -> tuple[dict[str, OpenLoop], d
     loops: dict[str, OpenLoop] = {}
     people: dict[str, Person] = {}
     for s in item["state"]:
-        loop = eng.add_loop(session, source_id=source.id, title=s["title"], summary=s["title"], kind=LoopKind(s["kind"]),
-                            waiting_on=s["person"], due=date.fromisoformat(s["due"]) if s["due"] else None)
+        kind = LoopKind(s["kind"])
+        loop = eng.add_loop(session, source_id=source.id, title=s["title"], summary=s["title"], kind=kind,
+                            waiting_on=s["person"] if kind != LoopKind.task else None,
+                            due=date.fromisoformat(s["due"]) if s["due"] else None)
         loop.created_at = loop.updated_at = datetime.fromisoformat(s["time"])
-        if s["person"] and loop.kind != LoopKind.task:  # the same rule as a new loop from chat
+        if s["person"]:  # as process_message links them; a task's person is the email's sender (eval_import._state)
             loop.person_id = _person(session, people, s["person"]).id
         loops[s["ref"]] = loop
     for link in item.get("state_links", []):

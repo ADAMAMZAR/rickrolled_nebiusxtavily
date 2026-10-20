@@ -167,15 +167,24 @@ def _name(text: str | None) -> str:
 EMPTY = {"loops": [], "updates": [], "resolves": [], "links": [], "changed": [], "goals": [], "proposals": []}
 
 
+def held_loops(p: dict[str, Any]) -> list[dict[str, Any]]:
+    """New loops an email made that wait for a yes (troth_eval.md §13.2). They reach the user, one tap away, so
+    they count as found, in the predicted loops' shape."""
+    held = [a["payload"] for a in p.get("proposals", []) if a["payload"].get("new_loop")]
+    return [{"ref": f"held:{n}", "raw_quote": h["quote"]} | {k: h.get(k) for k in
+            ("title", "summary", "kind", "waiting_on", "due", "next_action", "quote")} for n, h in enumerate(held)]
+
+
 def score(item: dict[str, Any], predicted: dict[str, Any] | None) -> tuple[Counter[str], set[str], list[str]]:
     """Counts for one run of one item, the gold loops it found, and what it got wrong."""
     text, g, p = item["text"], item["gold"], predicted or EMPTY
-    pairs = match(p["loops"], g["loops"], text)
-    c: Counter[str] = Counter(items=1, gold_loops=len(g["loops"]), pred_loops=len(p["loops"]), found=len(pairs))
+    loops = p["loops"] + held_loops(p)
+    pairs = match(loops, g["loops"], text)
+    c: Counter[str] = Counter(items=1, gold_loops=len(g["loops"]), pred_loops=len(loops), found=len(pairs))
     problems: list[str] = []
     loops_right = True
     for i, j in pairs.items():
-        pl, gl = p["loops"][i], g["loops"][j]
+        pl, gl = loops[i], g["loops"][j]
         checks = {"kind": pl["kind"] == gl["kind"], "due": pl["due"] == gl["due"]}
         if pl["waiting_on"] or gl["person"]:
             checks["person"] = _name(pl["waiting_on"]) == _name(gl["person"])
@@ -185,8 +194,8 @@ def score(item: dict[str, Any], predicted: dict[str, Any] | None) -> tuple[Count
             if not right:
                 problems.append(f"wrong {field}")
                 loops_right = False
-    c["quote_kept"] = sum(bool(l["quote"]) for l in p["loops"])
-    problems += ["missed loop"] * (len(g["loops"]) - len(pairs)) + ["extra loop"] * (len(p["loops"]) - len(pairs))
+    c["quote_kept"] = sum(bool(l["quote"]) for l in loops)
+    problems += ["missed loop"] * (len(g["loops"]) - len(pairs)) + ["extra loop"] * (len(loops) - len(pairs))
 
     closed = {r["target"] for r in p["resolves"]}
     done = {r["target"] for r in g["resolves"] if not r["cancel"]}
@@ -202,7 +211,7 @@ def score(item: dict[str, Any], predicted: dict[str, Any] | None) -> tuple[Count
     problems += ["wrong update date"] * (len(hit) - c["upd_date_ok"])
     problems += ["missed resolve"] * len(done - closed) + ["extra resolve"] * len(closed - done - cancelled)
 
-    ref = {p["loops"][i]["ref"]: g["loops"][j]["ref"] for i, j in pairs.items()}
+    ref = {loops[i]["ref"]: g["loops"][j]["ref"] for i, j in pairs.items()}
     gold_links = {(l["loop"], l["needs"]) for l in g["links"]}
     pred_links = {(ref.get(l["loop"], l["loop"]), ref.get(l["needs"], l["needs"])) for l in p["links"]}
     unordered = {frozenset(x) for x in pred_links}
@@ -213,7 +222,7 @@ def score(item: dict[str, Any], predicted: dict[str, Any] | None) -> tuple[Count
     problems += ["missed link"] * (len(gold_links) - len(found)) + ["extra link"] * (len(pred_links) - c["link_tp"])
     problems += ["link backwards"] * (len(found) - c["link_dir_ok"])
 
-    c["passed"] = int(loops_right and len(pairs) == len(g["loops"]) == len(p["loops"]) and pred_upd == gold_upd
+    c["passed"] = int(loops_right and len(pairs) == len(g["loops"]) == len(loops) and pred_upd == gold_upd
                       and done <= closed <= done | cancelled and pred_links == gold_links)
     return c, {g["loops"][j]["ref"] for j in pairs.values()}, problems
 
@@ -319,7 +328,7 @@ def _brief(loop: dict[str, Any]) -> str:
 
 def brief(g: dict[str, Any]) -> str:
     """One line per change, for reading failures."""
-    lines = [f"new {_brief(l)}" for l in g["loops"]]
+    lines = [f"new {_brief(l)}" for l in g["loops"]] + [f"new, waits for a yes: {_brief(l)}" for l in held_loops(g)]
     lines += [f"update {u['target']} due {u['due']}" for u in g["updates"]]
     lines += [f"{'cancel' if r.get('cancel') else 'resolve'} {r['target']}" for r in g["resolves"]]
     lines += [f"link {l['loop']} needs {l['needs']}" for l in g["links"]]

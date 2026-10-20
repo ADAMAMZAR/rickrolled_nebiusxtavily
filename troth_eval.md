@@ -371,3 +371,41 @@ It's `hold_reason` in `engine.py`. Everything else in the email still applies ri
 - **Caveat:** made-up items, and the fix was designed from these misses: dev numbers. The labelled real messages (E6) are the check.
 - **Live email tests:** 9 of 9 over 3 runs.
 - **Results:** `data/eval/results/20261020-1348*` (before), `-1356*` (after).
+
+## 15. Your email, labelled: first real baseline (2026-10-20)
+
+**Data:**
+- 58 emails from the last 3 months, pulled with `eval_import.py gmail`; 48 after the importer's filters. Your two Troth test emails were left out, leaving 46: 28 to tune on, 18 held out.
+- **Answer key:** 19 loops, 2 closes, and 29 emails with nothing to track.
+- **Labels:** Claude drafted sheet A, and you decided its 10 unsure rows. Sheet B (13 shared emails) holds your own choice of what to track; Claude filled in the details. Agreement on the 13 is kappa 1.0 on every question. That's weaker than two people labelling apart, since Claude wrote B's details.
+
+**What the tuning set showed (5 runs, `failures.csv`):**
+1. **An email's task wasn't linked to its sender, so the sender's next email couldn't see it.** "You've passed the assessment" never closed the assessment task (0 of 5 runs), and a payment reminder made a second task (5 of 5).
+   - **Fix:** a task made from an email belongs to its sender (`process_message`, and held loops on approval). The harness's starting loops do the same (`eval_import._state`).
+2. **Bulk mail became tasks:** a newsletter's "vote for us" (13–17 loops over 5 runs), event invitations' "apply, then register on Luma", calls to action.
+   - **Fix:** one sentence in `EMAIL_NOTE`. Newsletters, promotions, sales pitches, event announcements and automated notices aren't tasks; such an email adds only a step for something the user already signed up for.
+3. **Not fixed:**
+   - **Labels where Troth's reading is defensible:** AiSEAN's "we'll confirm" (a waiting loop), the YTL account activation, a recruiter asking for a CV, a sales "coffee chat".
+   - **One label miss:** the YTL check-in also asks you to finish the AnnoHub modules.
+   - **One scoring artifact:** the AI Tinkerers waiting loop is the same loop in meaning, but quotes another sentence.
+
+**Results** (`eval_report.py loops`, test scored twice: before and after both fixes):
+
+| Measure (5 runs each) | Tuning, 28 emails | Held out, 18 emails |
+|---|---|---|
+| Emails handled fully right: before → after | 48% → 67% | 19% (7–42%) → **52% (31–73%)** |
+| Right in most runs (McNemar) | 14 → 20 (p = 0.03) | 3 → 10 (p = 0.016) |
+| Loops found (recall) | 76% → 69% | 48% → 55% |
+| Troth's loops that are in the answer key (precision) | 34% → 47% | 12% → 22% |
+| Nothing-to-track emails where Troth made a loop | 8.6 → 4.4 of 18 | 8.4 → 3.8 of 11 |
+| Closes found | 0 → 1 of 1 | 0 → 1 of 1 |
+| Due date right, on loops found | 98% → 100% | 95% → 100% |
+
+- **Real use should do better on bulk mail than this.** Sync reads only email from people linked to one of your loops; the eval reads every email. Most of the loops Troth made on its own came from senders sync wouldn't read: newsletters, job fairs, sales.
+- **Still weak:** on held-out email, 22% of the loops Troth makes are in the answer key. It still makes some loops from bulk mail, and those are what the WhatsApp exports and more email should show.
+- **Small sets:** 8 loops in the held-out emails, so the intervals are wide.
+- **Checks after the prompt change:**
+  - weekday dates 100% (30 × 5);
+  - injection dev set: steered without asking 5% (1–24%), real changes 90%;
+  - live email tests 9 of 9 over 3 runs.
+- **Results files:** `data/eval/results/20261020-1520*` (held out, before), `-1541*` (held out, after); `-1523*`, `-1532*`, `-1537*` (tuning: before, sender fix, both).

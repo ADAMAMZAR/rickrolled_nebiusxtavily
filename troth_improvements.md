@@ -159,6 +159,18 @@ About 4 days in total. That leaves room for P3 deploy (issue #4) and the video b
 
 *`tests/test_dependency_live.py` (story + delay email, link to an existing loop, same-topic control): 3/3 in each of 3 runs. Live acceptance + email tests: 11/11 twice.*
 
+*Real email, 2026-10-20 ([troth_eval.md](troth_eval.md) §15): 46 of your emails, labelled, 18 held out; before → after the two fixes it found (email tasks linked to their sender, bulk mail isn't tasks):*
+
+| Measure (5 runs each) | Tuning, 28 emails | Held out, 18 emails |
+|---|---|---|
+| Emails handled fully right: before → after | 48% → 67% | 19% (7–42%) → **52% (31–73%)** |
+| Right in most runs (McNemar) | 14 → 20 (p = 0.03) | 3 → 10 (p = 0.016) |
+| Loops found (recall) | 76% → 69% | 48% → 55% |
+| Troth's loops that are in the answer key (precision) | 34% → 47% | 12% → 22% |
+| Nothing-to-track emails where Troth made a loop | 8.6 → 4.4 of 18 | 8.4 → 3.8 of 11 |
+| Closes found | 0 → 1 of 1 | 0 → 1 of 1 |
+| Due date right, on loops found | 98% → 100% | 95% → 100% |
+
 Synthetic scenarios, clearly labelled. Numbers go here and in the README only after a run.
 
 | Measure | How |

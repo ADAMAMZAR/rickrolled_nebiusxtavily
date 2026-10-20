@@ -173,6 +173,12 @@ def test_a_matching_loop_with_every_field_right_passes() -> None:
     assert (c["found"], c["pred_loops"], c["due_ok"], c["passed"]) == (1, 2, 0, 0)
     assert sorted(problems) == ["extra loop", "wrong due"]
 
+    held = {"kind": "loop_update", "target": None, "payload": {  # an email task waiting for a yes (§13.2) still counts
+        "new_loop": True, "title": "Get letter", "summary": "", "kind": "waiting", "waiting_on": "Dr Lim",
+        "due": "2026-10-09", "next_action": None, "quote": "I'm waiting for him to send it, he said by Friday"}}
+    c, found, problems = rep.score(item, predicted(proposals=[held]))
+    assert (c["found"], c["passed"], found, problems) == (1, 1, {"letter"}, [])
+
 
 def test_links_map_new_loops_to_gold_and_check_direction() -> None:
     item = gold_item("w02-4")

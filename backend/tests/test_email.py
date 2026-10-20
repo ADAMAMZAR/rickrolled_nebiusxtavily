@@ -272,3 +272,20 @@ def test_one_sync_reports_a_google_error_once_and_keeps_it_for_settings(session:
     assert eng.run_sync(session, llm, lambda: FakeMailbox({SARAH: [email()]}), None) == [
         'Email from Sarah: closed "Wait for Sarah\'s response".']
     assert eng.get_setting(session, eng.LAST_SYNC_ERROR) is None  # a good check clears it
+
+
+def test_an_email_task_is_linked_to_its_sender_so_their_next_email_can_close_it(session: Session) -> None:
+    """On real mail, "you've passed the assessment" couldn't close the assessment task, and a reminder made a second
+    one: an email's task had no person, so the sender's next email never saw it (troth_eval.md §15)."""
+    linked(session)
+    task = "please complete the online assessment by Sunday"
+    sync(session, FakeLLM(result(new=[loop("Complete online assessment", quote=task)])),
+         FakeMailbox({SARAH: [email(body=f"Hi Adam, {task}.")]}))
+    made = next(l for l in eng.list_loops(session) if l.title == "Complete online assessment")
+    sarah = next(p for p in eng.list_people(session) if p.name == "Sarah")
+    assert made.person_id == sarah.id and made.waiting_on is None  # still a task, not a "waiting on"
+    llm = FakeLLM(result(resolved=[{"id": str(made.id), "quote": "you passed the assessment"}]))
+    lines, _ = sync(session, llm, FakeMailbox({SARAH: [email(id="m2", body="Hi Adam, you passed the assessment!", minutes=5)]}),
+                    now=NOW + timedelta(minutes=10))
+    assert lines == ['Email from Sarah: closed "Complete online assessment".']
+    assert str(made.id) in llm.calls[0][1]["content"]  # the model was shown it

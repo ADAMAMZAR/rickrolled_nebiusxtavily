@@ -415,9 +415,10 @@ def build_gold(items: dict[str, dict[str, Any]], labels: dict[str, list[dict[str
         links: list[dict[str, str]] = []
         for item in witems:
             rows = labels.get(item["item"], [])
+            sender = item.get("sender") if item["path"] == "email" else None
             for e in rows:
                 if e["label"] == "open":
-                    open_[e["ref"]] = _state(e, item["now"])
+                    open_[e["ref"]] = _state(e, item["now"], sender)
             new = {e["ref"] for e in rows if e["label"] == "new"}
             for e in rows:
                 where = f"labels_a.csv row {e['row']} ({item['item']})"
@@ -438,7 +439,7 @@ def build_gold(items: dict[str, dict[str, Any]], labels: dict[str, list[dict[str
                         "state_links": state_links, "gold": gold})
             for e in rows:
                 if e["label"] == "new":
-                    open_[e["ref"]] = _state(e, item["now"])
+                    open_[e["ref"]] = _state(e, item["now"], sender)
                 elif e["label"] == "update" and e["target"] in open_:
                     open_[e["target"]] = {**open_[e["target"]], "due": e["due"], "time": item["now"]}
                 elif e["label"] in ("resolve", "cancel"):
@@ -448,8 +449,10 @@ def build_gold(items: dict[str, dict[str, Any]], labels: dict[str, list[dict[str
     return out, errors
 
 
-def _state(e: dict[str, Any], now: str) -> dict[str, Any]:
-    return {"ref": e["ref"], "title": e["title"] or e["quote"], "kind": e["kind"], "person": e["person"] or None,
+def _state(e: dict[str, Any], now: str, sender: str | None = None) -> dict[str, Any]:
+    """A loop as Troth would hold it. A task from an email is linked to its sender, as process_message does."""
+    person = e["person"] or (sender if e["kind"] == "task" else None)
+    return {"ref": e["ref"], "title": e["title"] or e["quote"], "kind": e["kind"], "person": person or None,
             "due": e["due"], "time": now}
 
 
