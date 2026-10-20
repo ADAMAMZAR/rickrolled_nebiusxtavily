@@ -13,7 +13,7 @@ Hackathon: Nebius x NVIDIA, Personal AI track. **Hermes Agent + NVIDIA Nemotron 
   - Addendum [continuum_personal_ai_plan.md](continuum_personal_ai_plan.md): one Personal AI, not two apps. Risky checks become loops, loops can be checked, `/check` and `/briefing` skills. *(P0–P2 built 2026-10-10; P3 deployed on GCP 2026-10-19; P4 after the video)*
   - Addendum [troth_improvements.md](troth_improvements.md): loops that depend on other loops; an upstream slip flags the promise "at risk" with options built in code. *(C1–C3 + a "Needs" line built and deployed 2026-10-19, checked live through Hermes; Telegram check pending)*
   - Audit [troth_audit_2026-10-19.md](troth_audit_2026-10-19.md): findings and ranked fixes. *(all 10 items built 2026-10-19)*
-  - Addendum [troth_eval.md](troth_eval.md): measure Troth on real, labelled messages, with intervals, then fix only what that shows. Labellers read [troth_labelling_guide.md](troth_labelling_guide.md). *(E0–E5 and E8 built 2026-10-20, plus the email-injection rule and email guard, each checked on a held-out set (§13), and the weekday date check (§14); waiting for labelled data)*
+  - Addendum [troth_eval.md](troth_eval.md): measure Troth on real, labelled messages, with intervals, then fix only what that shows. Labellers read [troth_labelling_guide.md](troth_labelling_guide.md). *(E0–E5 and E8 built 2026-10-20, plus the email-injection rule and email guard, each checked on a held-out set (§13), and the weekday date check (§14). E6–E7 done on 46 labelled emails (§15); WhatsApp exports to come)*
 
 Start a phase only after every box in the previous phase's Done Checklist is checked. When a phase is finished, move the "current phase" marker.
 
@@ -50,6 +50,7 @@ uvicorn app.main:app --reload     # Troth on :8000 (MCP at /mcp/)
 hermes -p continuum gateway run   # Hermes API server on :8642
 pytest                            # offline, LLM mocked
 pytest -m live                    # real LLM + Hermes (needs keys and both servers running)
+python scripts/eval_import.py gmail --months 3          # your Gmail -> data/eval/raw/gmail.mbox (instead of Takeout)
 python scripts/eval_import.py windows --me "Your Name"   # exports in data/eval/raw/ -> sheets to label (troth_eval.md)
 python scripts/eval_import.py check                      # labels -> data/eval/gold.jsonl, scam.jsonl
 python scripts/eval_import.py injection --set test2      # AgentDojo/BIPIA files in data/eval/benchmarks/ -> injection items (train, test, test2)

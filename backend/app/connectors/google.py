@@ -136,6 +136,19 @@ class GoogleClient:
         found = self._call("GET", f"{GMAIL}/messages", params={"q": query, "maxResults": limit})
         return [self._email(m["id"]) for m in found.get("messages", [])]
 
+    def raw_messages(self, query: str, limit: int) -> list[bytes]:
+        """Whole messages (RFC 822) for a Gmail search, newest first: the eval's mail sample (eval_import.py gmail)."""
+        ids: list[str] = []
+        page: str | None = None
+        while len(ids) < limit:
+            params = {"q": query, "maxResults": min(500, limit - len(ids))} | ({"pageToken": page} if page else {})
+            found = self._call("GET", f"{GMAIL}/messages", params=params)
+            ids += [m["id"] for m in found.get("messages", [])]
+            if not (page := found.get("nextPageToken")):
+                break
+        raws = [self._call("GET", f"{GMAIL}/messages/{i}", params={"format": "raw"})["raw"] for i in ids]
+        return [base64.urlsafe_b64decode(r + "=" * (-len(r) % 4)) for r in raws]
+
     def _email(self, message_id: str) -> Email:
         m = self._call("GET", f"{GMAIL}/messages/{message_id}", params={"format": "full"})
         headers = {h["name"].lower(): h["value"] for h in m["payload"].get("headers", [])}

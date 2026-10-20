@@ -4,6 +4,7 @@
   python scripts/eval_import.py check
   python scripts/eval_import.py blank-scam
   python scripts/eval_import.py injection --set test2
+  python scripts/eval_import.py gmail --months 3          # your recent Gmail -> raw/gmail.mbox, instead of Takeout
 
 Exports go in data/eval/raw/: WhatsApp "Export chat" .txt, Telegram Desktop result.json, Gmail Takeout .mbox.
 `windows` writes items.jsonl and the two labelling sheets; `check` turns labels_a.csv into gold.jsonl and
@@ -39,7 +40,7 @@ sys.path.insert(0, str(ROOT))  # so `app` imports without installing the package
 
 from app.config import settings  # noqa: E402
 from app.investigation import MAX_TEXT as MAX_CHECK_TEXT  # noqa: E402
-from app.connectors.google import Email, strip_reply  # noqa: E402
+from app.connectors.google import Email, GoogleClient, GoogleError, strip_reply  # noqa: E402
 from app.quotes import appears  # noqa: E402
 
 EVAL_DIR = Path(os.environ.get("EVAL_DIR", "data/eval"))
@@ -414,9 +415,10 @@ def build_gold(items: dict[str, dict[str, Any]], labels: dict[str, list[dict[str
         links: list[dict[str, str]] = []
         for item in witems:
             rows = labels.get(item["item"], [])
+            sender = item.get("sender") if item["path"] == "email" else None
             for e in rows:
                 if e["label"] == "open":
-                    open_[e["ref"]] = _state(e, item["now"])
+                    open_[e["ref"]] = _state(e, item["now"], sender)
             new = {e["ref"] for e in rows if e["label"] == "new"}
             for e in rows:
                 where = f"labels_a.csv row {e['row']} ({item['item']})"
@@ -437,7 +439,7 @@ def build_gold(items: dict[str, dict[str, Any]], labels: dict[str, list[dict[str
                         "state_links": state_links, "gold": gold})
             for e in rows:
                 if e["label"] == "new":
-                    open_[e["ref"]] = _state(e, item["now"])
+                    open_[e["ref"]] = _state(e, item["now"], sender)
                 elif e["label"] == "update" and e["target"] in open_:
                     open_[e["target"]] = {**open_[e["target"]], "due": e["due"], "time": item["now"]}
                 elif e["label"] in ("resolve", "cancel"):
@@ -447,8 +449,10 @@ def build_gold(items: dict[str, dict[str, Any]], labels: dict[str, list[dict[str
     return out, errors
 
 
-def _state(e: dict[str, Any], now: str) -> dict[str, Any]:
-    return {"ref": e["ref"], "title": e["title"] or e["quote"], "kind": e["kind"], "person": e["person"] or None,
+def _state(e: dict[str, Any], now: str, sender: str | None = None) -> dict[str, Any]:
+    """A loop as Troth would hold it. A task from an email is linked to its sender, as process_message does."""
+    person = e["person"] or (sender if e["kind"] == "task" else None)
+    return {"ref": e["ref"], "title": e["title"] or e["quote"], "kind": e["kind"], "person": person or None,
             "due": e["due"], "time": now}
 
 
@@ -688,6 +692,33 @@ def cmd_injection(args: argparse.Namespace) -> None:
           + (", twice in total." if held else "."))
 
 
+def cmd_gmail(args: argparse.Namespace) -> None:
+    """Your recent Gmail as raw/gmail.mbox, like a Takeout slice, through the Google connection Troth already has
+    (read-only). Gmail's promotions, social, updates and forums tabs and your own mail are left out; `windows` then
+    skips newsletters and no-reply senders as it does for Takeout. Prints counts, never text."""
+    out = Path(args.dir) / "raw" / "gmail.mbox"
+    if out.exists() and not args.force:
+        sys.exit(f"{out} exists. Pull again with --force (it replaces the file).")
+    after = datetime.now().astimezone() - timedelta(days=30 * args.months)
+    query = (f"after:{int(after.timestamp())} -from:me -category:promotions -category:social -category:updates "
+             "-category:forums")
+    try:
+        raws = GoogleClient.from_settings(settings).raw_messages(query, args.max)
+    except GoogleError as e:
+        sys.exit(str(e))
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.unlink(missing_ok=True)
+    box = mailbox.mbox(out)
+    try:
+        for raw in raws:
+            box.add(raw)
+        box.flush()
+    finally:
+        box.close()
+    print(f"{out.name}: {len(raws)} emails from the last {args.months} months"
+          + (f" (the newest {args.max}: raise --max for more)" if len(raws) >= args.max else "") + ".")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--dir", default=str(EVAL_DIR))
@@ -706,12 +737,17 @@ def main() -> None:
     c = sub.add_parser("check", help="labels_a.csv -> gold.jsonl; scam.csv -> scam.jsonl")
     c.add_argument("--test", type=float, default=0.4)
     sub.add_parser("blank-scam", help="scam.csv -> scam_sheet_b.csv without labels")
+    g = sub.add_parser("gmail", help="your recent Gmail -> raw/gmail.mbox, through Troth's Google connection")
+    g.add_argument("--months", type=int, default=3)
+    g.add_argument("--max", type=int, default=1000, help="at most this many emails, newest first")
+    g.add_argument("--force", action="store_true")
     j = sub.add_parser("injection", help="benchmarks/ -> injection_<set>.jsonl: published attacks in benign items")
     j.add_argument("--set", choices=SETS, default="test")
     j.add_argument("--seed", type=int, default=SEED)
     j.add_argument("--force", action="store_true")
     args = parser.parse_args()
-    {"windows": cmd_windows, "check": cmd_check, "blank-scam": cmd_blank_scam, "injection": cmd_injection}[args.cmd](args)
+    {"windows": cmd_windows, "check": cmd_check, "blank-scam": cmd_blank_scam, "injection": cmd_injection,
+     "gmail": cmd_gmail}[args.cmd](args)
 
 
 if __name__ == "__main__":

@@ -177,6 +177,8 @@ def process_message(
             )
             if created.kind in (LoopKind.waiting, LoopKind.commitment) and normalize(created.waiting_on or ""):
                 created.person_id = _find_or_add_person(session, created.waiting_on, people).id
+            elif person is not None:  # an email's task is about its sender: their next email can update or close it
+                created.person_id = person.id
             in_scope_by_key[key] = new_by_title[normalize(candidate.title)] = created
             changes.created_loops.append(created)
             _log(session, created, ActivityAction.created, by, link, source_id=source.id, quote=quote)
@@ -1154,9 +1156,9 @@ def _make_held_loop(session: Session, action: PendingAction, held: HeldLoop) -> 
     loop = add_loop(session, source_id=held.source_id, goal_id=goal.id if goal else None, title=held.title,
                     summary=held.summary, kind=held.kind, waiting_on=held.waiting_on, due=held.due,
                     next_action=held.next_action)
-    if loop.kind in (LoopKind.waiting, LoopKind.commitment) and normalize(loop.waiting_on or ""):
-        people = {normalize(p.name): p for p in list_people(session)}
-        loop.person_id = _find_or_add_person(session, loop.waiting_on, people).id  # type: ignore[arg-type]
+    people = {normalize(p.name): p for p in list_people(session)}
+    named = loop.waiting_on if loop.kind != LoopKind.task and normalize(loop.waiting_on or "") else held.sender
+    loop.person_id = _find_or_add_person(session, named, people).id  # like a loop the email made (process_message)
     action.loop_id = loop.id
     _log(session, loop, ActivityAction.created, ActivityBy.email, held.source_url or "", source_id=held.source_id,
          quote=held.quote)

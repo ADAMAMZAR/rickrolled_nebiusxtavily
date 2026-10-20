@@ -183,3 +183,22 @@ def test_logs_never_hold_the_gmail_query(caplog: pytest.LogCaptureFixture) -> No
         logging.getLogger("httpx").info('HTTP Request: %s %s "%s %d %s"', "GET", url, "HTTP/1.1", 200, "OK")
     assert "gmail.googleapis.com/gmail/v1/users/me/messages" in caplog.text
     assert "sarah" not in caplog.text and "q=" not in caplog.text
+
+
+def test_raw_messages_page_through_a_search() -> None:
+    """The eval's mail sample (eval_import.py gmail): whole messages, every page, up to the limit."""
+    seen: list[httpx.Request] = []
+    pages = {None: {"messages": [{"id": "m1"}, {"id": "m2"}], "nextPageToken": "p2"}, "p2": {"messages": [{"id": "m3"}]}}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if request.url.path.endswith("/messages"):
+            return httpx.Response(200, json=pages[request.url.params.get("pageToken")])
+        mid = request.url.path.rsplit("/", 1)[1]
+        raw = base64.urlsafe_b64encode(f"Subject: {mid}\r\n\r\nHi".encode()).decode().rstrip("=")  # Gmail drops padding
+        return httpx.Response(200, json={"id": mid, "raw": raw})
+
+    got = google(handler).raw_messages("after:1 -from:me", limit=10)
+    assert got == [b"Subject: m1\r\n\r\nHi", b"Subject: m2\r\n\r\nHi", b"Subject: m3\r\n\r\nHi"]
+    assert seen[0].url.params["q"] == "after:1 -from:me" and seen[2].url.params["format"] == "raw"  # both pages first
+    assert len(google(handler).raw_messages("q", limit=2)) == 2  # stops at the limit
