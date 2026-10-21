@@ -4,6 +4,8 @@ import { Icon } from "../ui";
 import { SnoozeMenu } from "./menus";
 
 export const KIND = { task: "Task", waiting: "Waiting on someone", commitment: "Your promise" } as const;
+/** Open a loop's detail in the ledger and scroll to it (LoopRow listens). */
+export const openLoop = (id: string) => window.dispatchEvent(new CustomEvent("troth:open-loop", { detail: id }));
 const risky = (reason: string) => reason.endsWith("hold off paying");
 
 interface Props {
@@ -27,7 +29,7 @@ export function Attention({ items, error, actions, actionsError, act, draft }: P
       {items && items.length === 0 && <p className="empty quiet">Nothing needs you today.</p>}
       {items && items.length > 0 && (
         <ul className="rows margined">
-          {items.map(({ loop: l, reason, options }) => (
+          {items.map(({ loop: l, reason, options, cause }) => (
             <li key={l.id}>
               <div className="entry">
                 <span className={risky(reason) ? "flag" : "kind"} title={risky(reason) ? "Risk signals" : KIND[l.kind]}>
@@ -40,6 +42,9 @@ export function Attention({ items, error, actions, actionsError, act, draft }: P
                     <span className={/^overdue|at risk|blocked/.test(reason) || risky(reason) ? "late" : undefined}>{reason}</span>
                   </span>
                   {options.length > 0 && <span className="meta options">Options: {options.join(" · ")}</span>}
+                  {cause && (
+                    <span className="meta">Because of <button className="link-btn" type="button" onClick={() => openLoop(cause.id)}>{cause.title}</button></span>
+                  )}
                 </span>
                 <span className="side">
                   {draft && !risky(reason) && <button className="btn small" type="button" onClick={() => draft(l.id, l.title)}>Draft</button>}

@@ -283,3 +283,14 @@ def test_edit_a_loop_then_undo(client: TestClient) -> None:
     assert (edit["detail"], edit["can_undo"]) == ("edited title, due", True)
     assert client.post(f"/api/activity/{edit['id']}/undo").json()["title"] == "Wait for Sarah's response"
     assert client.patch(f"/api/loops/{loop_id}", json={"title": ""}).status_code == 422  # a loop needs a title
+
+
+def test_link_routes(client: TestClient) -> None:
+    wait, portfolio = seed(client)
+    assert client.put(f"/api/loops/{portfolio['id']}/needs/{wait['id']}").status_code == 204
+    assert [n["id"] for n in client.get(f"/api/loops/{portfolio['id']}").json()["needs"]] == [wait["id"]]
+    circle = client.put(f"/api/loops/{wait['id']}/needs/{portfolio['id']}")
+    assert circle.status_code == 422 and "circle" in circle.json()["message"]
+    assert client.delete(f"/api/loops/{portfolio['id']}/needs/{wait['id']}").status_code == 204
+    assert client.get(f"/api/loops/{wait['id']}").json()["needed_by"] == []
+    assert client.delete(f"/api/loops/{portfolio['id']}/needs/{wait['id']}").status_code == 404

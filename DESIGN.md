@@ -291,6 +291,9 @@ Settling an entry draws one ballpoint-blue stroke (2.2px, round caps, a slightly
 ### Ruled Text
 Running source text (quotes, the checked message) sits on pale rules at a 1.7em line height, like writing on the page. Flagged phrases in a checked message get a 2px red underline, 4px offset, no fill.
 
+### Dependency Chain
+In a loop's detail, "What it depends on" is one plain column: "Needs first" entries, a muted ↓, this loop's title in bold, ↓, "Then" entries. Each entry is a blue link to that loop (pencil grey when done) with its due date and a muted × that turns red on hover. No graph, no boxes. "+ Needs…" is a native select under it.
+
 ### Chat
 A sheet that sizes to content, then becomes a fixed scrolling sheet (max 640px). Your messages are blue bubbles with paper text, right-aligned; Troth's are outlined in pale rule; errors are outlined in red. Two modes share the sheet, picked by two link buttons in its head (the current one in ink, not underlined): Chat (Hermes, Send) and Paste (saves loops without Hermes, Save). It opens on Paste where Hermes isn't running.
 

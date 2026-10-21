@@ -57,6 +57,17 @@ li.fresh > .row-btn .title b::after {
 .history ul { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s1); font-size: var(--fs-small); color: var(--muted); }
 .history li { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); }
 .history .said { display: block; font-style: italic; overflow-wrap: anywhere; }
+/* what a loop depends on: needs -> this -> needed by, one column of plain entries with arrows */
+.chain-steps { display: grid; justify-items: start; gap: var(--s1); font-size: var(--fs-small); }
+.chain-steps ul { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s1); }
+.chain-steps li { display: flex; align-items: baseline; flex-wrap: wrap; gap: var(--s2); }
+.chain-label { color: var(--muted); font-size: var(--fs-cap); font-weight: 650; }
+.chain-steps .arrow { color: var(--muted); line-height: 1; }
+.chain-this { font-size: var(--fs-body); }
+.settled-text { color: var(--muted); }
+.unlink { border: 0; background: none; padding: 0 4px; color: var(--muted); font-size: var(--fs-body); line-height: 1; cursor: pointer; }
+.unlink:hover { color: var(--red); }
+.chain-add { display: block; margin-top: var(--s2); max-width: 320px; }
 .field { display: grid; gap: var(--s2); }
 .field .row { display: flex; gap: var(--s2); }
 .edit label { display: grid; gap: var(--s1); font-size: var(--fs-small); color: var(--muted); }
