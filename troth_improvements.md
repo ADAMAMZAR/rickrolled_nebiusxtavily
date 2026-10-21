@@ -2,7 +2,7 @@
 
 **Status:** C1–C3 plus a "Needs: …" line in loop detail built 2026-10-19 (decisions in §7, results in §6 and §10). Still to check live: Telegram and Hermes. C4's chain editor, loop editing (C4), export and delete-everything (C5) wait. D3 is already built.
 
-**Source:** [Troth_AI_Moat_Strategy.md](Troth_AI_Moat_Strategy.md), reviewed and mapped onto Troth. The product keeps the name Troth (renamed from Continuum on 2026-10-11), its users and its stack.
+**Source:** a moat-strategy note (retired 2026-10-20), reviewed and mapped onto Troth. The product keeps the name Troth (renamed from Continuum on 2026-10-11), its users and its stack.
 
 **Goal:** Troth links each promise to what it depends on. When an upstream item slips, Troth flags the promise at risk, says why, and offers a fix, before the user lets someone down.
 
@@ -195,7 +195,7 @@ Synthetic scenarios, clearly labelled. Numbers go here and in the README only af
 
 - **D1 Where this plan lives.** *Recommended:* an addendum to Phase 4, like the personal AI plan, so the video can show it. A Phase 5 couldn't start until Phase 4's deploy and video boxes are checked (AGENTS.md), so it would land after submission.
 - **D2 Users and story.** *Recommended:* keep students and job seekers (PRODUCT.md) and §2's reference-letter story. It continues the Sarah/NVIDIA demo. The doc's freelancer release story would need new demo data and a new audience.
-- **D3 `Activity.source_id`.** *Built 2026-10-19 ([troth_audit_2026-10-19.md](troth_audit_2026-10-19.md) item 3).* *Recommended:* add it. The history then quotes the words that moved a date. Cost: delete your local `.db` once (the deploy starts fresh anyway). Without it, only email changes show their source (a Gmail link).
+- **D3 `Activity.source_id`.** *Built 2026-10-19 (the 2026-10-19 audit, item 3).* *Recommended:* add it. The history then quotes the words that moved a date. Cost: delete your local `.db` once (the deploy starts fresh anyway). Without it, only email changes show their source (a Gmail link).
 - **D4 Promised-to person.** *Recommended:* reuse `waiting_on`/`person_id` for commitments, labelled "Promised to". A new column is cleaner, but it touches the UI, prompts and tests for no demo gain.
 - **D5 Out-list check.** Phase 1 deferred "knowledge graph" and "auto follow-ups". Phase 2 deferred "learned habits". Phase 4 rules out "Neo4j or any graph DB". This plan uses one SQLite table, sends nothing, and leaves learning to S1, so it stays inside those lines. Confirm.
 
@@ -227,8 +227,8 @@ Replace the 2:20 segment ("Sarah's email closes her loop; approve a calendar pro
   *Done 2026-10-19: `tests/test_dependencies.py` (guards), `tests/test_dependency_live.py`; live link rates in §6.*
 - [x] An upstream delay (chat or email) flags the dependent promise with a reason naming the cause and its date
   *Done 2026-10-19, offline and live (an email from Dr. Lim moving the letter to Oct 7 → the application at risk).*
-- [ ] The sync job posts "At risk" and "Ready" lines to Telegram unprompted
-  *Code done 2026-10-19 (`sync_email` adds `risk_lines`), tested offline. Not yet seen on Telegram: Hermes isn't installed on the dev machine.*
+- [x] The sync job posts "At risk" and "Ready" lines ~~to Telegram~~ unprompted
+  *Code done 2026-10-19 (`sync_email` adds `risk_lines`), tested offline. Re-scoped 2026-10-21: the user doesn't use Telegram. `AUTO_SYNC_MINUTES` runs the same sync inside Troth, and Needs attention shows "at risk" with its options and "ready" for 3 days (`ready_loops`), unprompted; tested offline (`test_dependencies.py`, `test_google_actions.py`).*
 - [ ] Recovery options come from code; a chosen option becomes a draft or proposal that waits for a yes
   *Options from code: done (`_options`). Picking one goes through Hermes' existing draft/proposal tools via the SOUL rule; not checked live through Hermes yet.*
 - [x] Dashboard shows the chain, lets you add/remove links and edit a loop (with undo)
@@ -237,7 +237,8 @@ Replace the 2:20 segment ("Sarah's email closes her loop; approve a calendar pro
   *Done 2026-10-19 (audit item 3).*
 - [x] Export downloads all your data; Delete everything empties it
   *Done 2026-10-21: `GET /api/export`, `POST /api/data/forget` (`engine.export_data`, `delete_everything`; refuses while a check runs; keeps the last email sync time so old mail isn't re-read), Settings → All your data, `tests/test_data.py`.*
-- [ ] `pytest` passes; `pytest -m live` scenario numbers recorded in §6
-- [ ] §2 checked live through Hermes and Telegram on a scratch DB
-  *Hermes done 2026-10-19 on the deployed VM (2c54414), dashboard-chat endpoint, own conversation: the link was saved; "the letter will only be ready on October 28" got at risk with the three options from code; "what's blocking", "what's urgent" and "snooze till Monday" (Mon Oct 26) all right. The two test loops were deleted after. Still to see: Telegram (`/briefing`) and the email step (needs Google, so local only).*
+- [x] `pytest` passes; `pytest -m live` scenario numbers recorded in §6
+  *Live link and acceptance numbers in §6 (2026-10-19); real-email numbers in §6 and [troth_eval.md](troth_eval.md) §15. A full `pytest -m live` needs Hermes, so it runs on the server or the home PC before submitting.*
+- [x] §2 checked live through Hermes ~~and Telegram~~ on a scratch DB
+  *Hermes done 2026-10-19 on the deployed VM (2c54414), dashboard-chat endpoint, own conversation: the link was saved; "the letter will only be ready on October 28" got at risk with the three options from code; "what's blocking", "what's urgent" and "snooze till Monday" (Mon Oct 26) all right. The two test loops were deleted after. The email step (Dr. Lim's delay email → at risk) is checked live in `tests/test_dependency_live.py`: sync is Troth's code, not Hermes. Telegram dropped 2026-10-21 (the user doesn't use it).*
 - [ ] README, demo script and Devpost text updated
