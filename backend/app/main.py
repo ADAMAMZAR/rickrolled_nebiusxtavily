@@ -458,6 +458,16 @@ def create_app(
     def forget_email(session: Session = Depends(get_session)) -> dict[str, int]:
         return {"forgotten": eng.forget_email_data(session)}
 
+    @app.get("/api/export")
+    def export(session: Session = Depends(get_session)) -> JSONResponse:
+        """Settings: Export my data. Downloads as one JSON file."""
+        name = f"troth-export-{eng.local_now():%Y-%m-%d}.json"
+        return JSONResponse(eng.export_data(session), headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+    @app.post("/api/data/forget")
+    def delete_everything(session: Session = Depends(get_session)) -> dict[str, int]:
+        return {"deleted": eng.delete_everything(session)}
+
     app.mount("/", Pages(directory=STATIC, html=True), name="ui")
     return app
 

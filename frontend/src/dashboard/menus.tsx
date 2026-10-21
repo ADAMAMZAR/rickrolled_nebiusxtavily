@@ -51,6 +51,16 @@ export function Settings({ onChange }: { onChange: () => void }) {
     onChange();
   }
 
+  async function deleteAll() {
+    if (!confirm("Delete everything Troth holds: every loop, goal, person, message, email text and message check? "
+      + "This can't be undone, so export first if you want a copy. Google stays connected until you disconnect it.")) return;
+    try {
+      const { deleted } = await api<{ deleted: number }>("/api/data/forget", { method: "POST" });
+      setResult({ ok: true, text: `Deleted everything (${deleted} item${deleted === 1 ? "" : "s"}).` });
+    } catch (e) { setResult({ ok: false, text: (e as Error).message }); }
+    onChange();
+  }
+
   const last = status?.last_sync
     ? new Date(status.last_sync).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })
     : "not yet";
@@ -81,6 +91,12 @@ export function Settings({ onChange }: { onChange: () => void }) {
         <h3>Email data</h3>
         <p className="muted">Deletes the text of every email Troth read. Loops made from them stay.</p>
         <div><button className="btn small danger" type="button" onClick={forget}>Forget email data</button></div>
+        <h3>All your data</h3>
+        <p className="muted">One JSON file with your loops, goals, people, messages, history and checks.</p>
+        <div className="row-gap">
+          <a className="btn small" href="/api/export" download>Export my data</a>
+          <button className="btn small danger" type="button" onClick={deleteAll}>Delete everything</button>
+        </div>
         {result && <p className={result.ok ? "ok" : "error-line"} role={result.ok ? "status" : "alert"}>{result.text}</p>}
       </div>
     </details>
