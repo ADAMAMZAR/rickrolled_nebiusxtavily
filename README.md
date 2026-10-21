@@ -68,9 +68,9 @@ Every loop goes through five steps:
 
 ### When loops close on their own
 
-- **Email.** Give Troth someone's address (*"Sarah's email is sarah@nvidia.com"*) and it reads new mail from them, and only them, every 10 minutes. A reply that answers your loop closes it, a new deadline becomes a task, and a meeting time becomes a calendar proposal. [Setup](#google-setup-optional).
+- **Email.** Give Troth someone's address (*"Sarah's email is sarah@nvidia.com"*) and it reads new mail from them every 10 minutes. A reply that answers your loop closes it, a new deadline becomes a task, and a meeting time becomes a calendar proposal. Mail from someone new (not newsletters or Gmail's Promotions, Social, Updates and Forums) only suggests a loop: **Add** keeps it and follows their replies, **Ignore** drops it. [Setup](#google-setup-optional).
 - **Web.** Say *"keep an eye on the hackathon results"* and Troth searches for it once a day with Tavily. Ask *"when does the Google STEP application close?"* and it looks it up, with the link. What the web says is only ever a proposal.
-- **Your yes first.** Calendar events, Gmail drafts (*"draft a thank-you reply to Sarah"*) and web findings wait under **Pending actions**, or on Telegram, until you approve. Nothing is ever sent. If one fails (say Google was disconnected), it stays there with **Try again**.
+- **Your yes first.** Calendar events, Gmail drafts (*"draft a thank-you reply to Sarah"*) and web findings wait under **Waiting for your yes**, or on Telegram, until you approve. Nothing is ever sent. If one fails (say Google was disconnected), it stays there with **Try again**.
 - **Edit.** Fix a loop's title, kind, person, date or next action from its panel. The old values stay in History, with Undo.
 - **Undo.** Each loop's History shows what changed it (you, chat, email or the web) and the words behind it, with Undo on automatic changes.
 - **Only what was written.** Each loop and change keeps the words that state it, checked to really be in your message or the email. An email change Troth can't quote from the email isn't made. Emails and web pages reach the model marked as someone else's words, never instructions.
@@ -192,7 +192,7 @@ npm run dev      # http://localhost:5173 with hot reload; /api goes to Troth on 
 npm run build    # type-checks, then rebuilds backend/app/static (commit it)
 ```
 
-`TAVILY_API_KEY` in `.env` is needed for ScamGraph's research (without it, only the message itself is checked) and for web watch and lookup (free key at tavily.com). Then say "keep an eye on the hackathon results", or use **Watch the web** in a loop's detail. `python scripts/sync.py` runs the check: each watched loop is searched at most once a day, and anything found shows under **Pending actions**.
+`TAVILY_API_KEY` in `.env` is needed for ScamGraph's research (without it, only the message itself is checked) and for web watch and lookup (free key at tavily.com). Then say "keep an eye on the hackathon results", or use **Watch the web** in a loop's detail. `python scripts/sync.py` runs the check: each watched loop is searched at most once a day, and anything found shows under **Waiting for your yes**.
 
 `requirements.txt` pins the tested versions; `-e .` installs Troth itself so the scripts can import it.
 
@@ -254,7 +254,7 @@ The gateway (`hermes -p continuum gateway run`) must be running for it to fire. 
 
 ### Automatic email and web sync (optional, no Telegram needed)
 
-Set `AUTO_SYNC_MINUTES=10` in `.env` and restart Troth. While it runs, it reads new email and checks watched loops on the web every 10 minutes, the same as `python scripts/sync.py`. Email from people linked to open loops can close or update their loops. Mail from anyone else (not newsletters, no-reply senders, or Gmail's Promotions, Social, Updates and Forums tabs) only suggests new loops under **Waiting for your yes**: **Add** saves the loop and the sender's address, so their replies are followed; **Ignore** deletes that email's text and the sender's address. `EMAIL_NEW_SENDERS=0` reads only linked people. What changed shows in the dashboard: loops an email closed or updated (with Undo), **Pending actions** for what waits for your yes, and **Needs attention**. **Settings** shows the last email check and, if one failed, why (for example, Google ended the connection: connect again). Use this or the Telegram job below on one machine, not both.
+Set `AUTO_SYNC_MINUTES=10` in `.env` and restart Troth. While it runs, it reads new email and checks watched loops on the web every 10 minutes, the same as `python scripts/sync.py`. Email from people linked to open loops can close or update their loops. Mail from anyone else (not newsletters, no-reply senders, or Gmail's Promotions, Social, Updates and Forums tabs) only suggests new loops under **Waiting for your yes**: **Add** saves the loop and the sender's address, so their replies are followed; **Ignore** deletes that email's text and the sender's address. `EMAIL_NEW_SENDERS=0` reads only linked people. What changed shows in the dashboard: loops an email closed or updated (with Undo), **Waiting for your yes** for what waits for your yes, and **Needs attention**. **Settings** shows the last email check and, if one failed, why (for example, Google ended the connection: connect again). Use this or the Telegram job below on one machine, not both.
 
 ### Email and web sync on Telegram (optional, needs Telegram plus Google or Tavily)
 

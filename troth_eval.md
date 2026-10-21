@@ -200,20 +200,26 @@ CI replays only test scenarios A–F and the injection items, never real data. T
 
 ## 10. Done checklist
 
-- [ ] Guide written; kappa ≥ 0.7 recorded
-- [ ] Gold set checked and split; test scored before any change
-- [ ] `pytest -m eval` records JSONL with raw JSON, drops and tokens; cost estimated before the full run
-  *Harness built and smoke-tested 2026-10-20 (§11). The cost estimate needs your pilot.*
+- [x] Guide written; kappa ≥ 0.7 recorded
+  *Done 2026-10-20 for email: kappa 1.0 on every question over 13 shared emails (§15). Weaker than two people labelling apart: Claude drafted sheet A and filled sheet B's details.*
+- [x] Gold set checked and split; test scored before any change
+  *Done 2026-10-20: 46 emails, 28 to tune on and 18 held out; held out scored before the fixes (§15).*
+- [x] `pytest -m eval` records JSONL with raw JSON, drops and tokens; cost estimated before the full run
+  *Harness built and smoke-tested 2026-10-20 (§11); loops pilot run 2026-10-20 (`-151937-loops-pilot`) before the full runs.*
 - [ ] Report: per-field table with intervals, slices, McNemar, ScamGraph matrix, false-alarm and miss rates, injection counts
-  *Built 2026-10-20 and run on the synthetic sample; checked off once it reports on real data.*
-- [ ] Failures categorised; fixes by size; ablations done; removed rules listed with their numbers
-- [ ] Test scored after; before/after table in [troth_improvements.md](troth_improvements.md) §6
-- [ ] README's accuracy claims (README:303–304) replaced by numbers from that table
+  *Built 2026-10-20. On real data: loops (§15) and injection (§13). The message-check matrix waits for the labelled scam sheet.*
+- [x] Failures categorised; fixes by size; ablations done; removed rules listed with their numbers
+  *Done 2026-10-20 (§15): three categories, two fixes, each scored alone on the tuning set (sender link, then both); no rule removed. Unfixed label disputes listed there.*
+- [x] Test scored after; before/after table in [troth_improvements.md](troth_improvements.md) §6
+  *Done 2026-10-20: held-out emails fully right 19% → 52%, McNemar p = 0.016 (§15). The held-out split is now spent.*
+- [x] README's accuracy claims replaced by numbers from that table
+  *Done 2026-10-20: README Limitations, "Extraction is an LLM's judgment".*
 - [x] CI replays frozen A–F rows offline on every PR
   *Done 2026-10-20: `tests/test_eval_replay.py`, part of plain `pytest`.*
 - [ ] `correction_rate.py` run on real data
-  *Built 2026-10-20. On the VM: `journalctl -u troth -o short-iso > troth.log`, then `python scripts/correction_rate.py --log troth.log`.*
-- [ ] `pytest` green; AGENTS.md updated
+  *Built 2026-10-20; counts email suggestions added and ignored since 2026-10-21. First run 2026-10-21 on the shared database: too early (1 loop old enough). Run again around 2026-10-26 to 28. For deletes, add `--log` with the server's `journalctl -u troth -o short-iso` output.*
+- [x] `pytest` green; AGENTS.md updated
+  *Kept green at every step; AGENTS.md updated 2026-10-21.*
 
 ---
 
