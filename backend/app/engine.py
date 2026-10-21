@@ -149,6 +149,7 @@ def process_message(
             _find_or_add_goal(session, candidate.title, candidate.description, goal_by_name, changes)
 
         new_by_title: dict[str, OpenLoop] = {}  # this reply's loops, for links that name one by title
+        this_message: list[set[str]] = []  # title words of the loops this message made, or proposed
         for candidate in result.new_loops:
             key = _loop_key(candidate.title, candidate.waiting_on)
             if key in seen:
@@ -159,6 +160,11 @@ def process_message(
             if (quote := _quote(candidate.quote, text)) is None and strict:
                 log.info("change_dropped change=new reason=no_quote")
                 continue
+            named = _title_words(candidate.title)
+            if any(_same_thing(named, earlier) for earlier in this_message):
+                log.info("loop_duplicate_skipped reason=same_message")
+                continue
+            this_message.append(named)
             seen.add(key)
             due = on_its_weekday(candidate.due, quote, now.date())
             words = " ".join(filter(None, (candidate.title, candidate.summary, candidate.next_action, quote)))
@@ -264,6 +270,20 @@ def process_message(
     for action in changes.held:
         log.info("action_proposed id=%s kind=new_loop", action.id)
     return changes
+
+
+# Words that say how a loop is framed, not what it's about ("Promise to send slides" is "Send slides").
+FRAMING = {"a", "an", "the", "to", "for", "of", "my", "promise", "promised", "commit", "committed"}
+
+
+def _title_words(title: str) -> set[str]:
+    return set(normalize(title).split()) - FRAMING
+
+
+def _same_thing(a: set[str], b: set[str]) -> bool:
+    """Two new loops from one message about the same thing: one title's words hold the other's (at least two). Seen
+    live: a pasted "can you send the slides?" / "ok will do" gave "Send slides" and "Promise to send slides"."""
+    return len(a & b) >= 2 and (a <= b or b <= a)
 
 
 def _quote(quote: str | None, text: str) -> str | None:
@@ -496,6 +516,33 @@ def loop_links(session: Session, loop_id: UUID) -> tuple[list[OpenLoop], list[Op
 
     deps = session.exec(select(Dependency).where(or_(Dependency.loop_id == loop_id, Dependency.needs_id == loop_id))).all()
     return loops([d.needs_id for d in deps if d.loop_id == loop_id]), loops([d.loop_id for d in deps if d.needs_id == loop_id])
+
+
+def add_need(session: Session, loop_id: UUID, needs_id: UUID) -> None:
+    """The user's own link from the dashboard: `loop_id` can't be done before `needs_id`. Adding one twice is fine."""
+    loop, needed = _get(session, loop_id), _get(session, needs_id)
+    if loop.id == needed.id:
+        raise InvalidRequest("A loop can't need itself.")
+    edges = _edges(session)
+    if needed.id in edges.get(loop.id, set()):
+        return
+    if not _link(session, loop, needed, edges, ActivityBy.user, None):  # only a cycle is left to refuse
+        raise InvalidRequest(f'"{needed.title}" already needs "{loop.title}" (directly or further up), so this would go '
+                             "round in a circle.")
+    session.commit()
+    log.info("dependency_added by=user")
+
+
+def remove_need(session: Session, loop_id: UUID, needs_id: UUID) -> None:
+    """Remove a link, e.g. one the model got wrong. The history says so; add it again to undo."""
+    dep = session.exec(select(Dependency).where(Dependency.loop_id == loop_id, Dependency.needs_id == needs_id)).first()
+    if dep is None:
+        raise NotFound("Those loops aren't linked.")
+    loop, needed = _get(session, loop_id), _get(session, needs_id)
+    session.delete(dep)
+    _log(session, loop, ActivityAction.updated, ActivityBy.user, f'no longer needs "{needed.title}"')
+    session.commit()
+    log.info("dependency_removed by=user")
 
 
 def _blocked(session: Session) -> set[UUID]:

@@ -6,6 +6,8 @@ Today is Tue 2026-09-29 (conftest.NOW): Thu = Oct 1, Fri = Oct 2.
 from datetime import date, timedelta
 from typing import Any
 
+import pytest
+
 from sqlmodel import Session, select
 
 from app import engine as eng
@@ -196,3 +198,35 @@ def test_a_loop_whose_needs_are_done_shows_as_ready_for_a_few_days(session: Sess
     assert {a.loop.id: a.reason for a in eng.needs_attention(session, closed)}[top.id] == 'ready: "L1" is done'
     later = closed + timedelta(days=eng.READY_DAYS + 1)
     assert top.id not in {a.loop.id for a in eng.needs_attention(session, later)}
+
+
+# --- the user's own links, from the dashboard chain ---
+
+
+def test_the_user_can_remove_a_wrong_link_and_add_it_back(session: Session) -> None:
+    app, letter = story(session)
+    eng.remove_need(session, app.id, letter.id)
+    assert eng.loop_links(session, app.id) == ([], []) and eng.dependency_risks(session, TODAY) == {}
+    assert ("updated", "user", f'no longer needs "{LETTER}"') in [
+        (a.action.value, a.by.value, a.detail) for a in eng.list_activity(session, app.id)]
+    eng.add_need(session, app.id, letter.id)
+    eng.add_need(session, app.id, letter.id)  # twice is fine
+    assert eng.loop_links(session, app.id)[0] == [letter]
+    with pytest.raises(eng.NotFound):
+        eng.remove_need(session, letter.id, app.id)  # that way round was never linked
+
+
+def test_a_link_can_t_go_round_in_a_circle(session: Session) -> None:
+    app, letter = story(session)
+    with pytest.raises(eng.InvalidRequest, match="circle"):
+        eng.add_need(session, letter.id, app.id)
+    with pytest.raises(eng.InvalidRequest, match="itself"):
+        eng.add_need(session, app.id, app.id)
+    assert len(session.exec(select(Dependency)).all()) == 1
+
+
+def test_one_message_doesnt_make_the_same_loop_twice(session: Session) -> None:
+    """Seen live on a pasted "can you send the slides?" / "ok will do": "Send slides" and "Promise to send slides"."""
+    made = process(session, result(new=[loop("Send slides", due="2026-10-01"), loop("Promise to send slides", "commitment"),
+                                        loop("Pay RM30 for dinner"), loop("Send report")]), "Slides, RM30, report.").created_loops
+    assert [l.title for l in made] == ["Send slides", "Pay RM30 for dinner", "Send report"]  # one shared word isn't enough

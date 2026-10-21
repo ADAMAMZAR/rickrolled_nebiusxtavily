@@ -326,6 +326,16 @@ def create_app(
         return {**loop_out(session, detail.loop), "source": detail.source.model_dump(mode="json"), "quote": detail.quote,
                 "needs": [link_out(l) for l in needs], "needed_by": [link_out(l) for l in needed_by]}
 
+    @app.put("/api/loops/{loop_id}/needs/{needs_id}", status_code=204)
+    def add_need(loop_id: UUID, needs_id: UUID, session: Session = Depends(get_session)) -> Response:
+        eng.add_need(session, loop_id, needs_id)
+        return Response(status_code=204)
+
+    @app.delete("/api/loops/{loop_id}/needs/{needs_id}", status_code=204)
+    def remove_need(loop_id: UUID, needs_id: UUID, session: Session = Depends(get_session)) -> Response:
+        eng.remove_need(session, loop_id, needs_id)
+        return Response(status_code=204)
+
     @app.post("/api/loops/{loop_id}/resolve")
     def resolve(loop_id: UUID, session: Session = Depends(get_session)) -> dict[str, Any]:
         return loop_out(session, eng.resolve_loop(session, loop_id))

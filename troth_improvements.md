@@ -231,7 +231,8 @@ Replace the 2:20 segment ("Sarah's email closes her loop; approve a calendar pro
   *Code done 2026-10-19 (`sync_email` adds `risk_lines`), tested offline. Not yet seen on Telegram: Hermes isn't installed on the dev machine.*
 - [ ] Recovery options come from code; a chosen option becomes a draft or proposal that waits for a yes
   *Options from code: done (`_options`). Picking one goes through Hermes' existing draft/proposal tools via the SOUL rule; not checked live through Hermes yet.*
-- [ ] Dashboard shows the chain, lets you add/remove links and edit a loop (with undo)
+- [x] Dashboard shows the chain, lets you add/remove links and edit a loop (with undo)
+  *Done 2026-10-21: loop detail "What it depends on" (Needs first → this → Then), × removes a link, "+ Needs…" adds one (a circle is refused), entries and Needs attention's "Because of" open that loop. `PUT` / `DELETE /api/loops/{id}/needs/{needs_id}` (`engine.add_need`, `remove_need`), logged in History. A removed link's undo is adding it back; edits keep their Undo. Checked in headless Chrome on a scratch DB.*
 - [x] History quotes the words that moved a date (D3)
   *Done 2026-10-19 (audit item 3).*
 - [x] Export downloads all your data; Delete everything empties it

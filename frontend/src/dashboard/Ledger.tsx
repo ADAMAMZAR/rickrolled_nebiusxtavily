@@ -2,7 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { api, startCheck, type Activity, type ActivityBy, type LinkedLoop, type Loop, type LoopDetail, type LoopKind } from "../api";
 import { dueInfo, isSnoozed, localDate, shortDate, stamp } from "../dates";
 import { Icon, Strike } from "../ui";
-import { KIND } from "./Attention";
+import { KIND, openLoop } from "./Attention";
 import { SnoozeMenu } from "./menus";
 
 const BY: Record<ActivityBy, string> = { user: "you", chat: "chat", email: "email", web: "the web", check: "a message check" };
@@ -58,22 +58,22 @@ export function Ledger(p: Props) {
       {p.loops === null && !p.error && <p className="empty" aria-busy="true">Loading your loops…</p>}
       {p.loops && p.loops.length > 0 && (
         <div className="sides">
-          <Side {...p} title="Owed to you" empty="Nobody owes you anything right now." loops={owed} goalOpen={goalOpen} />
-          <Side {...p} title="You owe" empty="Nothing on your side right now." loops={owe} goalOpen={goalOpen} />
+          <Side {...p} title="Owed to you" empty="Nobody owes you anything right now." loops={owed} all={p.loops} goalOpen={goalOpen} />
+          <Side {...p} title="You owe" empty="Nothing on your side right now." loops={owe} all={p.loops} goalOpen={goalOpen} />
         </div>
       )}
     </section>
   );
 }
 
-function Side({ title, empty, loops, goalOpen, ...p }: Props & { title: string; empty: string; loops: Loop[]; goalOpen: (id: string) => number }) {
+function Side({ title, empty, loops, all, goalOpen, ...p }: Props & { title: string; empty: string; loops: Loop[]; all: Loop[]; goalOpen: (id: string) => number }) {
   const sorted = [...loops].sort((a, b) => Number(a.status === "resolved") - Number(b.status === "resolved"));
   return (
     <div className="side-col">
       <h3 className="subhead">{title} <span className="count num">{loops.filter((l) => l.status === "open").length}</span></h3>
       {sorted.length === 0 ? <p className="empty quiet">{empty}</p> : (
         <ul className="rows margined">
-          {sorted.map((l) => <LoopRow key={l.id} loop={l} fresh={p.fresh.has(l.id)} version={p.version} webEnabled={p.webEnabled} act={p.act} refresh={p.refresh} goalOpen={goalOpen} />)}
+          {sorted.map((l) => <LoopRow key={l.id} loop={l} all={all} fresh={p.fresh.has(l.id)} version={p.version} webEnabled={p.webEnabled} act={p.act} refresh={p.refresh} goalOpen={goalOpen} />)}
         </ul>
       )}
     </div>
@@ -81,15 +81,26 @@ function Side({ title, empty, loops, goalOpen, ...p }: Props & { title: string; 
 }
 
 interface RowProps {
-  loop: Loop; fresh: boolean; version: number; webEnabled: boolean; act: Act; refresh: () => Promise<void>; goalOpen: (id: string) => number;
+  loop: Loop; all: Loop[]; fresh: boolean; version: number; webEnabled: boolean; act: Act; refresh: () => Promise<void>;
+  goalOpen: (id: string) => number;
 }
 
-function LoopRow({ loop: l, fresh, version, webEnabled, act, refresh, goalOpen }: RowProps) {
+function LoopRow({ loop: l, all, fresh, version, webEnabled, act, refresh, goalOpen }: RowProps) {
   const [open, setOpen] = useState(false);
   const [settling, setSettling] = useState(false);
   const [resolveError, setResolveError] = useState<string | null>(null);
   const resolved = l.status === "resolved";
   const due = l.due && !resolved ? dueInfo(l.due) : null;
+
+  useEffect(() => { // openLoop(id): a chain entry or an attention cause asks for this loop
+    const show = (e: Event) => {
+      if ((e as CustomEvent<string>).detail !== l.id) return;
+      setOpen(true);
+      document.getElementById(`loop-${l.id}`)?.scrollIntoView({ block: "start", behavior: "smooth" });
+    };
+    window.addEventListener("troth:open-loop", show);
+    return () => window.removeEventListener("troth:open-loop", show);
+  }, [l.id]);
   // Troth's flag in the margin: a check found risk, or the loop asks for money and nobody checked yet.
   const risky = !resolved && !!l.risk_level && l.risk_level !== "LOW";
   const unchecked = !resolved && !l.risk_level && MONEY.test(`${l.title} ${l.summary}`);
@@ -114,7 +125,7 @@ function LoopRow({ loop: l, fresh, version, webEnabled, act, refresh, goalOpen }
   }
 
   return (
-    <li className={`${resolved || settling ? "settled" : ""}${fresh ? " fresh" : ""}`}>
+    <li id={`loop-${l.id}`} className={`${resolved || settling ? "settled" : ""}${fresh ? " fresh" : ""}`}>
       <button className="entry loop-entry row-btn" type="button" aria-expanded={open} onClick={() => setOpen(!open)}>
         {warning
           ? <span className="flag" title={warning}><Icon name={risky ? "risk" : "ask"} label={risky ? "Risk signals" : "Not checked yet"} /></span>
@@ -129,16 +140,17 @@ function LoopRow({ loop: l, fresh, version, webEnabled, act, refresh, goalOpen }
         {due && <span className={`due${due.late ? " late" : due.soon ? " soon" : ""}`}>{due.text}</span>}
         <span className={`chev${open ? " open" : ""}`}><Icon name="chevron" /></span>
       </button>
-      {open && <Detail id={l.id} version={version} webEnabled={webEnabled} act={act} resolve={resolve} resolveError={resolveError} goalOpen={goalOpen} />}
+      {open && <Detail id={l.id} all={all} version={version} webEnabled={webEnabled} act={act} resolve={resolve} resolveError={resolveError} goalOpen={goalOpen} />}
     </li>
   );
 }
 
 interface DetailProps {
-  id: string; version: number; webEnabled: boolean; act: Act; resolve: () => void; resolveError: string | null; goalOpen: (id: string) => number;
+  id: string; all: Loop[]; version: number; webEnabled: boolean; act: Act; resolve: () => void; resolveError: string | null;
+  goalOpen: (id: string) => number;
 }
 
-function Detail({ id, version, webEnabled, act, resolve, resolveError, goalOpen }: DetailProps) {
+function Detail({ id, all, version, webEnabled, act, resolve, resolveError, goalOpen }: DetailProps) {
   const [d, setD] = useState<LoopDetail | null>(null);
   const [history, setHistory] = useState<Activity[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -157,14 +169,10 @@ function Detail({ id, version, webEnabled, act, resolve, resolveError, goalOpen 
 
   const resolved = d.status === "resolved";
   const said = new Date(d.source.created_at);
-  const linked = (loops: LinkedLoop[]) => loops.length > 0 && loops.map((n) =>
-    `${n.title}${n.status === "resolved" ? " (done)" : n.due ? ` (due ${shortDate(localDate(n.due))})` : " (no date)"}`).join(" · ");
   const fields: [string, string | null | false][] = [
     ["Kind", KIND[d.kind]],
     [d.kind === "commitment" ? "Promised to" : "Waiting on", d.waiting_on],
     ["Due", d.due && shortDate(localDate(d.due))],
-    ["Needs", linked(d.needs)],
-    ["Needed by", linked(d.needed_by)],
     ["Next action", d.next_action],
     ["Summary", d.summary],
     ["Snoozed until", isSnoozed(d) && d.snoozed_until && shortDate(localDate(d.snoozed_until))],
@@ -197,6 +205,7 @@ function Detail({ id, version, webEnabled, act, resolve, resolveError, goalOpen 
           )}
         </dl>
       )}
+      <Chain d={d} all={all} act={act} />
       <figure className="why">
         <h4>Why Troth knows this</h4>
         {d.quote ? <blockquote className="ruled">“{d.quote}”</blockquote>
@@ -247,6 +256,55 @@ function Detail({ id, version, webEnabled, act, resolve, resolveError, goalOpen 
           onClick={() => confirm(`Delete "${d.title}" and the words it came from? This can't be undone.`) && act(`/api/loops/${d.id}`, "DELETE")}>Delete</button>
         {(resolveError || checkError) && <p className="error-line" role="alert">{resolveError || checkError}</p>}
       </div>
+    </div>
+  );
+}
+
+/** What this loop needs first and what needs it: needs → this → needed by. Each link can be removed, and "+ Needs…"
+ * adds one (the server refuses a circle). A wrong link from chat or email is fixed here. */
+function Chain({ d, all, act }: { d: LoopDetail; all: Loop[]; act: Act }) {
+  const linked = new Set([d.id, ...d.needs.map((n) => n.id), ...d.needed_by.map((n) => n.id)]);
+  const choices = all.filter((l) => l.status === "open" && !linked.has(l.id));
+  const entry = (n: LinkedLoop, unlink: string) => (
+    <li key={n.id}>
+      {n.status === "open"
+        ? <button className="link-btn" type="button" onClick={() => openLoop(n.id)}>{n.title}</button>
+        : <span className="settled-text">{n.title}</span>}
+      <span className="muted">{n.status === "resolved" ? "done" : n.due ? `due ${shortDate(localDate(n.due))}` : "no date"}</span>
+      <button className="unlink" type="button" title="Remove this link" aria-label={`Remove the link to ${n.title}`}
+        onClick={() => act(unlink, "DELETE")}>×</button>
+    </li>
+  );
+  const links = d.needs.length + d.needed_by.length > 0;
+  if (!links && choices.length === 0) return null;
+  return (
+    <div className="chain">
+      <h4>What it depends on</h4>
+      {links && (
+        <div className="chain-steps">
+          {d.needs.length > 0 && (<>
+            <span className="chain-label">Needs first</span>
+            <ul>{d.needs.map((n) => entry(n, `/api/loops/${d.id}/needs/${n.id}`))}</ul>
+            <span className="arrow" aria-hidden="true">↓</span>
+          </>)}
+          <b className="chain-this">{d.title}</b>
+          {d.needed_by.length > 0 && (<>
+            <span className="arrow" aria-hidden="true">↓</span>
+            <span className="chain-label">Then</span>
+            <ul>{d.needed_by.map((n) => entry(n, `/api/loops/${n.id}/needs/${d.id}`))}</ul>
+          </>)}
+        </div>
+      )}
+      {!links && <p className="muted">Nothing linked. Add what has to happen before this one.</p>}
+      {choices.length > 0 && (
+        <label className="chain-add">
+          <span className="sr-only">This loop needs</span>
+          <select value="" onChange={(e) => e.target.value && act(`/api/loops/${d.id}/needs/${e.target.value}`, "PUT")}>
+            <option value="">+ Needs…</option>
+            {choices.map((l) => <option key={l.id} value={l.id}>{l.title}</option>)}
+          </select>
+        </label>
+      )}
     </div>
   );
 }
