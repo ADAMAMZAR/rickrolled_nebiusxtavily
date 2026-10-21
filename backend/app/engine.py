@@ -10,6 +10,7 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
+from pathlib import Path
 from typing import Any, Literal, Protocol
 from urllib.parse import urlparse
 from uuid import UUID
@@ -20,8 +21,9 @@ from sqlmodel import Session, col, delete, func, or_, select, update
 
 from app.config import settings
 from app.db import (
-    ActionKind, ActionStatus, Activity, ActivityAction, ActivityBy, Dependency, Goal, GoalStatus, Investigation, LoopKind,
-    LoopStatus, OpenLoop, PendingAction, Person, RiskLevel, Setting, Source, utcnow,
+    ActionKind, ActionStatus, Activity, ActivityAction, ActivityBy, Claim, Dependency, Entity, Evidence, Goal, GoalStatus,
+    Investigation, InvestigationStatus, LoopKind, LoopStatus, OpenLoop, PendingAction, Person, RiskLevel, RiskSignal,
+    Setting, Source, utcnow,
 )
 from app.connectors import google
 from app.connectors.google import Email, GoogleClient, GoogleError
@@ -1530,3 +1532,37 @@ def forget_email_data(session: Session) -> int:
     session.commit()
     log.info("email_data_forgotten sources=%d", len(sources))
     return len(sources)
+
+
+# --- your data: export it all, or delete it all ---
+
+# Deleted in this order: each table only points at tables after it. Export lists them the other way round.
+ALL_DATA: list[tuple[str, Any]] = [
+    ("check_signals", RiskSignal), ("check_evidence", Evidence), ("check_claims", Claim), ("check_entities", Entity),
+    ("checks", Investigation), ("actions", PendingAction), ("activity", Activity), ("dependencies", Dependency),
+    ("loops", OpenLoop), ("goals", Goal), ("people", Person), ("sources", Source),
+]
+
+
+def export_data(session: Session) -> dict[str, Any]:
+    """Everything Troth holds about the user, as JSON. Settings rows (sync times) stay out; the Google token is a
+    file and never leaves the machine; a screenshot's file path isn't data about the user."""
+    out: dict[str, Any] = {"exported_at": utcnow().isoformat()}
+    for name, model in reversed(ALL_DATA):
+        out[name] = [row.model_dump(mode="json", exclude={"screenshot_path"}) for row in session.exec(select(model)).all()]
+    log.info("data_exported rows=%d", sum(len(v) for v in out.values() if isinstance(v, list)))
+    return out
+
+
+def delete_everything(session: Session) -> int:
+    """Delete every row and uploaded screenshot. Google stays connected, and the last email sync time stays, so
+    old mail isn't read again. Returns the number of rows deleted."""
+    if session.exec(select(Investigation).where(Investigation.status == InvestigationStatus.running)).first():
+        raise InvalidRequest("A message check is still running. Wait for it to finish, then try again.")
+    screenshots = [i.screenshot_path for i in session.exec(select(Investigation)).all() if i.screenshot_path]
+    deleted = sum(session.exec(delete(model)).rowcount for _, model in ALL_DATA)  # type: ignore[call-overload]
+    session.commit()
+    for path in screenshots:
+        Path(path).unlink(missing_ok=True)
+    log.info("everything_deleted rows=%d screenshots=%d", deleted, len(screenshots))
+    return deleted

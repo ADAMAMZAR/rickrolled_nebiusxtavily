@@ -1,5 +1,6 @@
 """How often you correct the loops Troth makes (troth_eval.md §5). Of the loops made from chat or email at least
 48 hours ago: the share you edited, deleted, or whose automatic change you undid, within 48 hours of it being made.
+Also: of the loops email suggested (troth_eval.md §16), how many you added and how many you ignored.
 Reads DATABASE_URL and changes nothing. Prints counts, never text.
 
   python scripts/correction_rate.py
@@ -22,7 +23,10 @@ sys.path.insert(0, str(ROOT))  # so `app` and `scripts` import without installin
 from sqlmodel import Session, select  # noqa: E402
 
 from app.config import settings  # noqa: E402
-from app.db import Activity, ActivityAction, ActivityBy, OpenLoop, create_db_engine, utcnow  # noqa: E402
+from app.db import (  # noqa: E402
+    ActionStatus, Activity, ActivityAction, ActivityBy, OpenLoop, PendingAction, create_db_engine, utcnow,
+)
+from app.engine import NEW_SENDER  # noqa: E402
 from scripts.eval_report import rate_row  # noqa: E402
 
 WINDOW = timedelta(hours=48)
@@ -85,6 +89,16 @@ def corrections(session: Session, now: datetime, log: Path | None = None) -> Cou
     return c
 
 
+def suggestions(session: Session) -> Counter[str]:
+    """Loops an email would add that waited for a yes, by why ("new": someone Troth didn't follow yet; "risky": a link,
+    an address or a money/details ask) and by what you did: done = Add, rejected = Ignore."""
+    c: Counter[str] = Counter()
+    for a in session.exec(select(PendingAction)).all():
+        if a.payload.get("new_loop"):
+            c[f"{'new' if a.payload.get('why') == NEW_SENDER else 'risky'}:{a.status.value}"] += 1
+    return c
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--log", type=Path, help="Troth's log with timestamps, e.g. from journalctl -o short-iso")
@@ -95,6 +109,7 @@ def main() -> None:
     db = create_db_engine(settings.database_url)
     with Session(db) as session:
         c = corrections(session, utcnow(), args.log)
+        s = suggestions(session)
     print(f"Loops Troth made from chat or email at least 48 h ago: {c['made']} (chat {c['made_by_chat']}, "
           f"email {c['made_by_email']}" + (f", deleted since {c['made_gone']}" if c["log"] else "") + ").\n")
     print("| Corrected within 48 h | Rate | 95% interval | n |\n|---|---|---|---|")
@@ -106,6 +121,12 @@ def main() -> None:
     if fields:
         print("\nFields edited: " + ", ".join(f"{name} x{n}" for name, n in fields))
     print(f"\nMade in the last 48 h, not counted yet: {c['too_new']}.")
+    print("\n| Email suggestions you answered | Added | 95% interval | n |\n|---|---|---|---|")
+    for why, label in (("new", "From someone new"), ("risky", "Link, address or money ask")):
+        added, ignored = s[f"{why}:{ActionStatus.done.value}"], s[f"{why}:{ActionStatus.rejected.value}"]
+        print(rate_row(label, added, added + ignored, "answered"))
+    waiting = sum(n for k, n in s.items() if k.endswith((ActionStatus.proposed.value, ActionStatus.failed.value)))
+    print(f"\nStill waiting for an answer: {waiting}.")
 
 
 if __name__ == "__main__":

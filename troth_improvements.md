@@ -117,7 +117,7 @@ No new MCP tool: `remember` creates links from chat. `tools.include` stays the s
 
 ### 3.5 Memory controls
 
-- **Export:** one JSON file, `continuum-export-YYYY-MM-DD.json`, with goals, loops, dependencies, people, sources, activity, actions and check results. Settings rows stay out. The Google token is a file and never leaves the machine.
+- **Export:** one JSON file, `troth-export-YYYY-MM-DD.json`, with goals, loops, dependencies, people, sources, activity, actions and check results. Settings rows stay out. The Google token is a file and never leaves the machine.
 - **Delete everything:** all rows and uploaded screenshots. Google stays connected until you disconnect it (the dialog says so). Built next to "Forget email data".
 
 ---
@@ -234,7 +234,8 @@ Replace the 2:20 segment ("Sarah's email closes her loop; approve a calendar pro
 - [ ] Dashboard shows the chain, lets you add/remove links and edit a loop (with undo)
 - [x] History quotes the words that moved a date (D3)
   *Done 2026-10-19 (audit item 3).*
-- [ ] Export downloads all your data; Delete everything empties it
+- [x] Export downloads all your data; Delete everything empties it
+  *Done 2026-10-21: `GET /api/export`, `POST /api/data/forget` (`engine.export_data`, `delete_everything`; refuses while a check runs; keeps the last email sync time so old mail isn't re-read), Settings → All your data, `tests/test_data.py`.*
 - [ ] `pytest` passes; `pytest -m live` scenario numbers recorded in §6
 - [ ] §2 checked live through Hermes and Telegram on a scratch DB
   *Hermes done 2026-10-19 on the deployed VM (2c54414), dashboard-chat endpoint, own conversation: the link was saved; "the letter will only be ready on October 28" got at risk with the three options from code; "what's blocking", "what's urgent" and "snooze till Monday" (Mon Oct 26) all right. The two test loops were deleted after. Still to see: Telegram (`/briefing`) and the email step (needs Google, so local only).*

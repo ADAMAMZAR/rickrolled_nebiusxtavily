@@ -90,6 +90,7 @@ li.fresh > .row-btn .title b::after {
 .settings-pop h3 { font-size: var(--fs-small); font-weight: 750; }
 .settings-pop h3:not(:first-child) { margin-top: var(--s3); padding-top: var(--s3); border-top: 1px solid var(--rule); }
 .ok { color: var(--blue); font-weight: 650; }
+.row-gap { display: flex; flex-wrap: wrap; gap: var(--s2); }
 
 @media (max-width: 1080px) {
   .dash { grid-template-columns: minmax(0, 1fr); grid-template-areas: "attention" "chat" "ledger"; }

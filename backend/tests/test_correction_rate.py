@@ -38,3 +38,18 @@ def test_corrections_within_48_hours(session: Session, tmp_path: Path) -> None:
         encoding="utf-8")
     got = corrections(session, later + timedelta(days=1), log)
     assert (got["made"], got["made_gone"], got["deleted"], got["corrected"]) == (5, 2, 1, 3)
+
+
+def test_email_suggestions_added_and_ignored(session: Session) -> None:
+    """Of the loops email suggested, how many the user added (troth_eval.md §16): says if new senders are too noisy."""
+    from scripts.correction_rate import suggestions
+    from tests.test_email import FakeMailbox, pearl, sync
+
+    words = "pay the RM50 deposit at www.revolab-pay.co"
+    sync(session, FakeLLM(result(new=[loop("Sign contract", quote="please sign and return the contract by Friday")]),
+                          result(new=[loop("Pay deposit", quote=words)]), result(new=[loop("Book room", quote="book a room")])),
+         FakeMailbox(new=[pearl("p1"), pearl("p2", f"Hi, {words}.", 1), pearl("p3", "Hi, book a room.", 2)]))
+    first, second, third = eng.list_actions(session)
+    eng.approve_action(session, first.id)
+    eng.reject_action(session, second.id)
+    assert suggestions(session) == {"new:done": 1, "risky:rejected": 1, "new:proposed": 1}
