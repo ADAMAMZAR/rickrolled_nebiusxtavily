@@ -78,28 +78,46 @@ jobs:
           chmod 600 ~/.ssh/id_ed25519
           # Fails on a badly pasted key. The fingerprint must match the VM's key for DEPLOY_USER.
           ssh-keygen -lf ~/.ssh/id_ed25519
-      # Runs on the VM: check out the commit CI just tested, install, refresh the Hermes profile, restart.
+      # Runs on the VM: check out the commit CI just tested, then redo only what it changed since the last deploy
+      # that finished (refs/deployed, set at the very end, so a deploy that failed half way is finished next time).
+      # Docs, tests, scripts and the UI build need no restart: Troth reads app/static from disk on each request.
+      # A manual run, or the first deploy, redoes everything: use it after editing .env on the VM.
       - name: Deploy
+        env:
+          FULL: ${{ github.event_name == 'workflow_dispatch' }}
         run: |
-          ssh "$TARGET" bash -s -- "$GITHUB_SHA" <<'EOF'
+          ssh "$TARGET" bash -s -- "$GITHUB_SHA" "$FULL" <<'EOF'
           set -euo pipefail
+          full=$2
           cd ~/troth
           git fetch --quiet origin main
+          old=$(git rev-parse -q --verify refs/deployed || true)
           git reset --hard --quiet "$1"
           cd backend
-          .venv/bin/pip install --quiet -r requirements.txt -e .
-          .venv/bin/python scripts/setup_hermes.py
-          # Troth first: Hermes only picks up Troth's tools if Troth answers when Hermes starts.
-          sudo systemctl restart troth
-          up=""
-          for _ in $(seq 60); do  # up to 2 minutes: on the small VM, Troth took ~30 s to answer
-            code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8000/health || true)
-            case $code in 200|401) up=1; break ;; esac
-            sleep 2
-          done
-          [ -n "$up" ] || { echo "Troth didn't start. On the VM: journalctl -u troth -n 50"; exit 1; }
-          sudo systemctl restart hermes
-          sleep 5
-          systemctl is-active --quiet hermes || { echo "Hermes didn't start. On the VM: journalctl -u hermes -n 50"; exit 1; }
-          echo "Troth and Hermes are up at $(git rev-parse --short HEAD)"
+          changed() { [ "$full" = true ] || [ -z "$old" ] || ! git diff --quiet "$old" HEAD -- "$@"; }
+          deps="" troth="" hermes=""
+          if changed requirements.txt pyproject.toml; then deps=1 troth=1 hermes=1; fi
+          if changed app ':(exclude)app/static'; then troth=1 hermes=1; fi  # Hermes reads Troth's tools when it starts
+          if changed hermes scripts/setup_hermes.py; then hermes=1; fi
+          [ -z "$deps" ] || .venv/bin/pip install --quiet -r requirements.txt -e .
+          [ -z "$hermes" ] || .venv/bin/python scripts/setup_hermes.py
+          if [ -n "$troth" ]; then  # Troth first: Hermes only picks up Troth's tools if Troth answers when Hermes starts
+            sudo systemctl restart troth
+            up=""
+            for _ in $(seq 60); do  # up to 2 minutes: on the small VM, Troth took ~30 s to answer
+              code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8000/health || true)
+              case $code in 200|401) up=1; break ;; esac
+              sleep 2
+            done
+            [ -n "$up" ] || { echo "Troth didn't start. On the VM: journalctl -u troth -n 50"; exit 1; }
+          fi
+          if [ -n "$hermes" ]; then
+            sudo systemctl restart hermes
+            sleep 5
+            systemctl is-active --quiet hermes || { echo "Hermes didn't start. On the VM: journalctl -u hermes -n 50"; exit 1; }
+          fi
+          git update-ref refs/deployed HEAD
+          yn() { if [ -n "$1" ]; then echo yes; else echo no; fi; }
+          echo "Deployed $(git rev-parse --short HEAD): pip install $(yn "$deps"), Troth restarted $(yn "$troth")," \
+               "Hermes refreshed $(yn "$hermes")"
           EOF

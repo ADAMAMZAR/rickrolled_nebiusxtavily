@@ -206,7 +206,12 @@ Set `APP_PASSWORD` in `.env`: every page and `/api` then asks for it (any userna
 
 ### Deploy to GCP Compute Engine
 
-CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) tests every push. When `main` passes, it deploys that commit to the VM over SSH: it updates the code, installs the dependencies, re-runs `setup_hermes.py`, then restarts Troth and Hermes. Your `.env` and database on the VM stay as they are. To redeploy by hand: Actions → CI → Run workflow.
+CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) tests every push. When `main` passes, it deploys that commit to the VM over SSH. It updates the code, then redoes only what changed since the last deploy that finished:
+- new dependencies → `pip install`;
+- code in `backend/app/` → restart Troth, then Hermes;
+- `backend/hermes/` or `setup_hermes.py` → `setup_hermes.py` and a Hermes restart.
+
+Docs, tests, scripts and the UI build go live without a restart. Your `.env` and database on the VM stay as they are. After editing `.env` on the VM, or to redo everything, run it by hand: Actions → CI → Run workflow. A change to `scripts/setup_server.sh` isn't applied by a deploy: run it again on the VM.
 
 **Once, on the VM:**
 1. Create a VM: Debian 12, e2-small or larger, with **Allow HTTP traffic** and **Allow HTTPS traffic** ticked. Make its external IP static (VPC network → IP addresses → Promote to static).
