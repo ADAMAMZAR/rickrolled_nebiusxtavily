@@ -46,7 +46,10 @@ export interface LinkedLoop {
 }
 
 /** `quote`: the words in the source that made the loop, checked to be in it. */
-export type LoopDetail = Loop & { source: Source; quote: string | null; needs: LinkedLoop[]; needed_by: LinkedLoop[] };
+// check_id: the loop's latest finished message check, if any
+export type LoopDetail = Loop & {
+  source: Source; quote: string | null; needs: LinkedLoop[]; needed_by: LinkedLoop[]; check_id: string | null;
+};
 
 export interface Attention {
   loop: Loop;

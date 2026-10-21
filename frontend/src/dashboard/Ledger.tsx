@@ -249,7 +249,8 @@ function Detail({ id, all, version, webEnabled, act, resolve, resolveError, goal
           ? <button className="btn" type="button" onClick={() => act(`/api/loops/${d.id}/unsnooze`, "POST")}>Unsnooze</button>
           : <SnoozeMenu onPick={(until) => act(`/api/loops/${d.id}/snooze`, "POST", { until })} />)}
         {!editing && <button className="btn" type="button" onClick={() => setEditing(true)}>Edit</button>}
-        {!resolved && d.source.kind !== "investigation" && MONEY.test(d.source.text || "") && (
+        {d.check_id && <a className="btn" href={`/investigate.html#${d.check_id}`}><Icon name="search" />See the check</a>}
+        {!d.check_id && !resolved && d.source.kind !== "investigation" && MONEY.test(d.source.text || "") && (
           <button className="btn" type="button" disabled={checking} onClick={check}><Icon name="search" />{checking ? "Starting the check…" : "Check who's asking"}</button>
         )}
         <button className="btn danger apart" type="button"
