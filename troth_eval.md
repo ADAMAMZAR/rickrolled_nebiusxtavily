@@ -434,3 +434,14 @@ It's `hold_reason` in `engine.py`. Everything else in the email still applies ri
 | Real Gmail, last 7 days, read-only, counts only | 14 emails matched the query; 12 were left after dropping newsletters and no-reply senders (about 2 a day to read) |
 
 The held-out split wasn't run again: it was spent in §15, and the prompt didn't change.
+
+**Paste mode (no Hermes): reading a pasted chat from the user's side.** Pasted text reached the model as "User message", so "Aina: can you send me the slides by Thursday?" often became "Get slides from Adam". `PASTE_NOTE` (Paste only; chat and email prompts unchanged) fixes that. Synthetic probe, real Nemotron, 6 kinds of paste:
+
+| Case | No note | Note v1 | Note v2 (final: "whoever answers the others' requests is the user") |
+|---|---|---|---|
+| Someone asks the user (slides, RM30) | 1 of 3 right side | 3 of 3 | 3 of 3 |
+| Two-person chat, the user agrees | 0 of 3 (extra wrong "waiting") | 3 of 3, then 2 wrong of 8 | 0 wrong side of 8; 1 of 8 made the loop twice |
+| Promise, email, own note, nothing to track | 12 of 12 | 12 of 12 | 12 of 12 |
+
+`tests/test_paste_live.py` holds the two chat cases (3 of 3 runs passed with v2). One older live email test (`test_a_new_deadline_adds_a_loop`) failed once in 3 runs, then passed 5 of 5 alone: a sometimes-miss in a path this change doesn't touch.
+
