@@ -324,7 +324,8 @@ def create_app(
         detail = eng.get_loop(session, loop_id)
         needs, needed_by = eng.loop_links(session, loop_id)
         return {**loop_out(session, detail.loop), "source": detail.source.model_dump(mode="json"), "quote": detail.quote,
-                "needs": [link_out(l) for l in needs], "needed_by": [link_out(l) for l in needed_by]}
+                "needs": [link_out(l) for l in needs], "needed_by": [link_out(l) for l in needed_by],
+                "check_id": eng.latest_check(session, loop_id)}
 
     @app.put("/api/loops/{loop_id}/needs/{needs_id}", status_code=204)
     def add_need(loop_id: UUID, needs_id: UUID, session: Session = Depends(get_session)) -> Response:

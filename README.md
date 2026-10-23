@@ -198,7 +198,7 @@ npm run build    # type-checks, then rebuilds backend/app/static (commit it)
 
 On Windows the Hermes installer puts `hermes.exe` in `%LOCALAPPDATA%\hermes\bin`. If `hermes` isn't found, add that folder to your PATH.
 
-To try the UI without an LLM, fill a scratch database with sample data: set `DATABASE_URL=sqlite:///./data/seed.db`, then run `python scripts/seed_demo.py` and start uvicorn with the same `DATABASE_URL`.
+To try the UI with sample data, set `DATABASE_URL=sqlite:///./data/seed.db`, then run `python scripts/seed_demo.py` and start uvicorn with the same `DATABASE_URL`. It loads the [judges' demo](#a-demo-for-judges) and refuses a database that already holds other data.
 
 ### Running on a server
 
@@ -230,6 +230,27 @@ Docs, tests, scripts and the UI build go live without a restart. Your `.env` and
 4. On GitHub, go to Settings → Secrets and variables → Actions and add `DEPLOY_HOST` (the VM's IP), `DEPLOY_USER` (`<vm-user>`), `DEPLOY_SSH_KEY` (the contents of `troth-deploy`) and `DEPLOY_KNOWN_HOSTS` (the output of step 3). Then delete the local key files.
 
 A deploy doesn't change the database schema. If a change needs a new one, delete the `.db` file on the VM (or reset the Postgres database), then redeploy.
+
+### A demo for judges
+
+`scripts/seed_demo.py` fills an empty database with a short story, dated from today:
+- a promise put at risk by an email that moves what it needs;
+- an overdue reply, a stale task and a promise due tomorrow;
+- a loop an email closed, with Undo;
+- a suggestion from a new sender waiting for Add or Ignore;
+- two finished message checks: a clone of a real fund company (critical risk) and a real bank (low).
+
+The checks replay test samples B and C as recorded with Tavily (`tests/fixtures/scam_frozen.jsonl`), scored with today's rules, so loading costs no Tavily credits; Nemotron writes their findings. The script refuses a database that holds data and isn't marked as the demo, and `--reset` empties only a demo.
+
+On the VM, give the demo its own database and password, so judges never see your data:
+1. Create an empty Postgres database (for example a second Neon database).
+2. In `~/troth/backend/.env`, set `DATABASE_URL` to it and `APP_PASSWORD` to a password just for judges, then `sudo systemctl restart troth`.
+3. Load it: `cd ~/troth/backend && .venv/bin/python scripts/seed_demo.py`.
+4. Reload it every night, so one judge's changes don't reach the next. `crontab -e`, then add (19:00 UTC is 03:00 in Malaysia; check the VM's zone with `date`):
+   ```
+   0 19 * * * cd ~/troth/backend && .venv/bin/python scripts/seed_demo.py --reset >> data/seed_demo.log 2>&1
+   ```
+Google can't be connected on the VM (its sign-in only works on your own computer), so email shows only in the sample data.
 
 ### Telegram (optional)
 

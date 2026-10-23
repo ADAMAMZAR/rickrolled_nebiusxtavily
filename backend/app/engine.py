@@ -701,6 +701,13 @@ def check_levels(session: Session, loop_ids: list[UUID]) -> dict[UUID, RiskLevel
     return {loop_id: level for loop_id, level in session.exec(query).all()}  # type: ignore[misc]
 
 
+def latest_check(session: Session, loop_id: UUID) -> UUID | None:
+    """The loop's latest finished check, so its detail can link to the evidence (None: never checked)."""
+    query = (select(Investigation.id).where(Investigation.loop_id == loop_id, col(Investigation.risk_level).is_not(None))
+             .order_by(col(Investigation.created_at).desc()))
+    return session.exec(query).first()
+
+
 def track_check(session: Session, title: str, summary: str, next_action: str | None, text: str, link: str) -> OpenLoop:
     """The loop a risky check leaves, so it stays in Needs attention and the briefing until the user closes it
     (no commit). An open loop with the same title is reused: checking a message twice doesn't add a second one."""
